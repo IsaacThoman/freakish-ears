@@ -2,6 +2,7 @@ import './index.css';
 import logoUrl from './assets/dutocal-logo.webp';
 
 import {
+  ACTIVE_CONFIG_STORAGE_KEY,
   APO_FILTERS_STORAGE_KEY,
   APO_MAX_BOOST_STORAGE_KEY,
   APO_MAX_CUT_STORAGE_KEY,
@@ -19,18 +20,27 @@ import {
   DEFAULT_SPL_OFFSET_DB,
   DEFAULT_START_FREQUENCY,
   DEFAULT_SWEEP_LEVEL_DB,
+  DURATION_STORAGE_KEY,
+  END_FREQUENCY_STORAGE_KEY,
+  INPUT_DEVICE_STORAGE_KEY,
+  INPUT_CHANNEL_STORAGE_KEY,
   MEASUREMENT_BACKEND_STORAGE_KEY,
   MAX_SWEEP_LEVEL_DB,
   MIN_SWEEP_LEVEL_DB,
   NORMALIZE_PLOT_STORAGE_KEY,
+  OUTPUT_CHANNEL_STORAGE_KEY,
+  OUTPUT_DEVICE_STORAGE_KEY,
   PLOT_VIEW_MODE_STORAGE_KEY,
   POST_ROLL_SECONDS,
   PRE_ROLL_SECONDS,
   SAMPLE_RATE_OPTIONS,
+  SAMPLE_RATE_STORAGE_KEY,
   SMOOTHING_MODE_OPTIONS,
   SMOOTHING_MODE_STORAGE_KEY,
   SPL_OFFSET_STORAGE_KEY,
+  START_FREQUENCY_STORAGE_KEY,
   STORAGE_KEY,
+  SWEEP_LEVEL_STORAGE_KEY,
 } from './renderer/constants';
 import { analyzeMeasurement, encodeWavFile, recordSweepMeasurement } from './renderer/audio';
 import {
@@ -43,7 +53,13 @@ import {
   getMeasurementPointsForDisplay,
   parseImportedMeasurementFile,
 } from './renderer/measurements';
-import { attachPlotInteractions, renderApoEqPlot, renderResponsePlot } from './renderer/plot';
+import {
+  type ApoDragAxis,
+  attachApoPlotInteractions,
+  attachPlotInteractions,
+  renderApoEqPlot,
+  renderResponsePlot,
+} from './renderer/plot';
 import type {
   ApoFilter,
   AppState,
@@ -252,6 +268,9 @@ app.innerHTML = `
               <button id="addApoFilterButton" class="btn btn-secondary" type="button">
                 Add Filter
               </button>
+              <button id="clearApoFiltersButton" class="btn btn-secondary" type="button">
+                Clear
+              </button>
               <button id="exportApoConfigButton" class="btn btn-secondary" type="button">
                 Export APO
               </button>
@@ -295,6 +314,15 @@ app.innerHTML = `
 
           <span class="apo-hint">Generate a basic peaking-EQ set from the difference between the selected measurement and target curve, then fine-tune the filters below.</span>
           <span id="apoApplyStatus" class="apo-hint"></span>
+
+          <div class="apo-filter-header">
+            <span class="apo-filter-header-cell">On</span>
+            <span class="apo-filter-header-cell">Type</span>
+            <span class="apo-filter-header-cell">Freq (Hz)</span>
+            <span class="apo-filter-header-cell">Gain (dB)</span>
+            <span class="apo-filter-header-cell">Q</span>
+            <span class="apo-filter-header-cell">Action</span>
+          </div>
 
           <div id="apoFilterList" class="apo-filter-list"></div>
 
@@ -347,6 +375,7 @@ const configFileInput = getElement<HTMLInputElement>('configFileInput');
 const plotCard = getElement<HTMLDivElement>('plotCard');
 const generateApoFiltersButton = getElement<HTMLButtonElement>('generateApoFiltersButton');
 const addApoFilterButton = getElement<HTMLButtonElement>('addApoFilterButton');
+const clearApoFiltersButton = getElement<HTMLButtonElement>('clearApoFiltersButton');
 const exportApoConfigButton = getElement<HTMLButtonElement>('exportApoConfigButton');
 const applyApoConfigButton = getElement<HTMLButtonElement>('applyApoConfigButton');
 const apoApplyWarning = getElement<HTMLDivElement>('apoApplyWarning');
@@ -420,10 +449,23 @@ measurementBackendSelect.addEventListener('change', () => {
   state.measurementBackend = getSelectedMeasurementBackend();
   localStorage.setItem(MEASUREMENT_BACKEND_STORAGE_KEY, state.measurementBackend);
   updateMeasurementBackendUi();
+  persistActiveConfiguration();
 });
 
 refreshDevicesButton.addEventListener('click', () => {
   void refreshMicrophones(true);
+});
+
+microphoneSelect.addEventListener('change', () => {
+  localStorage.setItem(INPUT_DEVICE_STORAGE_KEY, microphoneSelect.value);
+  microphoneSelect.dataset.storedDeviceId = microphoneSelect.value;
+  persistActiveConfiguration();
+});
+
+outputSelect.addEventListener('change', () => {
+  localStorage.setItem(OUTPUT_DEVICE_STORAGE_KEY, outputSelect.value);
+  outputSelect.dataset.storedDeviceId = outputSelect.value;
+  persistActiveConfiguration();
 });
 
 importMeasurementsButton.addEventListener('click', () => {
@@ -543,22 +585,73 @@ splOffsetInput.addEventListener('blur', () => {
 normalizePlotToggle.addEventListener('change', () => {
   state.normalizePlot = normalizePlotToggle.checked;
   localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(state.normalizePlot));
+  persistActiveConfiguration();
   renderMeasurements();
 });
 
 smoothingModeSelect.addEventListener('change', () => {
   state.smoothingMode = getSelectedSmoothingMode();
   localStorage.setItem(SMOOTHING_MODE_STORAGE_KEY, state.smoothingMode);
+  persistActiveConfiguration();
   renderMeasurements();
   renderApoSection();
 });
 
+sampleRateSelect.addEventListener('change', () => {
+  localStorage.setItem(SAMPLE_RATE_STORAGE_KEY, sampleRateSelect.value);
+  persistActiveConfiguration();
+});
+
+inputChannelSelect.addEventListener('change', () => {
+  localStorage.setItem(INPUT_CHANNEL_STORAGE_KEY, inputChannelSelect.value);
+  persistActiveConfiguration();
+});
+
+outputChannelSelect.addEventListener('change', () => {
+  localStorage.setItem(OUTPUT_CHANNEL_STORAGE_KEY, outputChannelSelect.value);
+  persistActiveConfiguration();
+});
+
+startFrequencyInput.addEventListener('input', () => {
+  const value = Number(startFrequencyInput.value);
+  if (Number.isFinite(value)) {
+    localStorage.setItem(START_FREQUENCY_STORAGE_KEY, String(value));
+    persistActiveConfiguration();
+  }
+});
+
+endFrequencyInput.addEventListener('input', () => {
+  const value = Number(endFrequencyInput.value);
+  if (Number.isFinite(value)) {
+    localStorage.setItem(END_FREQUENCY_STORAGE_KEY, String(value));
+    persistActiveConfiguration();
+  }
+});
+
+durationInput.addEventListener('input', () => {
+  const value = Number(durationInput.value);
+  if (Number.isFinite(value)) {
+    localStorage.setItem(DURATION_STORAGE_KEY, String(value));
+    persistActiveConfiguration();
+  }
+});
+
+volumeInput.addEventListener('input', () => {
+  const value = Number(volumeInput.value);
+  if (Number.isFinite(value)) {
+    localStorage.setItem(SWEEP_LEVEL_STORAGE_KEY, String(value));
+    persistActiveConfiguration();
+  }
+});
+
 measurementsViewButton.addEventListener('click', () => {
   setPlotViewMode('measurements');
+  persistActiveConfiguration();
 });
 
 apoViewButton.addEventListener('click', () => {
   setPlotViewMode('apo');
+  persistActiveConfiguration();
 });
 
 generateApoFiltersButton.addEventListener('click', () => {
@@ -567,6 +660,10 @@ generateApoFiltersButton.addEventListener('click', () => {
 
 addApoFilterButton.addEventListener('click', () => {
   addApoFilter();
+});
+
+clearApoFiltersButton.addEventListener('click', () => {
+  clearApoFilters();
 });
 
 exportApoConfigButton.addEventListener('click', () => {
@@ -672,6 +769,7 @@ smoothingModeSelect.value = state.smoothingMode;
 apoMaxFiltersInput.value = String(state.apoMaxFilters);
 apoMaxBoostInput.value = String(state.apoMaxBoostDb);
 apoMaxCutInput.value = String(state.apoMaxCutDb);
+initializeMeasurementConfigFromStorage();
 hideToast();
 updateMeasurementActionState();
 renderApoSection();
@@ -716,6 +814,7 @@ function setBusy(isBusy: boolean): void {
   apoViewButton.disabled = isBusy;
   generateApoFiltersButton.disabled = isBusy;
   addApoFilterButton.disabled = isBusy;
+  clearApoFiltersButton.disabled = isBusy;
   exportApoConfigButton.disabled = isBusy;
   applyApoConfigButton.disabled = isBusy;
   apoMeasurementSelect.disabled = isBusy;
@@ -761,6 +860,7 @@ function updateMeasurementActionState(): void {
   generateApoFiltersButton.disabled =
     state.busy || !state.apoSelectedMeasurementId || !state.apoSelectedReferenceId;
   addApoFilterButton.disabled = state.busy;
+  clearApoFiltersButton.disabled = state.busy || state.apoFilters.length === 0;
   exportApoConfigButton.disabled = state.busy || !state.outputFolder;
   const enabledFilterCount = state.apoFilters.filter((filter) => filter.enabled).length;
   const apoInstalled = state.equalizerApoStatus?.installed ?? false;
@@ -857,6 +957,7 @@ function syncSplOffsetControl(normalize: boolean): void {
 
   state.splOffsetDb = nextOffsetDb;
   localStorage.setItem(SPL_OFFSET_STORAGE_KEY, String(nextOffsetDb));
+  persistActiveConfiguration();
 
   if (state.measurements.length > 0) {
     renderMeasurements();
@@ -869,6 +970,7 @@ async function chooseOutputFolder(): Promise<void> {
   if (result.folderPath) {
     state.outputFolder = result.folderPath;
     localStorage.setItem(STORAGE_KEY, result.folderPath);
+    persistActiveConfiguration();
     updateSelectedFolder();
     appendLog(`Save folder set to ${result.folderPath}.`, 'success');
   }
@@ -990,6 +1092,8 @@ async function refreshMicrophones(requestPermission: boolean): Promise<void> {
 
     const priorSelection = microphoneSelect.value;
     const priorOutputSelection = outputSelect.value;
+    const storedSelection = microphoneSelect.dataset.storedDeviceId ?? localStorage.getItem(INPUT_DEVICE_STORAGE_KEY) ?? '';
+    const storedOutputSelection = outputSelect.dataset.storedDeviceId ?? localStorage.getItem(OUTPUT_DEVICE_STORAGE_KEY) ?? '';
 
     if (requestPermission) {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -1045,11 +1149,24 @@ async function refreshMicrophones(requestPermission: boolean): Promise<void> {
 
     if (microphones.some((microphone) => microphone.deviceId === priorSelection)) {
       microphoneSelect.value = priorSelection;
+    } else if (microphones.some((microphone) => microphone.deviceId === storedSelection)) {
+      microphoneSelect.value = storedSelection;
     }
 
-    if (Array.from(outputSelect.options).some((option) => option.value === priorOutputSelection)) {
+    if (
+      priorOutputSelection &&
+      Array.from(outputSelect.options).some((option) => option.value === priorOutputSelection)
+    ) {
       outputSelect.value = priorOutputSelection;
+    } else if (Array.from(outputSelect.options).some((option) => option.value === storedOutputSelection)) {
+      outputSelect.value = storedOutputSelection;
     }
+
+    localStorage.setItem(INPUT_DEVICE_STORAGE_KEY, microphoneSelect.value);
+    localStorage.setItem(OUTPUT_DEVICE_STORAGE_KEY, outputSelect.value);
+    persistActiveConfiguration();
+    delete microphoneSelect.dataset.storedDeviceId;
+    delete outputSelect.dataset.storedDeviceId;
 
     appendLog(
       `Loaded ${microphones.length} microphone input(s) and ${seenOutputIds.size + 1} output option(s).`,
@@ -1386,6 +1503,13 @@ function renderPlotCard(
       measurementName: measurement?.name ?? null,
       targetName: referenceCurve?.name ?? null,
     });
+
+    attachApoPlotInteractions({
+      plotCard,
+      filters: state.apoFilters,
+      onFilterDrag: handleApoFilterDrag,
+      onDragEnd: handleApoFilterDragEnd,
+    });
     return;
   }
 
@@ -1461,6 +1585,122 @@ function readStoredPlotViewMode(): PlotViewMode {
     : 'measurements';
 }
 
+function initializeMeasurementConfigFromStorage(): void {
+  const persistedConfig = readPersistedActiveConfiguration();
+
+  if (persistedConfig) {
+    applyImportedConfiguration(persistedConfig, false);
+    return;
+  }
+
+  const storedSampleRate = readStoredNumber(SAMPLE_RATE_STORAGE_KEY, DEFAULT_SAMPLE_RATE);
+  const storedStartFreq = readStoredNumber(START_FREQUENCY_STORAGE_KEY, DEFAULT_START_FREQUENCY);
+  const storedEndFreq = readStoredNumber(END_FREQUENCY_STORAGE_KEY, DEFAULT_END_FREQUENCY);
+  const storedDuration = readStoredNumber(DURATION_STORAGE_KEY, DEFAULT_DURATION_SECONDS);
+  const storedSweepLevel = readStoredNumber(SWEEP_LEVEL_STORAGE_KEY, DEFAULT_SWEEP_LEVEL_DB);
+  const storedInputChannel = localStorage.getItem(INPUT_CHANNEL_STORAGE_KEY);
+  const storedOutputChannel = localStorage.getItem(OUTPUT_CHANNEL_STORAGE_KEY);
+  const storedInputDeviceId = localStorage.getItem(INPUT_DEVICE_STORAGE_KEY);
+  const storedOutputDeviceId = localStorage.getItem(OUTPUT_DEVICE_STORAGE_KEY);
+
+  if (SAMPLE_RATE_OPTIONS.includes(storedSampleRate as typeof SAMPLE_RATE_OPTIONS[number])) {
+    sampleRateSelect.value = String(storedSampleRate);
+  }
+
+  if (Number.isFinite(storedStartFreq) && storedStartFreq >= 1 && storedStartFreq < 100000) {
+    startFrequencyInput.value = String(storedStartFreq);
+  }
+
+  if (Number.isFinite(storedEndFreq) && storedEndFreq > 1 && storedEndFreq <= 100000) {
+    endFrequencyInput.value = String(storedEndFreq);
+  }
+
+  if (Number.isFinite(storedDuration) && storedDuration >= 2 && storedDuration <= 30) {
+    durationInput.value = String(storedDuration);
+  }
+
+  if (Number.isFinite(storedSweepLevel) && storedSweepLevel >= MIN_SWEEP_LEVEL_DB && storedSweepLevel <= MAX_SWEEP_LEVEL_DB) {
+    volumeInput.value = String(storedSweepLevel);
+    syncVolumeControls('slider');
+  }
+
+  if (storedInputChannel === 'left' || storedInputChannel === 'right' || storedInputChannel === 'both') {
+    inputChannelSelect.value = storedInputChannel;
+  }
+
+  if (storedOutputChannel === 'left' || storedOutputChannel === 'right' || storedOutputChannel === 'both') {
+    outputChannelSelect.value = storedOutputChannel;
+  }
+
+  if (storedInputDeviceId) {
+    microphoneSelect.dataset.storedDeviceId = storedInputDeviceId;
+  }
+
+  if (storedOutputDeviceId !== null) {
+    outputSelect.dataset.storedDeviceId = storedOutputDeviceId;
+  }
+}
+
+function readPersistedActiveConfiguration(): Record<string, unknown> | null {
+  const stored = localStorage.getItem(ACTIVE_CONFIG_STORAGE_KEY);
+
+  if (!stored) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(stored);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistActiveConfiguration(): void {
+  const payload = {
+    backend: getSelectedMeasurementBackend(),
+    sampleRate: getSelectedSampleRate(),
+    inputChannel: getSelectedChannel(inputChannelSelect),
+    outputChannel: getSelectedChannel(outputChannelSelect),
+    inputDeviceId: getPreferredInputDeviceId(),
+    outputDeviceId: getPreferredOutputDeviceId(),
+    startFrequency: Number(startFrequencyInput.value),
+    endFrequency: Number(endFrequencyInput.value),
+    durationSeconds: Number(durationInput.value),
+    sweepLevelDb: Number(volumeInput.value),
+    splOffsetDb: Number(splOffsetInput.value),
+    smoothingMode: getSelectedSmoothingMode(),
+    normalizePlot: normalizePlotToggle.checked,
+    plotViewMode: state.plotViewMode,
+    apoSelectedMeasurementId: state.apoSelectedMeasurementId,
+    apoSelectedReferenceId: state.apoSelectedReferenceId,
+    apoMaxFilters: state.apoMaxFilters,
+    apoMaxBoostDb: state.apoMaxBoostDb,
+    apoMaxCutDb: state.apoMaxCutDb,
+    apoFilters: state.apoFilters,
+  };
+
+  localStorage.setItem(ACTIVE_CONFIG_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function getPreferredInputDeviceId(): string {
+  return (
+    microphoneSelect.value ||
+    microphoneSelect.dataset.storedDeviceId ||
+    localStorage.getItem(INPUT_DEVICE_STORAGE_KEY) ||
+    ''
+  );
+}
+
+function getPreferredOutputDeviceId(): string {
+  return (
+    outputSelect.value ||
+    outputSelect.dataset.storedDeviceId ||
+    localStorage.getItem(OUTPUT_DEVICE_STORAGE_KEY) ||
+    ''
+  );
+}
+
 function setPlotViewMode(viewMode: PlotViewMode): void {
   if (state.plotViewMode === viewMode) {
     return;
@@ -1468,6 +1708,7 @@ function setPlotViewMode(viewMode: PlotViewMode): void {
 
   state.plotViewMode = viewMode;
   localStorage.setItem(PLOT_VIEW_MODE_STORAGE_KEY, viewMode);
+  persistActiveConfiguration();
   renderMeasurements();
 }
 
@@ -1623,7 +1864,7 @@ async function importConfiguration(file: File): Promise<void> {
   }
 }
 
-function applyImportedConfiguration(config: Record<string, unknown>): void {
+function applyImportedConfiguration(config: Record<string, unknown>, persist = true): void {
   const backend = config.backend === 'sox' ? 'sox' : 'web-audio';
   measurementBackendSelect.value = backend;
   state.measurementBackend = backend;
@@ -1632,19 +1873,28 @@ function applyImportedConfiguration(config: Record<string, unknown>): void {
   const sampleRate = Number(config.sampleRate);
   if (Number.isFinite(sampleRate)) {
     sampleRateSelect.value = String(sampleRate);
+    localStorage.setItem(SAMPLE_RATE_STORAGE_KEY, String(sampleRate));
   }
 
   inputChannelSelect.value =
     config.inputChannel === 'left' || config.inputChannel === 'right'
       ? String(config.inputChannel)
       : 'both';
+  localStorage.setItem(INPUT_CHANNEL_STORAGE_KEY, inputChannelSelect.value);
   outputChannelSelect.value =
     config.outputChannel === 'left' || config.outputChannel === 'right'
       ? String(config.outputChannel)
       : 'both';
+  localStorage.setItem(OUTPUT_CHANNEL_STORAGE_KEY, outputChannelSelect.value);
 
-  selectOptionIfPresent(microphoneSelect, String(config.inputDeviceId ?? ''));
-  selectOptionIfPresent(outputSelect, String(config.outputDeviceId ?? ''));
+  const importedInputDeviceId = String(config.inputDeviceId ?? '');
+  const importedOutputDeviceId = String(config.outputDeviceId ?? '');
+  selectOptionIfPresent(microphoneSelect, importedInputDeviceId);
+  selectOptionIfPresent(outputSelect, importedOutputDeviceId);
+  microphoneSelect.dataset.storedDeviceId = importedInputDeviceId;
+  outputSelect.dataset.storedDeviceId = importedOutputDeviceId;
+  localStorage.setItem(INPUT_DEVICE_STORAGE_KEY, importedInputDeviceId);
+  localStorage.setItem(OUTPUT_DEVICE_STORAGE_KEY, importedOutputDeviceId);
 
   setNumericInputValue(startFrequencyInput, config.startFrequency);
   setNumericInputValue(endFrequencyInput, config.endFrequency);
@@ -1652,6 +1902,10 @@ function applyImportedConfiguration(config: Record<string, unknown>): void {
   setNumericInputValue(volumeInput, config.sweepLevelDb);
   setNumericInputValue(volumeNumberInput, config.sweepLevelDb);
   setNumericInputValue(splOffsetInput, config.splOffsetDb);
+  localStorage.setItem(START_FREQUENCY_STORAGE_KEY, startFrequencyInput.value);
+  localStorage.setItem(END_FREQUENCY_STORAGE_KEY, endFrequencyInput.value);
+  localStorage.setItem(DURATION_STORAGE_KEY, durationInput.value);
+  localStorage.setItem(SWEEP_LEVEL_STORAGE_KEY, volumeInput.value);
 
   smoothingModeSelect.value = isSmoothingMode(String(config.smoothingMode ?? ''))
     ? String(config.smoothingMode)
@@ -1690,6 +1944,9 @@ function applyImportedConfiguration(config: Record<string, unknown>): void {
       return Number.isFinite(numericId) ? Math.max(maxId, numericId) : maxId;
     }, 0) + 1;
   persistApoState();
+  if (persist) {
+    persistActiveConfiguration();
+  }
   apoMaxFiltersInput.value = String(state.apoMaxFilters);
   apoMaxBoostInput.value = String(state.apoMaxBoostDb);
   apoMaxCutInput.value = String(state.apoMaxCutDb);
@@ -1820,6 +2077,39 @@ function persistApoState(): void {
   persistApoSelections();
 }
 
+function handleApoFilterDrag(
+  filterId: string,
+  frequencyHz: number,
+  gainDb: number,
+  axis: ApoDragAxis,
+): void {
+  state.apoFilters = state.apoFilters.map((filter) => {
+    if (filter.id !== filterId) {
+      return filter;
+    }
+
+    const nextFrequencyHz = axis === 'vertical' ? filter.frequencyHz : roundTo(frequencyHz, 1);
+    const nextGainDb = axis === 'horizontal' ? filter.gainDb : roundTo(gainDb, 0.1);
+
+    return {
+      ...filter,
+      frequencyHz: nextFrequencyHz,
+      gainDb: nextGainDb,
+    };
+  });
+  persistApoState();
+  persistActiveConfiguration();
+  renderPlotCard(
+    state.measurements.filter((measurement) => measurement.visible),
+    state.referenceCurves.filter((referenceCurve) => referenceCurve.visible),
+  );
+  apoConfigPreview.value = buildApoConfigText();
+}
+
+function handleApoFilterDragEnd(): void {
+  renderApoSection();
+}
+
 function syncApoGenerationSettings(normalize: boolean): void {
   const parsedMaxFilters = Number(apoMaxFiltersInput.value);
   const parsedMaxBoostDb = Number(apoMaxBoostInput.value);
@@ -1844,6 +2134,7 @@ function syncApoGenerationSettings(normalize: boolean): void {
   }
 
   persistApoState();
+  persistActiveConfiguration();
 }
 
 function renderApoSection(): void {
@@ -1939,7 +2230,11 @@ function renderApoFilterList(): string {
     return '<div class="measurement-empty">No APO filters yet. Generate from a target curve or add one manually.</div>';
   }
 
-  return state.apoFilters
+  const sortedFilters = [...state.apoFilters].sort(
+    (aFilter, bFilter) => aFilter.frequencyHz - bFilter.frequencyHz,
+  );
+
+  return sortedFilters
     .map(
       (filter, index) => `
         <div class="apo-filter-row${filter.enabled ? '' : ' is-hidden'}">
@@ -1974,12 +2269,23 @@ function addApoFilter(partial: Partial<ApoFilter> = {}): void {
   ];
   state.nextApoFilterIndex += 1;
   persistApoState();
+  persistActiveConfiguration();
   renderApoSection();
+}
+
+function clearApoFilters(): void {
+  state.apoFilters = [];
+  state.nextApoFilterIndex = 1;
+  persistApoState();
+  persistActiveConfiguration();
+  renderApoSection();
+  appendLog('Cleared all APO filters.', 'neutral');
 }
 
 function removeApoFilter(filterId: string): void {
   state.apoFilters = state.apoFilters.filter((filter) => filter.id !== filterId);
   persistApoState();
+  persistActiveConfiguration();
   renderApoSection();
 }
 
@@ -2012,6 +2318,7 @@ function updateApoFilter(filterId: string, field: string, value: string | boolea
   });
 
   persistApoState();
+  persistActiveConfiguration();
   renderApoSection();
 }
 

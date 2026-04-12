@@ -268,6 +268,15 @@ export function attachPlotInteractions(input: {
   });
 }
 
+export type ApoDragAxis = 'both' | 'horizontal' | 'vertical';
+
+export type ApoPlotDragHandler = (
+  filterId: string,
+  frequencyHz: number,
+  gainDb: number,
+  axis: ApoDragAxis,
+) => void;
+
 export function renderApoEqPlot(input: {
   filters: ApoFilter[];
   measurementName: string | null;
@@ -295,25 +304,7 @@ export function renderApoEqPlot(input: {
       totalDb: getApoFilterResponseDb(filter, point.frequencyHz),
     })),
   }));
-  const allValues = [
-    ...sampledPoints.map((point) => point.totalDb),
-    ...individualPointSets.flatMap((entry) => entry.points.map((point) => point.totalDb)),
-    0,
-  ];
-  const minDb = Math.min(-12, Math.floor((Math.min(...allValues) - 1) / 3) * 3);
-  const maxDb = Math.max(12, Math.ceil((Math.max(...allValues) + 1) / 3) * 3);
-  const geometry: ResponsePlotGeometry = {
-    width: 960,
-    height: 356,
-    left: 84,
-    right: 24,
-    top: 18,
-    bottom: 94,
-    minFrequency: DEFAULT_START_FREQUENCY,
-    maxFrequency: DEFAULT_END_FREQUENCY,
-    minDb,
-    maxDb,
-  };
+  const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets);
   const yTicks = Array.from({ length: 7 }, (_unused, index) => {
     const ratio = index / 6;
     return geometry.maxDb - (geometry.maxDb - geometry.minDb) * ratio;
@@ -350,6 +341,13 @@ export function renderApoEqPlot(input: {
         })
         .join('')}
       <polyline points="${combinedPath}" fill="none" stroke="#f8a145" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
+      ${enabledFilters
+        .map((filter) => {
+          const x = getPlotX(filter.frequencyHz, geometry);
+          const y = getPlotY(filter.gainDb, geometry);
+          return `<circle class="apo-filter-node" data-apo-filter-id="${escapeHtml(filter.id)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="#f8a145" stroke="#4d2b0b" stroke-width="2" cursor="grab" vector-effect="non-scaling-stroke"><title>${escapeHtml(`${filter.frequencyHz.toFixed(0)} Hz, ${filter.gainDb.toFixed(1)} dB`)}</title></circle>`;
+        })
+        .join('')}
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
@@ -364,6 +362,37 @@ export function renderApoEqPlot(input: {
       <text x="28" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 28 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">EQ Gain (dB)</text>
     </svg>
   `;
+}
+
+function getApoEqPlotGeometry(
+  enabledFilters: ApoFilter[],
+  sampledPoints: Array<{ frequencyHz: number; totalDb: number }>,
+  individualPointSets: Array<{
+    filter: ApoFilter;
+    points: Array<{ frequencyHz: number; totalDb: number }>;
+  }>,
+): ResponsePlotGeometry {
+  const allValues = [
+    ...sampledPoints.map((point) => point.totalDb),
+    ...individualPointSets.flatMap((entry) => entry.points.map((point) => point.totalDb)),
+    ...enabledFilters.map((filter) => filter.gainDb),
+    0,
+  ];
+  const minDb = Math.min(-12, Math.floor((Math.min(...allValues) - 1) / 3) * 3);
+  const maxDb = Math.max(12, Math.ceil((Math.max(...allValues) + 1) / 3) * 3);
+
+  return {
+    width: 960,
+    height: 356,
+    left: 84,
+    right: 24,
+    top: 18,
+    bottom: 94,
+    minFrequency: DEFAULT_START_FREQUENCY,
+    maxFrequency: DEFAULT_END_FREQUENCY,
+    minDb,
+    maxDb,
+  };
 }
 
 function getApoFilterResponseDb(filter: ApoFilter, frequencyHz: number): number {
@@ -489,4 +518,167 @@ function getPlotY(valueDb: number, geometry: ResponsePlotGeometry): number {
     ((geometry.maxDb - valueDb) / (geometry.maxDb - geometry.minDb)) *
       (geometry.height - geometry.top - geometry.bottom)
   );
+}
+
+export function attachApoPlotInteractions(input: {
+  plotCard: HTMLElement;
+  filters: ApoFilter[];
+  onFilterDrag: ApoPlotDragHandler;
+  onDragEnd: () => void;
+}): void {
+  const { plotCard } = input;
+  const plotCardWithController = plotCard as HTMLElement & {
+    __apoPlotController?: {
+      filters: ApoFilter[];
+      onFilterDrag: ApoPlotDragHandler;
+      onDragEnd: () => void;
+      draggingFilterId: string | null;
+      cleanup: () => void;
+    };
+  };
+
+  if (plotCardWithController.__apoPlotController) {
+    plotCardWithController.__apoPlotController.filters = input.filters;
+    plotCardWithController.__apoPlotController.onFilterDrag = input.onFilterDrag;
+    plotCardWithController.__apoPlotController.onDragEnd = input.onDragEnd;
+    return;
+  }
+
+  const getGeometryFromSvg = (filters: ApoFilter[]): ResponsePlotGeometry | null => {
+    const svg = plotCard.querySelector('svg');
+    if (!svg) {
+      return null;
+    }
+
+    const viewBox = svg.getAttribute('viewBox');
+    if (!viewBox) return null;
+    const [width, height] = viewBox.split(' ').slice(2).map(Number);
+    if (!width || !height) return null;
+
+    const enabledFilters = filters.filter((filter) => filter.enabled);
+    const sampledPoints = Array.from({ length: 256 }, (_unused, index) => {
+      const ratio = index / 255;
+      const frequencyHz =
+        DEFAULT_START_FREQUENCY *
+        Math.pow(DEFAULT_END_FREQUENCY / DEFAULT_START_FREQUENCY, ratio);
+
+      return {
+        frequencyHz,
+        totalDb: enabledFilters.reduce(
+          (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz),
+          0,
+        ),
+      };
+    });
+    const individualPointSets = enabledFilters.map((filter) => ({
+      filter,
+      points: sampledPoints.map((point) => ({
+        frequencyHz: point.frequencyHz,
+        totalDb: getApoFilterResponseDb(filter, point.frequencyHz),
+      })),
+    }));
+
+    const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets);
+    return { ...geometry, width, height };
+  };
+
+  const handleMouseDown = (event: MouseEvent) => {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.classList.contains('apo-filter-node')) {
+      return;
+    }
+
+    event.preventDefault();
+    const controller = plotCardWithController.__apoPlotController;
+    if (!controller) {
+      return;
+    }
+
+    controller.draggingFilterId = target.getAttribute('data-apo-filter-id');
+    target.setAttribute('cursor', 'grabbing');
+  };
+
+  const handleMouseMove = (event: MouseEvent) => {
+    const controller = plotCardWithController.__apoPlotController;
+    if (!controller?.draggingFilterId) {
+      return;
+    }
+
+    const svg = plotCard.querySelector('svg');
+    if (!(svg instanceof SVGSVGElement)) {
+      return;
+    }
+
+    const geometry = getGeometryFromSvg(controller.filters);
+    if (!geometry) return;
+
+    const svgPoint = svg.createSVGPoint();
+    svgPoint.x = event.clientX;
+    svgPoint.y = event.clientY;
+
+    const screenMatrix = svg.getScreenCTM();
+    if (!screenMatrix) {
+      return;
+    }
+
+    const transformedPoint = svgPoint.matrixTransform(screenMatrix.inverse());
+    const axis: ApoDragAxis = event.shiftKey ? 'horizontal' : event.altKey ? 'vertical' : 'both';
+
+    const frequencyHz = clamp(
+      getFrequencyForPlotX(transformedPoint.x, geometry),
+      20,
+      20000,
+    );
+    const gainDb = clamp(
+      getDbForPlotY(transformedPoint.y, geometry),
+      -24,
+      24,
+    );
+
+    controller.onFilterDrag(controller.draggingFilterId, frequencyHz, gainDb, axis);
+  };
+
+  const handleMouseUp = () => {
+    const controller = plotCardWithController.__apoPlotController;
+    if (!controller?.draggingFilterId) {
+      return;
+    }
+
+    const svg = plotCard.querySelector('svg');
+    const node = svg?.querySelector(
+      `[data-apo-filter-id="${controller.draggingFilterId}"]`,
+    );
+    if (node instanceof Element) {
+      node.setAttribute('cursor', 'grab');
+    }
+
+    controller.draggingFilterId = null;
+    controller.onDragEnd();
+  };
+
+  const cleanup = () => {
+    plotCard.removeEventListener('mousedown', handleMouseDown);
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('mouseup', handleMouseUp);
+  };
+
+  plotCard.addEventListener('mousedown', handleMouseDown);
+  window.addEventListener('mousemove', handleMouseMove);
+  window.addEventListener('mouseup', handleMouseUp);
+
+  plotCardWithController.__apoPlotController = {
+    filters: input.filters,
+    onFilterDrag: input.onFilterDrag,
+    onDragEnd: input.onDragEnd,
+    draggingFilterId: null,
+    cleanup,
+  };
+}
+
+function getDbForPlotY(y: number, geometry: ResponsePlotGeometry): number {
+  const clampedY = clamp(y, geometry.top, geometry.height - geometry.bottom);
+  const ratio =
+    (clampedY - geometry.top) /
+    (geometry.height - geometry.top - geometry.bottom);
+  return geometry.maxDb - ratio * (geometry.maxDb - geometry.minDb);
 }
