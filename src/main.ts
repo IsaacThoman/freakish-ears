@@ -1,4 +1,5 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 
@@ -7,15 +8,55 @@ if (started) {
   app.quit();
 }
 
+type SaveMeasurementFile = {
+  name: string;
+  contents: Uint8Array;
+};
+
+type SaveMeasurementPayload = {
+  folderPath: string;
+  sessionName: string;
+  files: SaveMeasurementFile[];
+};
+
+const sanitizePathSegment = (value: string) => {
+  const sanitized = Array.from(value.trim(), (character) => {
+    const codePoint = character.charCodeAt(0);
+
+    if (
+      codePoint < 32 ||
+      '<>:"/\\|?*'.includes(character) ||
+      /\s/.test(character)
+    ) {
+      return '-';
+    }
+
+    return character;
+  })
+    .join('')
+    .replace(/-+/g, '-')
+    .slice(0, 120);
+
+  return sanitized || 'measurement';
+};
+
 const createWindow = () => {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1180,
+    height: 840,
+    minWidth: 960,
+    minHeight: 720,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
+
+  mainWindow.webContents.session.setPermissionRequestHandler(
+    (_webContents, permission, callback) => {
+      callback(permission === 'media');
+    },
+  );
 
   // and load the index.html of the app.
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
@@ -29,6 +70,47 @@ const createWindow = () => {
   // Open the DevTools.
   // mainWindow.webContents.openDevTools();
 };
+
+ipcMain.handle('dialog:selectOutputFolder', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Choose a folder for recordings and values',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+
+  return {
+    canceled: result.canceled,
+    folderPath: result.canceled ? null : result.filePaths[0] ?? null,
+  };
+});
+
+ipcMain.handle(
+  'files:saveMeasurementSession',
+  async (_event, payload: SaveMeasurementPayload) => {
+    const sessionDirectory = path.join(
+      payload.folderPath,
+      sanitizePathSegment(payload.sessionName),
+    );
+
+    await mkdir(sessionDirectory, { recursive: true });
+
+    const filePaths: string[] = [];
+
+    for (const file of payload.files) {
+      const filePath = path.join(
+        sessionDirectory,
+        sanitizePathSegment(file.name),
+      );
+
+      await writeFile(filePath, Buffer.from(file.contents));
+      filePaths.push(filePath);
+    }
+
+    return {
+      sessionDirectory,
+      filePaths,
+    };
+  },
+);
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
