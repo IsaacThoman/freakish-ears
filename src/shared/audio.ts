@@ -1,39 +1,3 @@
-export const DEFAULT_SWEEP_AMPLITUDE = 0.72;
-
-export function createLogSweep(
-  sampleRate: number,
-  durationSeconds: number,
-  startFrequency: number,
-  endFrequency: number,
-  amplitude = DEFAULT_SWEEP_AMPLITUDE,
-): Float32Array {
-  const length = Math.max(1, Math.round(sampleRate * durationSeconds));
-  const sweep = new Float32Array(length);
-  const ratio = endFrequency / startFrequency;
-  const phaseScale =
-    (2 * Math.PI * startFrequency * durationSeconds) / Math.log(ratio);
-  const fadeSampleCount = Math.max(32, Math.round(sampleRate * 0.02));
-
-  for (let index = 0; index < length; index += 1) {
-    const time = index / sampleRate;
-    const exponentialTerm = Math.pow(ratio, time / durationSeconds);
-    let sample = Math.sin(phaseScale * (exponentialTerm - 1));
-
-    if (index < fadeSampleCount) {
-      sample *= 0.5 - 0.5 * Math.cos((Math.PI * index) / fadeSampleCount);
-    }
-
-    const fadeOutIndex = length - index - 1;
-    if (fadeOutIndex < fadeSampleCount) {
-      sample *= 0.5 - 0.5 * Math.cos((Math.PI * fadeOutIndex) / fadeSampleCount);
-    }
-
-    sweep[index] = sample * amplitude;
-  }
-
-  return sweep;
-}
-
 export function encodeWavFile(
   samples: Float32Array,
   sampleRate: number,

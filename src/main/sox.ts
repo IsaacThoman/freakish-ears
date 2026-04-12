@@ -1,9 +1,8 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { createLogSweep, encodeWavFile } from '../shared/audio';
 import type {
   RunSoxMeasurementPayload,
   RunSoxMeasurementResult,
@@ -19,19 +18,9 @@ export async function runSoxMeasurement(
   const tempDirectory = await mkdtemp(path.join(tmpdir(), 'freakish-ears-sox-'));
 
   try {
-    const sweep = scaleSamples(
-      createLogSweep(
-      SOX_SAMPLE_RATE,
-      payload.durationSeconds,
-      payload.startFrequency,
-      payload.endFrequency,
-      ),
-      Math.pow(10, payload.sweepLevelDb / 20),
-    );
     const sweepPath = path.join(tempDirectory, 'sweep.wav');
     const recordingPath = path.join(tempDirectory, 'recording.wav');
-
-    await writeFile(sweepPath, Buffer.from(encodeWavFile(sweep, SOX_SAMPLE_RATE)));
+    await synthesizeSweepWithSox(sweepPath, payload);
 
     const recordingDurationSeconds =
       payload.preRollSeconds + payload.durationSeconds + payload.postRollSeconds + 0.25;
@@ -78,6 +67,8 @@ export async function runSoxMeasurement(
 
     await recorder.completion;
 
+    const sweepWav = new Uint8Array(await readFile(sweepPath));
+    const sweep = decodeMono16BitPcmWav(sweepWav);
     const recordingWav = new Uint8Array(await readFile(recordingPath));
     const recording = decodeMono16BitPcmWav(recordingWav);
 
@@ -91,6 +82,38 @@ export async function runSoxMeasurement(
   } finally {
     await rm(tempDirectory, { recursive: true, force: true });
   }
+}
+
+async function synthesizeSweepWithSox(
+  sweepPath: string,
+  payload: RunSoxMeasurementPayload,
+): Promise<void> {
+  const fadeSeconds = Math.min(0.02, payload.durationSeconds / 2);
+
+  await runLoggedProcess('sox', [
+    '-q',
+    '-n',
+    '-r',
+    String(SOX_SAMPLE_RATE),
+    '-c',
+    '1',
+    '-b',
+    '16',
+    '-e',
+    'signed-integer',
+    sweepPath,
+    'synth',
+    payload.durationSeconds.toFixed(6),
+    'sine',
+    `${payload.startFrequency}/${payload.endFrequency}`,
+    'gain',
+    payload.sweepLevelDb.toFixed(2),
+    'fade',
+    'q',
+    '0',
+    payload.durationSeconds.toFixed(6),
+    fadeSeconds.toFixed(6),
+  ]);
 }
 
 function decodeMono16BitPcmWav(wavBytes: Uint8Array): Float32Array {
@@ -156,20 +179,6 @@ function readAscii(view: DataView, offset: number, length: number): string {
   }
 
   return text;
-}
-
-function scaleSamples(samples: Float32Array, gain: number): Float32Array {
-  if (gain === 1) {
-    return samples;
-  }
-
-  const scaled = new Float32Array(samples.length);
-
-  for (let index = 0; index < samples.length; index += 1) {
-    scaled[index] = samples[index] * gain;
-  }
-
-  return scaled;
 }
 
 function spawnLoggedProcess(command: string, args: string[]): {

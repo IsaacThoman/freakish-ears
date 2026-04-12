@@ -1,5 +1,4 @@
 import { POST_ROLL_SECONDS, PRE_ROLL_SECONDS } from './constants';
-import { createLogSweep } from '../shared/audio';
 export { analyzeMeasurement } from '../shared/measurement-analysis';
 export { encodeWavFile } from '../shared/audio';
 import type {
@@ -28,7 +27,7 @@ export async function recordSweepMeasurement(settings: {
 
   const audioContext = new AudioContext({ latencyHint: 'interactive' });
   const sampleRate = audioContext.sampleRate;
-  const sweep = createLogSweep(
+  const sweep = await renderLogSweep(
     sampleRate,
     settings.durationSeconds,
     settings.startFrequency,
@@ -98,6 +97,47 @@ export async function recordSweepMeasurement(settings: {
     sampleRate,
     preRollSamples: Math.round(PRE_ROLL_SECONDS * sampleRate),
   };
+}
+
+async function renderLogSweep(
+  sampleRate: number,
+  durationSeconds: number,
+  startFrequency: number,
+  endFrequency: number,
+): Promise<Float32Array> {
+  const sampleCount = Math.max(1, Math.round(sampleRate * durationSeconds));
+  const renderDurationSeconds = sampleCount / sampleRate;
+  const fadeSeconds = Math.min(0.02, renderDurationSeconds / 2);
+  const offlineContext = new OfflineAudioContext(1, sampleCount, sampleRate);
+  const oscillator = offlineContext.createOscillator();
+  const gainNode = offlineContext.createGain();
+
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(startFrequency, 0);
+  oscillator.frequency.exponentialRampToValueAtTime(
+    endFrequency,
+    renderDurationSeconds,
+  );
+
+  gainNode.gain.setValueAtTime(0, 0);
+  if (fadeSeconds > 0) {
+    gainNode.gain.linearRampToValueAtTime(1, fadeSeconds);
+    gainNode.gain.setValueAtTime(1, Math.max(fadeSeconds, renderDurationSeconds - fadeSeconds));
+    gainNode.gain.linearRampToValueAtTime(0, renderDurationSeconds);
+  } else {
+    gainNode.gain.setValueAtTime(1, 0);
+  }
+
+  oscillator.connect(gainNode);
+  gainNode.connect(offlineContext.destination);
+  oscillator.start(0);
+  oscillator.stop(renderDurationSeconds);
+
+  const renderedBuffer = await offlineContext.startRendering();
+  const renderedSweep = renderedBuffer.getChannelData(0);
+  const sweep = new Float32Array(renderedSweep.length);
+  sweep.set(renderedSweep);
+  return sweep;
 }
 
 function flattenChunks(chunks: Float32Array[], totalLength: number): Float32Array {
