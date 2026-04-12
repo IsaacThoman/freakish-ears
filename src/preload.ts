@@ -1,20 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import { IPC_CHANNELS } from './shared/ipc';
+import type { FreakishEarsApi, SaveMeasurementPayload } from './shared/ipc';
 
-type SaveMeasurementFile = {
-  name: string;
-  contents: Uint8Array;
-};
-
-type SaveMeasurementPayload = {
-  folderPath: string;
-  sessionName: string;
-  files: SaveMeasurementFile[];
-};
-
-contextBridge.exposeInMainWorld('freakishEars', {
-  selectOutputFolder: () => ipcRenderer.invoke('dialog:selectOutputFolder'),
+const api: FreakishEarsApi = {
+  selectOutputFolder: () => ipcRenderer.invoke(IPC_CHANNELS.selectOutputFolder),
   saveMeasurementSession: (payload: SaveMeasurementPayload) =>
-    ipcRenderer.invoke('files:saveMeasurementSession', payload),
+    ipcRenderer.invoke(IPC_CHANNELS.saveMeasurementSession, payload),
   showItemInFolder: (filePath: string) =>
-    ipcRenderer.invoke('files:showItemInFolder', filePath),
-});
+    ipcRenderer.invoke(IPC_CHANNELS.showItemInFolder, filePath),
+};
+
+contextBridge.exposeInMainWorld('freakishEars', api);
