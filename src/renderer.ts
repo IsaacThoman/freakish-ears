@@ -2043,15 +2043,14 @@ function attachPlotInteractions(measurements: LoadedMeasurement[]): void {
       hoverDots[index]?.setAttribute('cx', x.toFixed(1));
       hoverDots[index]?.setAttribute('cy', y.toFixed(1));
       hoverDots[index]?.setAttribute('opacity', '1');
-      hoverDetails.push(
-        `${measurement.name}: ${closestPoint.smoothedMagnitudeDbRelative.toFixed(1)} ${state.normalizePlot ? 'dB rel' : 'dB'}`,
-      );
+      const valueText = `${closestPoint.smoothedMagnitudeDbRelative.toFixed(1)} ${state.normalizePlot ? 'dB rel' : 'dB'}`;
+      hoverDetails.push(`<span style="color:${measurement.color}">${valueText}</span>`);
     });
 
     hoverLine.setAttribute('x1', hoverLineX.toFixed(1));
     hoverLine.setAttribute('x2', hoverLineX.toFixed(1));
     hoverLine.setAttribute('opacity', '1');
-    hoverLabel.textContent = `Hover: ${formatFrequencyDetailed(hoveredFrequency)} | ${hoverDetails.join(' | ')}`;
+    hoverLabel.innerHTML = `Hover: ${formatFrequencyDetailed(hoveredFrequency)} | ${hoverDetails.join(' | ')}`;
   };
 
   svg.addEventListener('pointermove', (event) => {
