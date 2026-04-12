@@ -1,5 +1,9 @@
 import { app, BrowserWindow } from 'electron';
 import started from 'electron-squirrel-startup';
+import {
+  isHeadlessMeasurementMode,
+  runHeadlessMeasurementMode,
+} from './main/headless';
 import { registerIpcHandlers } from './main/ipc';
 import { createWindow } from './main/window';
 
@@ -9,16 +13,29 @@ if (started) {
 
 registerIpcHandlers();
 
-app.on('ready', createWindow);
+const headlessMeasurementMode = isHeadlessMeasurementMode(process.argv);
+
+app.on('ready', () => {
+  if (headlessMeasurementMode) {
+    void runHeadlessMeasurementMode(process.argv).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[freakish-ears] Headless measurement failed: ${message}`);
+      app.exit(1);
+    });
+    return;
+  }
+
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  if (!headlessMeasurementMode && process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (!headlessMeasurementMode && BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
 });

@@ -11,6 +11,7 @@ import type {
 
 const SOX_SAMPLE_RATE = 48000;
 const SOX_RECORDER_LEAD_IN_MS = 200;
+const SOX_WAVEAUDIO_DEVICE = 'default';
 
 export async function runSoxMeasurement(
   payload: RunSoxMeasurementPayload,
@@ -37,7 +38,9 @@ export async function runSoxMeasurement(
 
     const recorder = spawnLoggedProcess('sox', [
       '-q',
-      '-d',
+      '-t',
+      'waveaudio',
+      SOX_WAVEAUDIO_DEVICE,
       '-r',
       String(SOX_SAMPLE_RATE),
       '-c',
@@ -52,10 +55,21 @@ export async function runSoxMeasurement(
       recordingDurationSeconds.toFixed(3),
     ]);
 
-    await wait(SOX_RECORDER_LEAD_IN_MS);
+    await wait(
+      Math.max(
+        SOX_RECORDER_LEAD_IN_MS,
+        Math.round(payload.preRollSeconds * 1000),
+      ),
+    );
 
     try {
-      await runLoggedProcess('sox', ['-q', sweepPath, '-d']);
+      await runLoggedProcess('sox', [
+        '-q',
+        sweepPath,
+        '-t',
+        'waveaudio',
+        SOX_WAVEAUDIO_DEVICE,
+      ]);
     } catch (error) {
       recorder.child.kill('SIGTERM');
       await recorder.completion.catch(() => undefined);
