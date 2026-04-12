@@ -105,7 +105,7 @@ input {
 }
 
 .field select,
-.field input {
+.field input:not([type='range']) {
   padding: 6px 8px;
   background: var(--input-bg);
   border: 1px solid var(--input-border);
@@ -115,9 +115,31 @@ input {
 }
 
 .field select:focus,
-.field input:focus {
+.field input:not([type='range']):focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.slider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.range-input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.value-chip {
+  min-width: 56px;
+  padding: 4px 8px;
+  text-align: right;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text-muted);
 }
 
 .inline-row {

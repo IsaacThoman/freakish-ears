@@ -62,6 +62,9 @@ const STORAGE_KEY = 'freakish-ears-output-folder';
 const DEFAULT_START_FREQUENCY = 20;
 const DEFAULT_END_FREQUENCY = 20000;
 const DEFAULT_DURATION_SECONDS = 8;
+const MIN_SWEEP_LEVEL_DB = -60;
+const MAX_SWEEP_LEVEL_DB = 0;
+const DEFAULT_SWEEP_LEVEL_DB = -6;
 const DEFAULT_SWEEP_AMPLITUDE = 0.72;
 const PRE_ROLL_SECONDS = 0.35;
 const POST_ROLL_SECONDS = 0.55;
@@ -116,6 +119,14 @@ app.innerHTML = `
           </div>
         </div>
 
+        <div class="field">
+          <label for="volumeInput">Level</label>
+          <div class="slider-row">
+            <input id="volumeInput" class="range-input" type="range" min="${MIN_SWEEP_LEVEL_DB}" max="${MAX_SWEEP_LEVEL_DB}" step="1" value="${DEFAULT_SWEEP_LEVEL_DB}" />
+            <span id="volumeValue" class="value-chip">${DEFAULT_SWEEP_LEVEL_DB} dB</span>
+          </div>
+        </div>
+
         <button id="runMeasurementButton" class="btn btn-primary" type="button">
           Run
         </button>
@@ -161,6 +172,8 @@ const selectedFolder = getElement<HTMLDivElement>('selectedFolder');
 const startFrequencyInput = getElement<HTMLInputElement>('startFrequencyInput');
 const endFrequencyInput = getElement<HTMLInputElement>('endFrequencyInput');
 const durationInput = getElement<HTMLInputElement>('durationInput');
+const volumeInput = getElement<HTMLInputElement>('volumeInput');
+const volumeValue = getElement<HTMLSpanElement>('volumeValue');
 const runMeasurementButton = getElement<HTMLButtonElement>('runMeasurementButton');
 const statusPill = getElement<HTMLDivElement>('statusPill');
 const latencyValue = getElement<HTMLSpanElement>('latencyValue');
@@ -187,11 +200,16 @@ runMeasurementButton.addEventListener('click', () => {
   void runMeasurement();
 });
 
+volumeInput.addEventListener('input', () => {
+  updateVolumeLabel();
+});
+
 navigator.mediaDevices?.addEventListener?.('devicechange', () => {
   void refreshMicrophones(false);
 });
 
 updateSelectedFolder();
+updateVolumeLabel();
 appendLog('Click Refresh to access microphones.');
 void refreshMicrophones(false);
 
@@ -214,6 +232,7 @@ function setBusy(isBusy: boolean): void {
   startFrequencyInput.disabled = isBusy;
   endFrequencyInput.disabled = isBusy;
   durationInput.disabled = isBusy;
+  volumeInput.disabled = isBusy;
   runMeasurementButton.disabled = isBusy;
 }
 
@@ -231,6 +250,10 @@ function appendLog(message: string, tone: LogTone = 'neutral'): void {
 
 function updateSelectedFolder(): void {
   selectedFolder.textContent = state.outputFolder ?? 'None';
+}
+
+function updateVolumeLabel(): void {
+  volumeValue.textContent = `${clamp(Number(volumeInput.value), MIN_SWEEP_LEVEL_DB, MAX_SWEEP_LEVEL_DB).toFixed(0)} dB`;
 }
 
 async function chooseOutputFolder(): Promise<void> {
@@ -312,6 +335,7 @@ async function runMeasurement(): Promise<void> {
   const startFrequency = Number(startFrequencyInput.value);
   const endFrequency = Number(endFrequencyInput.value);
   const durationSeconds = Number(durationInput.value);
+  const sweepLevelDb = Number(volumeInput.value);
 
   if (!outputFolder) {
     setStatus('Choose a save folder before measuring.', 'error');
@@ -329,11 +353,14 @@ async function runMeasurement(): Promise<void> {
     !Number.isFinite(startFrequency) ||
     !Number.isFinite(endFrequency) ||
     !Number.isFinite(durationSeconds) ||
+    !Number.isFinite(sweepLevelDb) ||
     startFrequency < 10 ||
     endFrequency <= startFrequency ||
     endFrequency > 22000 ||
     durationSeconds < 2 ||
-    durationSeconds > 30
+    durationSeconds > 30 ||
+    sweepLevelDb < MIN_SWEEP_LEVEL_DB ||
+    sweepLevelDb > MAX_SWEEP_LEVEL_DB
   ) {
     setStatus('Sweep settings are invalid.', 'error');
     appendLog('Sweep settings must be numeric, ordered, and within range.', 'error');
@@ -350,6 +377,7 @@ async function runMeasurement(): Promise<void> {
       startFrequency,
       endFrequency,
       durationSeconds,
+      sweepLevelDb,
     });
 
     setStatus('Processing response values...', 'working');
@@ -368,7 +396,7 @@ async function runMeasurement(): Promise<void> {
       analysis,
       capture,
       microphoneLabel,
-      { startFrequency, endFrequency, durationSeconds },
+      { startFrequency, endFrequency, durationSeconds, sweepLevelDb },
     );
     const measurementCsv = buildMeasurementCsv(analysis.points);
     const captureWav = encodeWavFile(capture.recording, capture.sampleRate);
@@ -409,6 +437,7 @@ async function recordSweepMeasurement(settings: {
   startFrequency: number;
   endFrequency: number;
   durationSeconds: number;
+  sweepLevelDb: number;
 }): Promise<MeasurementCapture> {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -432,7 +461,9 @@ async function recordSweepMeasurement(settings: {
   const sourceNode = audioContext.createMediaStreamSource(stream);
   const processorNode = audioContext.createScriptProcessor(4096, 1, 1);
   const mutedGain = audioContext.createGain();
+  const playbackGain = audioContext.createGain();
   mutedGain.gain.value = 0;
+  playbackGain.gain.value = Math.pow(10, settings.sweepLevelDb / 20);
 
   const chunks: Float32Array[] = [];
   let sampleCount = 0;
@@ -454,7 +485,8 @@ async function recordSweepMeasurement(settings: {
 
   const sweepNode = audioContext.createBufferSource();
   sweepNode.buffer = sweepBuffer;
-  sweepNode.connect(audioContext.destination);
+  sweepNode.connect(playbackGain);
+  playbackGain.connect(audioContext.destination);
 
   await audioContext.resume();
 
@@ -468,6 +500,7 @@ async function recordSweepMeasurement(settings: {
 
   processorNode.disconnect();
   mutedGain.disconnect();
+  playbackGain.disconnect();
   sourceNode.disconnect();
 
   for (const track of stream.getTracks()) {
@@ -850,6 +883,7 @@ function buildMeasurementJson(
     startFrequency: number;
     endFrequency: number;
     durationSeconds: number;
+    sweepLevelDb: number;
   },
 ): string {
   return JSON.stringify(
