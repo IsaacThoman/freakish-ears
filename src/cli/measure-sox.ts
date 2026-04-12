@@ -1,6 +1,7 @@
 import { saveMeasurementSession } from '../main/files';
 import { runSoxMeasurement } from '../main/sox';
 import { POST_ROLL_SECONDS, PRE_ROLL_SECONDS } from '../renderer/constants';
+import { encodeWavFile } from '../shared/audio';
 import {
   buildMeasurementCsv,
   buildMeasurementJson,
@@ -13,6 +14,9 @@ type CliOptions = {
   endFrequency: number;
   durationSeconds: number;
   sweepLevelDb: number;
+  sampleRate: number;
+  inputChannel: 'left' | 'right' | 'both';
+  outputChannel: 'left' | 'right' | 'both';
   repeat: number;
   pauseMs: number;
 };
@@ -31,6 +35,9 @@ async function main(): Promise<void> {
       endFrequency: options.endFrequency,
       durationSeconds: options.durationSeconds,
       sweepLevelDb: options.sweepLevelDb,
+      sampleRate: options.sampleRate,
+      inputChannel: options.inputChannel,
+      outputChannel: options.outputChannel,
       preRollSeconds: PRE_ROLL_SECONDS,
       postRollSeconds: POST_ROLL_SECONDS,
     });
@@ -62,6 +69,9 @@ async function main(): Promise<void> {
         endFrequency: options.endFrequency,
         durationSeconds: options.durationSeconds,
         sweepLevelDb: options.sweepLevelDb,
+        sampleRate: options.sampleRate,
+        inputChannel: options.inputChannel,
+        outputChannel: options.outputChannel,
       },
       preRollSeconds: PRE_ROLL_SECONDS,
       postRollSeconds: POST_ROLL_SECONDS,
@@ -74,7 +84,7 @@ async function main(): Promise<void> {
       files: [
         {
           name: 'recording.wav',
-          contents: capture.recordingWav,
+          contents: encodeWavFile(capture.recording, capture.sampleRate),
         },
         {
           name: 'values.csv',
@@ -122,6 +132,9 @@ function parseCliOptions(argv: string[]): CliOptions {
     endFrequency: readNumberOption(argv, 'end-frequency', 20000),
     durationSeconds: readNumberOption(argv, 'duration-seconds', 2),
     sweepLevelDb: readNumberOption(argv, 'sweep-level-db', -6),
+    sampleRate: readNumberOption(argv, 'sample-rate', 48000),
+    inputChannel: readChannelOption(argv, 'input-channel', 'both'),
+    outputChannel: readChannelOption(argv, 'output-channel', 'both'),
     repeat,
     pauseMs: readNumberOption(argv, 'pause-ms', 0),
   };
@@ -160,6 +173,15 @@ function readNumberOption(argv: string[], key: string, fallback: number): number
   }
 
   return parsed;
+}
+
+function readChannelOption(
+  argv: string[],
+  key: string,
+  fallback: 'left' | 'right' | 'both',
+): 'left' | 'right' | 'both' {
+  const value = readStringOption(argv, key);
+  return value === 'left' || value === 'right' || value === 'both' ? value : fallback;
 }
 
 function formatTimestampForPath(date: Date): string {

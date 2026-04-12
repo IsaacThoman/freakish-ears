@@ -7,6 +7,8 @@ export const IPC_CHANNELS = {
 
 export type MeasurementBackend = 'web-audio' | 'sox';
 
+export type MeasurementChannelSelection = 'left' | 'right' | 'both';
+
 export type FolderSelectionResult = {
   canceled: boolean;
   folderPath: string | null;
@@ -33,6 +35,9 @@ export type RunSoxMeasurementPayload = {
   endFrequency: number;
   durationSeconds: number;
   sweepLevelDb: number;
+  sampleRate: number;
+  inputChannel: MeasurementChannelSelection;
+  outputChannel: MeasurementChannelSelection;
   preRollSeconds: number;
   postRollSeconds: number;
 };
