@@ -53,10 +53,16 @@ export async function analyzeMeasurement(
 }
 
 async function resolvePythonPath(): Promise<string> {
-  const candidatePaths = [
-    path.resolve(process.cwd(), '.venv', 'bin', 'python3'),
-    path.resolve(process.cwd(), '.venv', 'bin', 'python'),
-  ];
+  const candidatePaths =
+    process.platform === 'win32'
+      ? [
+          path.resolve(process.cwd(), '.venv', 'Scripts', 'python.exe'),
+          path.resolve(process.cwd(), '.venv', 'Scripts', 'python3.exe'),
+        ]
+      : [
+          path.resolve(process.cwd(), '.venv', 'bin', 'python3'),
+          path.resolve(process.cwd(), '.venv', 'bin', 'python'),
+        ];
 
   for (const candidatePath of candidatePaths) {
     try {
@@ -67,7 +73,11 @@ async function resolvePythonPath(): Promise<string> {
     }
   }
 
-  throw new Error('Python virtualenv was not found. Expected .venv/bin/python3.');
+  throw new Error(
+    process.platform === 'win32'
+      ? 'Python virtualenv was not found. Expected .venv\\Scripts\\python.exe.'
+      : 'Python virtualenv was not found. Expected .venv/bin/python3.',
+  );
 }
 
 function float32ArrayToBuffer(values: Float32Array): Buffer {
