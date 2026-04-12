@@ -42,7 +42,9 @@ type ToastState = {
 type MeasurementPoint = {
   frequencyHz: number;
   magnitudeDbRelative: number;
+  phaseDegrees: number;
   smoothedMagnitudeDbRelative: number;
+  smoothedPhaseDegrees: number;
 };
 
 type MeasurementMagnitudeMode = 'relative' | 'spl';
@@ -1284,19 +1286,27 @@ function buildMeasurementPoints(
       highestBin,
     );
     let powerSum = 0;
+    let smoothedRealSum = 0;
+    let smoothedImagSum = 0;
     let binCount = 0;
 
     for (let bin = lowBin; bin <= highBin; bin += 1) {
-      const binMagnitude = Math.hypot(responseReal[bin], responseImag[bin]);
+      const binReal = responseReal[bin];
+      const binImag = responseImag[bin];
+      const binMagnitude = Math.hypot(binReal, binImag);
       powerSum += binMagnitude * binMagnitude;
+      smoothedRealSum += binReal;
+      smoothedImagSum += binImag;
       binCount += 1;
     }
 
     points.push({
       frequencyHz,
       magnitudeDbRelative: 20 * Math.log10(magnitude + 1e-12),
+      phaseDegrees: (Math.atan2(responseImag[centerBin], responseReal[centerBin]) * 180) / Math.PI,
       smoothedMagnitudeDbRelative:
         10 * Math.log10(powerSum / Math.max(1, binCount) + 1e-18),
+      smoothedPhaseDegrees: (Math.atan2(smoothedImagSum, smoothedRealSum) * 180) / Math.PI,
     });
   }
 
@@ -1365,10 +1375,10 @@ function buildMeasurementJson(
 
 function buildMeasurementCsv(points: MeasurementPoint[]): string {
   const header =
-    'frequency_hz,magnitude_db_relative,smoothed_magnitude_db_relative';
+    'frequency_hz,magnitude_db_relative,smoothed_magnitude_db_relative,phase_degrees,smoothed_phase_degrees';
   const rows = points.map(
     (point) =>
-      `${point.frequencyHz.toFixed(3)},${point.magnitudeDbRelative.toFixed(4)},${point.smoothedMagnitudeDbRelative.toFixed(4)}`,
+      `${point.frequencyHz.toFixed(3)},${point.magnitudeDbRelative.toFixed(4)},${point.smoothedMagnitudeDbRelative.toFixed(4)},${point.phaseDegrees.toFixed(4)},${point.smoothedPhaseDegrees.toFixed(4)}`,
   );
 
   return [header, ...rows].join('\n');
@@ -1386,15 +1396,15 @@ function buildRewMeasurementText(measurement: LoadedMeasurement): string {
     '* Measurement data exported by Freakish Ears',
     `* Source: ${measurement.sourcePath ?? 'Freakish Ears'}`,
     `* Dated: ${new Date().toLocaleString()}`,
-    `* Measurement: ${measurement.name}`,
-    exportUnitLabel,
-    '*',
-    '* Freq(Hz) SPL(dB) Phase(degrees)',
-    ...exportPoints.map(
-      (point) =>
-        `${point.frequencyHz.toFixed(6)} ${point.smoothedMagnitudeDbRelative.toFixed(4)} 0.0000`,
-    ),
-  ];
+      `* Measurement: ${measurement.name}`,
+      exportUnitLabel,
+      '*',
+      '* Freq(Hz) SPL(dB) Phase(degrees)',
+      ...exportPoints.map(
+        (point) =>
+          `${point.frequencyHz.toFixed(6)} ${point.smoothedMagnitudeDbRelative.toFixed(4)} ${point.smoothedPhaseDegrees.toFixed(4)}`,
+      ),
+    ];
 
   return lines.join('\n');
 }
@@ -1522,10 +1532,18 @@ function parseCsvMeasurementPoints(contents: string): MeasurementPoint[] {
       continue;
     }
 
-    const [frequencyToken, magnitudeToken, smoothedToken] = trimmed.split(',');
+    const [
+      frequencyToken,
+      magnitudeToken,
+      smoothedToken,
+      phaseToken,
+      smoothedPhaseToken,
+    ] = trimmed.split(',');
     const frequencyHz = Number(frequencyToken);
     const magnitudeDbRelative = Number(magnitudeToken);
     const smoothedMagnitudeDbRelative = Number(smoothedToken);
+    const phaseDegrees = Number(phaseToken);
+    const smoothedPhaseDegrees = Number(smoothedPhaseToken);
 
     if (!Number.isFinite(frequencyHz) || !Number.isFinite(magnitudeDbRelative)) {
       continue;
@@ -1534,9 +1552,15 @@ function parseCsvMeasurementPoints(contents: string): MeasurementPoint[] {
     points.push({
       frequencyHz,
       magnitudeDbRelative,
+      phaseDegrees: Number.isFinite(phaseDegrees) ? phaseDegrees : 0,
       smoothedMagnitudeDbRelative: Number.isFinite(smoothedMagnitudeDbRelative)
         ? smoothedMagnitudeDbRelative
         : magnitudeDbRelative,
+      smoothedPhaseDegrees: Number.isFinite(smoothedPhaseDegrees)
+        ? smoothedPhaseDegrees
+        : Number.isFinite(phaseDegrees)
+          ? phaseDegrees
+          : 0,
     });
   }
 
@@ -1553,9 +1577,10 @@ function parseRewMeasurementPoints(contents: string): MeasurementPoint[] {
       continue;
     }
 
-    const [frequencyToken, magnitudeToken] = trimmed.split(/\s+/u);
+    const [frequencyToken, magnitudeToken, phaseToken] = trimmed.split(/\s+/u);
     const frequencyHz = Number(frequencyToken);
     const magnitudeDb = Number(magnitudeToken);
+    const phaseDegrees = Number(phaseToken);
 
     if (!Number.isFinite(frequencyHz) || !Number.isFinite(magnitudeDb)) {
       continue;
@@ -1564,7 +1589,9 @@ function parseRewMeasurementPoints(contents: string): MeasurementPoint[] {
     points.push({
       frequencyHz,
       magnitudeDbRelative: magnitudeDb,
+      phaseDegrees: Number.isFinite(phaseDegrees) ? phaseDegrees : 0,
       smoothedMagnitudeDbRelative: magnitudeDb,
+      smoothedPhaseDegrees: Number.isFinite(phaseDegrees) ? phaseDegrees : 0,
     });
   }
 
@@ -1582,8 +1609,12 @@ function normalizeMeasurementPoints(rawPoints: unknown[]): MeasurementPoint[] {
     const record = rawPoint as Record<string, unknown>;
     const frequencyHz = Number(record.frequencyHz);
     const magnitudeDbRelative = Number(record.magnitudeDbRelative);
+    const phaseDegrees = Number(record.phaseDegrees);
     const smoothedMagnitudeDbRelative = Number(
       record.smoothedMagnitudeDbRelative ?? record.magnitudeDbRelative,
+    );
+    const smoothedPhaseDegrees = Number(
+      record.smoothedPhaseDegrees ?? record.phaseDegrees,
     );
 
     if (!Number.isFinite(frequencyHz) || !Number.isFinite(magnitudeDbRelative)) {
@@ -1593,9 +1624,15 @@ function normalizeMeasurementPoints(rawPoints: unknown[]): MeasurementPoint[] {
     points.push({
       frequencyHz,
       magnitudeDbRelative,
+      phaseDegrees: Number.isFinite(phaseDegrees) ? phaseDegrees : 0,
       smoothedMagnitudeDbRelative: Number.isFinite(smoothedMagnitudeDbRelative)
         ? smoothedMagnitudeDbRelative
         : magnitudeDbRelative,
+      smoothedPhaseDegrees: Number.isFinite(smoothedPhaseDegrees)
+        ? smoothedPhaseDegrees
+        : Number.isFinite(phaseDegrees)
+          ? phaseDegrees
+          : 0,
     });
   }
 
@@ -1672,19 +1709,27 @@ function resampleMeasurementPoints(
     const upperPoint = points[upperIndex] ?? points.at(-1) ?? points[0];
     const span = upperPoint.frequencyHz - lowerPoint.frequencyHz;
     const interpolation = span > 0 ? (frequencyHz - lowerPoint.frequencyHz) / span : 0;
+    const rawComponents = interpolateMeasurementComponents(
+      lowerPoint.magnitudeDbRelative,
+      lowerPoint.phaseDegrees,
+      upperPoint.magnitudeDbRelative,
+      upperPoint.phaseDegrees,
+      interpolation,
+    );
+    const smoothedComponents = interpolateMeasurementComponents(
+      lowerPoint.smoothedMagnitudeDbRelative,
+      lowerPoint.smoothedPhaseDegrees,
+      upperPoint.smoothedMagnitudeDbRelative,
+      upperPoint.smoothedPhaseDegrees,
+      interpolation,
+    );
 
     resampled.push({
       frequencyHz,
-      magnitudeDbRelative: interpolate(
-        lowerPoint.magnitudeDbRelative,
-        upperPoint.magnitudeDbRelative,
-        interpolation,
-      ),
-      smoothedMagnitudeDbRelative: interpolate(
-        lowerPoint.smoothedMagnitudeDbRelative,
-        upperPoint.smoothedMagnitudeDbRelative,
-        interpolation,
-      ),
+      magnitudeDbRelative: rawComponents.magnitudeDbRelative,
+      phaseDegrees: rawComponents.phaseDegrees,
+      smoothedMagnitudeDbRelative: smoothedComponents.magnitudeDbRelative,
+      smoothedPhaseDegrees: smoothedComponents.phaseDegrees,
     });
   }
 
@@ -1693,6 +1738,40 @@ function resampleMeasurementPoints(
 
 function interpolate(start: number, end: number, ratio: number): number {
   return start + (end - start) * clamp(ratio, 0, 1);
+}
+
+function interpolateMeasurementComponents(
+  startMagnitudeDb: number,
+  startPhaseDegrees: number,
+  endMagnitudeDb: number,
+  endPhaseDegrees: number,
+  ratio: number,
+): Pick<MeasurementPoint, 'magnitudeDbRelative' | 'phaseDegrees'> {
+  const clampedRatio = clamp(ratio, 0, 1);
+  const startMagnitude = Math.pow(10, startMagnitudeDb / 20);
+  const endMagnitude = Math.pow(10, endMagnitudeDb / 20);
+  const startPhaseRadians = (startPhaseDegrees * Math.PI) / 180;
+  const endPhaseRadians = (endPhaseDegrees * Math.PI) / 180;
+  // Interpolate the complex response so wrapped phase does not bend the plotted magnitude.
+  const interpolatedReal = interpolate(
+    startMagnitude * Math.cos(startPhaseRadians),
+    endMagnitude * Math.cos(endPhaseRadians),
+    clampedRatio,
+  );
+  const interpolatedImag = interpolate(
+    startMagnitude * Math.sin(startPhaseRadians),
+    endMagnitude * Math.sin(endPhaseRadians),
+    clampedRatio,
+  );
+  const interpolatedMagnitudeDb =
+    20 * Math.log10(Math.hypot(interpolatedReal, interpolatedImag) + 1e-12);
+  const interpolatedPhaseDegrees =
+    (Math.atan2(interpolatedImag, interpolatedReal) * 180) / Math.PI;
+
+  return {
+    magnitudeDbRelative: interpolatedMagnitudeDb,
+    phaseDegrees: interpolatedPhaseDegrees,
+  };
 }
 
 function addMeasurement(measurement: LoadedMeasurement): void {
