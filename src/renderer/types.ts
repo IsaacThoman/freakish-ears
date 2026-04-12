@@ -16,6 +16,7 @@ export type MeasurementMagnitudeMode = 'relative' | 'spl';
 
 export type MeasurementBackend = 'web-audio' | 'sox';
 export type MeasurementChannelSelection = 'left' | 'right' | 'both';
+export type MeasurementSmoothingMode = 'raw' | `1/${number}`;
 
 export type MeasurementAnalysis = {
   sampleRate: number;
@@ -46,6 +47,8 @@ export type LoadedMeasurement = {
   points: MeasurementPoint[];
   plotPoints: MeasurementPoint[];
 };
+
+export type ReferenceCurve = LoadedMeasurement;
 
 export type ResponsePlotGeometry = {
   width: number;
@@ -85,9 +88,12 @@ export type AppState = {
   measurementBackend: MeasurementBackend;
   splOffsetDb: number;
   normalizePlot: boolean;
+  smoothingMode: MeasurementSmoothingMode;
   measurements: LoadedMeasurement[];
+  referenceCurves: ReferenceCurve[];
   focusedMeasurementId: string | null;
   nextMeasurementIndex: number;
+  nextReferenceIndex: number;
   toast: ToastState | null;
   toastTimeoutId: number;
 };

@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, nativeTheme } from 'electron';
 import started from 'electron-squirrel-startup';
 import {
   isHeadlessMeasurementMode,
@@ -10,6 +10,8 @@ import { createWindow } from './main/window';
 if (started) {
   app.quit();
 }
+
+nativeTheme.themeSource = 'dark';
 
 registerIpcHandlers();
 

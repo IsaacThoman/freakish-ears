@@ -6,6 +6,8 @@ import { getMeasurementPointsForDisplay } from './measurements';
 import type {
   LoadedMeasurement,
   MeasurementPoint,
+  MeasurementSmoothingMode,
+  ReferenceCurve,
   ResponsePlotGeometry,
 } from './types';
 import {
@@ -20,40 +22,63 @@ import {
 export function renderResponsePlot(input: {
   visibleMeasurements: LoadedMeasurement[];
   allMeasurements: LoadedMeasurement[];
+  visibleReferenceCurves: ReferenceCurve[];
+  allReferenceCurves: ReferenceCurve[];
   normalizePlot: boolean;
+  smoothingMode: MeasurementSmoothingMode;
   splOffsetDb: number;
   busy: boolean;
   outputFolder: string | null;
 }): string {
-  if (input.allMeasurements.length === 0) {
+  if (input.allMeasurements.length === 0 && input.allReferenceCurves.length === 0) {
     return `
       <div class="plot-empty-state">
         <span>Run or import measurements to plot response.</span>
       </div>
-      ${renderMeasurementList(input.allMeasurements, input.busy, input.outputFolder)}
+      ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.busy, input.outputFolder)}
     `;
   }
 
-  if (input.visibleMeasurements.length === 0) {
+  if (input.visibleMeasurements.length === 0 && input.visibleReferenceCurves.length === 0) {
     return `
       <div class="plot-empty-state">
-        <span>No measurements are currently selected for display.</span>
+        <span>No measurements or reference curves are currently selected for display.</span>
       </div>
-      ${renderMeasurementList(input.allMeasurements, input.busy, input.outputFolder)}
+      ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.busy, input.outputFolder)}
     `;
   }
+
+  const plottedReferenceCurves = input.visibleReferenceCurves.map((referenceCurve) => ({
+    referenceCurve,
+    points: getMeasurementPointsForDisplay(
+      referenceCurve.plotPoints,
+      referenceCurve,
+      false,
+      0,
+      input.smoothingMode,
+      null,
+    ),
+  }));
+  const referenceNormalizationDb = plottedReferenceCurves[0]
+    ? findClosestPoint(
+        plottedReferenceCurves[0].points,
+        1000,
+      ).smoothedMagnitudeDbRelative
+    : null;
 
   const plottedMeasurements = input.visibleMeasurements.map((measurement) => ({
     measurement,
     points: getMeasurementPointsForDisplay(
-      measurement.plotPoints,
-      measurement,
-      input.normalizePlot,
-      input.splOffsetDb,
-    ),
+        measurement.plotPoints,
+        measurement,
+        input.normalizePlot,
+        input.splOffsetDb,
+        input.smoothingMode,
+        referenceNormalizationDb,
+      ),
   }));
   const geometry = getResponsePlotGeometry(
-    plottedMeasurements.map((entry) => entry.points),
+    [...plottedMeasurements.map((entry) => entry.points), ...plottedReferenceCurves.map((entry) => entry.points)],
   );
   const xTicks = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].filter(
     (frequency) =>
@@ -69,22 +94,35 @@ export function renderResponsePlot(input: {
 
   return `
     <div class="plot-hover" id="plotHover">Hover: --</div>
-    <svg id="responsePlot" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response overlay with logarithmic frequency axis">
+      <svg id="responsePlot" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response overlay with logarithmic frequency axis">
       <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
-          return `<line x1="${geometry.left}" y1="${y.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.07)" />`;
+          return `<line x1="${geometry.left}" y1="${y.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.07)" vector-effect="non-scaling-stroke" />`;
         })
         .join('')}
       ${xTicks
         .map((frequency) => {
           const x = getPlotX(frequency, geometry);
-          return `<line x1="${x.toFixed(1)}" y1="${geometry.top}" x2="${x.toFixed(1)}" y2="${xAxisY}" stroke="rgba(255,255,255,0.06)" />`;
+          return `<line x1="${x.toFixed(1)}" y1="${geometry.top}" x2="${x.toFixed(1)}" y2="${xAxisY}" stroke="rgba(255,255,255,0.06)" vector-effect="non-scaling-stroke" />`;
         })
         .join('')}
-      <line x1="${yAxisX}" y1="${xAxisY}" x2="${geometry.width - geometry.right}" y2="${xAxisY}" stroke="rgba(170,190,228,0.28)" />
-      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${xAxisY}" stroke="rgba(170,190,228,0.28)" />
+      <line x1="${yAxisX}" y1="${xAxisY}" x2="${geometry.width - geometry.right}" y2="${xAxisY}" stroke="rgba(248,161,69,0.24)" vector-effect="non-scaling-stroke" />
+      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${xAxisY}" stroke="rgba(248,161,69,0.24)" vector-effect="non-scaling-stroke" />
+      ${plottedReferenceCurves
+        .map(({ referenceCurve, points }) => {
+          const path = points
+            .map((point) => {
+              const x = getPlotX(point.frequencyHz, geometry);
+              const y = getPlotY(point.smoothedMagnitudeDbRelative, geometry);
+              return `${x.toFixed(1)},${y.toFixed(1)}`;
+            })
+            .join(' ');
+
+          return `<polyline points="${path}" fill="none" stroke="${referenceCurve.color}" stroke-width="2" stroke-dasharray="8 8" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>`;
+        })
+        .join('')}
       ${plottedMeasurements
         .map(({ measurement, points }) => {
           const path = points
@@ -95,39 +133,41 @@ export function renderResponsePlot(input: {
             })
             .join(' ');
 
-          return `<polyline points="${path}" fill="none" stroke="${measurement.color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"></polyline>`;
+          return `<polyline points="${path}" fill="none" stroke="${measurement.color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>`;
         })
         .join('')}
-      <line id="plotHoverLine" x1="0" y1="${geometry.top}" x2="0" y2="${xAxisY}" stroke="#7ee7ff" stroke-width="1" opacity="0"></line>
+      <line id="plotHoverLine" x1="0" y1="${geometry.top}" x2="0" y2="${xAxisY}" stroke="#f8a145" stroke-width="1" opacity="0" vector-effect="non-scaling-stroke"></line>
       ${input.visibleMeasurements
         .map(
           (measurement, index) =>
-            `<circle class="plot-hover-dot" data-hover-index="${index}" cx="0" cy="0" r="4" fill="${measurement.color}" stroke="#0d0d0f" stroke-width="1.5" opacity="0"></circle>`,
+            `<circle class="plot-hover-dot" data-hover-index="${index}" cx="0" cy="0" r="4" fill="${measurement.color}" stroke="#0d0d0f" stroke-width="1.5" opacity="0" vector-effect="non-scaling-stroke"></circle>`,
         )
         .join('')}
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
-          return `<text x="${geometry.left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="plot-axis-text">${formatDbLabel(value)}</text>`;
-        })
-        .join('')}
+            return `<text x="${geometry.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="plot-axis-text">${formatDbLabel(value)}</text>`;
+         })
+         .join('')}
       ${xTicks
         .map((frequency) => {
           const x = getPlotX(frequency, geometry);
-          return `<text x="${x.toFixed(1)}" y="${geometry.height - 10}" text-anchor="middle" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
-        })
-        .join('')}
+          return `<text x="${x.toFixed(1)}" y="${geometry.height - 42}" text-anchor="middle" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
+         })
+         .join('')}
       <text x="${(geometry.left + (geometry.width - geometry.right)) / 2}" y="${geometry.height - 12}" text-anchor="middle" class="plot-axis-label">Frequency (Hz, log)</text>
-      <text x="22" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 22 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">${input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)'}</text>
+      <text x="28" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 28 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">${input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)'}</text>
     </svg>
-    ${renderMeasurementList(input.allMeasurements, input.busy, input.outputFolder)}
+    ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.busy, input.outputFolder)}
   `;
 }
 
 export function attachPlotInteractions(input: {
   plotCard: HTMLDivElement;
   measurements: LoadedMeasurement[];
+  referenceCurves: ReferenceCurve[];
   normalizePlot: boolean;
+  smoothingMode: MeasurementSmoothingMode;
   splOffsetDb: number;
 }): void {
   const svg = input.plotCard.querySelector<SVGSVGElement>('#responsePlot');
@@ -150,14 +190,40 @@ export function attachPlotInteractions(input: {
   const plottedMeasurements = input.measurements.map((measurement) => ({
     measurement,
     points: getMeasurementPointsForDisplay(
-      measurement.plotPoints,
-      measurement,
-      input.normalizePlot,
-      input.splOffsetDb,
-    ),
+        measurement.plotPoints,
+        measurement,
+        input.normalizePlot,
+        input.splOffsetDb,
+        input.smoothingMode,
+        input.referenceCurves[0]
+          ? findClosestPoint(
+              getMeasurementPointsForDisplay(
+                input.referenceCurves[0].plotPoints,
+                input.referenceCurves[0],
+                false,
+                0,
+                input.smoothingMode,
+                null,
+              ),
+              1000,
+            ).smoothedMagnitudeDbRelative
+          : null,
+      ),
   }));
   const geometry = getResponsePlotGeometry(
-    plottedMeasurements.map((entry) => entry.points),
+    [
+      ...plottedMeasurements.map((entry) => entry.points),
+      ...input.referenceCurves.map((referenceCurve) =>
+        getMeasurementPointsForDisplay(
+          referenceCurve.plotPoints,
+          referenceCurve,
+          false,
+          0,
+          input.smoothingMode,
+          null,
+        ),
+      ),
+    ],
   );
 
   const updateHover = (clientX: number) => {
@@ -201,6 +267,7 @@ export function attachPlotInteractions(input: {
 
 function renderMeasurementList(
   measurements: LoadedMeasurement[],
+  referenceCurves: ReferenceCurve[],
   busy: boolean,
   outputFolder: string | null,
 ): string {
@@ -232,6 +299,29 @@ function renderMeasurementList(
               )
               .join('')
       }
+      <div class="measurement-list-header">Reference curves</div>
+      ${
+        referenceCurves.length === 0
+          ? '<div class="measurement-empty">No reference curves loaded.</div>'
+          : referenceCurves
+              .map(
+                (referenceCurve) => `
+                  <div class="measurement-row${referenceCurve.visible ? '' : ' is-hidden'}">
+                    <label class="measurement-toggle" title="${escapeHtml(referenceCurve.sourcePath ?? referenceCurve.name)}">
+                      <input type="checkbox" data-reference-toggle="${referenceCurve.id}" ${referenceCurve.visible ? 'checked' : ''} />
+                      <span class="measurement-swatch measurement-swatch-reference"></span>
+                      <span class="measurement-name">${escapeHtml(referenceCurve.name)}</span>
+                    </label>
+                    <div class="measurement-actions">
+                      <button class="btn btn-secondary measurement-remove-button" type="button" data-reference-remove="${referenceCurve.id}" ${busy ? 'disabled' : ''}>
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                `,
+              )
+              .join('')
+      }
     </div>
   `;
 }
@@ -249,11 +339,11 @@ function getResponsePlotGeometry(
 
   return {
     width: 960,
-    height: 320,
-    left: 72,
+    height: 356,
+    left: 84,
     right: 24,
     top: 18,
-    bottom: 56,
+    bottom: 94,
     minFrequency:
       frequencies.length > 0 ? Math.min(...frequencies) : DEFAULT_START_FREQUENCY,
     maxFrequency:

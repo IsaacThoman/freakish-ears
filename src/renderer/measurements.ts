@@ -12,8 +12,12 @@ import type {
   MeasurementImport,
   MeasurementMagnitudeMode,
   MeasurementPoint,
+  MeasurementSmoothingMode,
   MeasurementSummary,
+  ReferenceCurve,
 } from './types';
+
+const REFERENCE_CURVE_COLOR = '#7d7d7d';
 import {
   clamp,
   findClosestPoint,
@@ -89,6 +93,8 @@ export function buildRewMeasurementText(input: {
     input.measurement,
     false,
     input.splOffsetDb,
+    '1/12',
+    null,
   );
   const exportUnitLabel =
     input.measurement.magnitudeMode === 'relative' && input.splOffsetDb !== 0
@@ -170,6 +176,9 @@ export function parseImportedMeasurementFile(
   } else if (looksLikeCsvMeasurement(contents)) {
     parsedPoints = parseCsvMeasurementPoints(contents);
     magnitudeMode = 'relative';
+  } else if (looksLikeTargetCurveMeasurement(contents)) {
+    parsedPoints = parseTargetCurveMeasurementPoints(contents);
+    magnitudeMode = 'spl';
   } else {
     parsedPoints = parseRewMeasurementPoints(contents);
     magnitudeMode = inferTextMeasurementMagnitudeMode(contents);
@@ -228,26 +237,105 @@ export function createMeasurementFromAnalysis(
   );
 }
 
+export function createReferenceCurve(
+  input: MeasurementImport,
+  referenceIndex: number,
+): ReferenceCurve {
+  return {
+    id: `reference-${referenceIndex}`,
+    name: input.name,
+    exportName: sanitizeMeasurementName(input.exportName),
+    color: REFERENCE_CURVE_COLOR,
+    visible: true,
+    magnitudeMode: 'spl',
+    sourcePath: input.sourcePath,
+    summary: input.summary,
+    points: input.points,
+    plotPoints: buildPlotPoints(input.points),
+  };
+}
+
 export function getMeasurementPointsForDisplay(
   points: MeasurementPoint[],
   measurement: LoadedMeasurement,
   normalizePlot: boolean,
   splOffsetDb: number,
+  smoothingMode: MeasurementSmoothingMode,
+  referenceNormalizationDb: number | null,
 ): MeasurementPoint[] {
   const totalOffsetDb = normalizePlot
-    ? -findClosestPoint(points, PLOT_NORMALIZATION_FREQUENCY_HZ)
+    ? (referenceNormalizationDb ?? 0) -
+      findClosestPoint(points, PLOT_NORMALIZATION_FREQUENCY_HZ)
         .smoothedMagnitudeDbRelative
     : getMeasurementCalibrationOffsetDb(measurement, splOffsetDb);
 
-  if (totalOffsetDb === 0) {
-    return points;
-  }
-
-  return points.map((point) => ({
+  const offsetPoints = totalOffsetDb === 0
+    ? points
+    : points.map((point) => ({
     ...point,
     magnitudeDbRelative: point.magnitudeDbRelative + totalOffsetDb,
     smoothedMagnitudeDbRelative: point.smoothedMagnitudeDbRelative + totalOffsetDb,
   }));
+
+  return applyMeasurementSmoothing(offsetPoints, smoothingMode);
+}
+
+function applyMeasurementSmoothing(
+  points: MeasurementPoint[],
+  smoothingMode: MeasurementSmoothingMode,
+): MeasurementPoint[] {
+  if (smoothingMode === 'raw') {
+    return points.map((point) => ({
+      ...point,
+      smoothedMagnitudeDbRelative: point.magnitudeDbRelative,
+      smoothedPhaseDegrees: point.phaseDegrees,
+    }));
+  }
+
+  const octaveDivisor = parseSmoothingDivisor(smoothingMode);
+  const widthRatio = Math.pow(2, 1 / (2 * octaveDivisor));
+
+  return points.map((point) => {
+    const lowFrequency = point.frequencyHz / widthRatio;
+    const highFrequency = point.frequencyHz * widthRatio;
+    const window = points.filter(
+      (candidate) =>
+        candidate.frequencyHz >= lowFrequency && candidate.frequencyHz <= highFrequency,
+    );
+    const smoothedWindow = window.length > 0 ? window : [point];
+    const meanPower =
+      smoothedWindow.reduce(
+        (total, candidate) =>
+          total + Math.pow(10, candidate.magnitudeDbRelative / 10),
+        0,
+      ) / smoothedWindow.length;
+    const complex = smoothedWindow.reduce(
+      (total, candidate) => {
+        const magnitude = Math.pow(10, candidate.magnitudeDbRelative / 20);
+        const phaseRadians = (candidate.phaseDegrees * Math.PI) / 180;
+        return {
+          real: total.real + magnitude * Math.cos(phaseRadians),
+          imag: total.imag + magnitude * Math.sin(phaseRadians),
+        };
+      },
+      { real: 0, imag: 0 },
+    );
+
+    return {
+      ...point,
+      smoothedMagnitudeDbRelative: 10 * Math.log10(meanPower + 1e-18),
+      smoothedPhaseDegrees: (Math.atan2(complex.imag, complex.real) * 180) / Math.PI,
+    };
+  });
+}
+
+function parseSmoothingDivisor(smoothingMode: MeasurementSmoothingMode): number {
+  if (smoothingMode === 'raw') {
+    return 1;
+  }
+
+  const divisor = Number(smoothingMode.split('/')[1]);
+  return Number.isFinite(divisor) && divisor > 0 ? divisor : 12;
 }
 
 function getMeasurementCalibrationOffsetDb(
@@ -280,6 +368,10 @@ function inferJsonMeasurementMagnitudeMode(
 
 function inferTextMeasurementMagnitudeMode(contents: string): MeasurementMagnitudeMode {
   const lowerContents = contents.toLowerCase();
+  if (lowerContents.includes('breakpoints') && lowerContents.includes('lowlimithz')) {
+    return 'spl';
+  }
+
   if (
     lowerContents.includes('measurement data exported by freakish ears') ||
     lowerContents.includes('relative db using the plotted response trace') ||
@@ -298,7 +390,12 @@ function looksLikeCsvMeasurement(contents: string): boolean {
     .map((line) => line.trim())
     .find((line) => line.length > 0);
 
-  return firstLine?.toLowerCase().includes('frequency_hz') ?? false;
+  return firstLine?.includes(',') ?? false;
+}
+
+function looksLikeTargetCurveMeasurement(contents: string): boolean {
+  const upperContents = contents.toUpperCase();
+  return upperContents.includes('BREAKPOINTS') && upperContents.includes('LOWLIMITHZ');
 }
 
 function parseCsvMeasurementPoints(contents: string): MeasurementPoint[] {
@@ -307,7 +404,7 @@ function parseCsvMeasurementPoints(contents: string): MeasurementPoint[] {
   for (const line of contents.split(/\r?\n/u)) {
     const trimmed = line.trim();
 
-    if (!trimmed || trimmed.startsWith('frequency_hz')) {
+    if (!trimmed || trimmed.toLowerCase().startsWith('frequency_hz')) {
       continue;
     }
 
@@ -371,6 +468,45 @@ function parseRewMeasurementPoints(contents: string): MeasurementPoint[] {
       phaseDegrees: Number.isFinite(phaseDegrees) ? phaseDegrees : 0,
       smoothedMagnitudeDbRelative: magnitudeDb,
       smoothedPhaseDegrees: Number.isFinite(phaseDegrees) ? phaseDegrees : 0,
+    });
+  }
+
+  return ensureMeasurementPoints(points);
+}
+
+function parseTargetCurveMeasurementPoints(contents: string): MeasurementPoint[] {
+  const points: MeasurementPoint[] = [];
+  const lines = contents.split(/\r?\n/u).map((line) => line.trim());
+  const breakpointsIndex = lines.findIndex((line) => line.toUpperCase() === 'BREAKPOINTS');
+
+  if (breakpointsIndex < 0) {
+    throw new Error('Target curve file does not contain BREAKPOINTS.');
+  }
+
+  for (let index = breakpointsIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) {
+      continue;
+    }
+
+    if (/^[A-Z]+/u.test(line)) {
+      break;
+    }
+
+    const [frequencyToken, magnitudeToken] = line.split(/\s+/u);
+    const frequencyHz = Number(frequencyToken);
+    const magnitudeDb = Number(magnitudeToken);
+
+    if (!Number.isFinite(frequencyHz) || !Number.isFinite(magnitudeDb)) {
+      continue;
+    }
+
+    points.push({
+      frequencyHz,
+      magnitudeDbRelative: magnitudeDb,
+      phaseDegrees: 0,
+      smoothedMagnitudeDbRelative: magnitudeDb,
+      smoothedPhaseDegrees: 0,
     });
   }
 

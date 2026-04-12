@@ -1,10 +1,12 @@
 import './index.css';
+import logoUrl from './assets/dutocal-logo.webp';
 
 import {
   DEFAULT_MEASUREMENT_BACKEND,
   DEFAULT_DURATION_SECONDS,
   DEFAULT_END_FREQUENCY,
   DEFAULT_SAMPLE_RATE,
+  DEFAULT_SMOOTHING_MODE,
   DEFAULT_SPL_OFFSET_DB,
   DEFAULT_START_FREQUENCY,
   DEFAULT_SWEEP_LEVEL_DB,
@@ -15,6 +17,8 @@ import {
   POST_ROLL_SECONDS,
   PRE_ROLL_SECONDS,
   SAMPLE_RATE_OPTIONS,
+  SMOOTHING_MODE_OPTIONS,
+  SMOOTHING_MODE_STORAGE_KEY,
   SPL_OFFSET_STORAGE_KEY,
   STORAGE_KEY,
 } from './renderer/constants';
@@ -23,6 +27,7 @@ import {
   buildMeasurementCsv,
   buildMeasurementJson,
   buildRewMeasurementText,
+  createReferenceCurve,
   createLoadedMeasurement,
   createMeasurementFromAnalysis,
   parseImportedMeasurementFile,
@@ -34,6 +39,8 @@ import type {
   LogTone,
   MeasurementBackend,
   MeasurementChannelSelection,
+  MeasurementSmoothingMode,
+  ReferenceCurve,
   StatusTone,
   ToastState,
 } from './renderer/types';
@@ -54,7 +61,7 @@ if (!app) {
 app.innerHTML = `
   <main class="shell">
     <header class="header">
-      <h1>Freakish Ears</h1>
+      <img class="header-logo" src="${logoUrl}" alt="dutocal" />
     </header>
 
     <section class="grid">
@@ -114,6 +121,15 @@ app.innerHTML = `
             Folder
           </button>
           <div id="selectedFolder" class="folder-chip">None</div>
+        </div>
+
+        <div class="folder-row">
+          <button id="saveConfigButton" class="btn btn-secondary" type="button">
+            Save Config
+          </button>
+          <button id="importConfigButton" class="btn btn-secondary" type="button">
+            Import Config
+          </button>
         </div>
 
         <span class="section-title">Sweep</span>
@@ -186,13 +202,24 @@ app.innerHTML = `
               <input id="normalizePlotToggle" type="checkbox" />
               <span>Normalize @ 1 kHz</span>
             </label>
+            <label class="plot-smoothing" for="smoothingModeSelect">
+              <span>Smoothing</span>
+              <select id="smoothingModeSelect">
+                ${SMOOTHING_MODE_OPTIONS.map((value) => `<option value="${value}">${formatSmoothingModeLabel(value)}</option>`).join('')}
+              </select>
+            </label>
             <button id="importMeasurementsButton" class="btn btn-secondary" type="button">
               Import
+            </button>
+            <button id="importReferenceButton" class="btn btn-secondary" type="button">
+              Import Ref
             </button>
           </div>
         </div>
 
-        <input id="measurementFileInput" type="file" accept=".txt,.csv,.json,text/plain,application/json" multiple hidden />
+        <input id="measurementFileInput" type="file" accept=".txt,.csv,.json,.targetcurve,text/plain,application/json" multiple hidden />
+        <input id="referenceFileInput" type="file" accept=".txt,.csv,.targetcurve,text/plain" multiple hidden />
+        <input id="configFileInput" type="file" accept=".json,application/json,text/plain" hidden />
 
         <div id="plotCard" class="plot-card">
           <span style="color:var(--text-muted);font-size:11px">Run or import measurements to plot response</span>
@@ -212,6 +239,8 @@ const sampleRateSelect = getElement<HTMLSelectElement>('sampleRateSelect');
 const inputChannelSelect = getElement<HTMLSelectElement>('inputChannelSelect');
 const refreshDevicesButton = getElement<HTMLButtonElement>('refreshDevicesButton');
 const chooseFolderButton = getElement<HTMLButtonElement>('chooseFolderButton');
+const saveConfigButton = getElement<HTMLButtonElement>('saveConfigButton');
+const importConfigButton = getElement<HTMLButtonElement>('importConfigButton');
 const selectedFolder = getElement<HTMLDivElement>('selectedFolder');
 const outputChannelSelect = getElement<HTMLSelectElement>('outputChannelSelect');
 const outputSelect = getElement<HTMLSelectElement>('outputSelect');
@@ -228,8 +257,12 @@ const peakValue = getElement<HTMLSpanElement>('peakValue');
 const rmsValue = getElement<HTMLSpanElement>('rmsValue');
 const savedPathValue = getElement<HTMLSpanElement>('savedPathValue');
 const importMeasurementsButton = getElement<HTMLButtonElement>('importMeasurementsButton');
+const importReferenceButton = getElement<HTMLButtonElement>('importReferenceButton');
 const normalizePlotToggle = getElement<HTMLInputElement>('normalizePlotToggle');
+const smoothingModeSelect = getElement<HTMLSelectElement>('smoothingModeSelect');
 const measurementFileInput = getElement<HTMLInputElement>('measurementFileInput');
+const referenceFileInput = getElement<HTMLInputElement>('referenceFileInput');
+const configFileInput = getElement<HTMLInputElement>('configFileInput');
 const plotCard = getElement<HTMLDivElement>('plotCard');
 const logList = getElement<HTMLUListElement>('logList');
 const toastButton = getElement<HTMLButtonElement>('toastButton');
@@ -240,15 +273,26 @@ const state: AppState = {
   measurementBackend: readStoredMeasurementBackend(),
   splOffsetDb: readStoredNumber(SPL_OFFSET_STORAGE_KEY, DEFAULT_SPL_OFFSET_DB),
   normalizePlot: localStorage.getItem(NORMALIZE_PLOT_STORAGE_KEY) === 'true',
+  smoothingMode: readStoredSmoothingMode(),
   measurements: [],
+  referenceCurves: [],
   focusedMeasurementId: null,
   nextMeasurementIndex: 1,
+  nextReferenceIndex: 1,
   toast: null,
   toastTimeoutId: 0,
 };
 
 chooseFolderButton.addEventListener('click', () => {
   void chooseOutputFolder();
+});
+
+saveConfigButton.addEventListener('click', () => {
+  void saveConfiguration();
+});
+
+importConfigButton.addEventListener('click', () => {
+  configFileInput.click();
 });
 
 measurementBackendSelect.addEventListener('change', () => {
@@ -265,12 +309,34 @@ importMeasurementsButton.addEventListener('click', () => {
   measurementFileInput.click();
 });
 
+importReferenceButton.addEventListener('click', () => {
+  referenceFileInput.click();
+});
+
 measurementFileInput.addEventListener('change', () => {
   const files = Array.from(measurementFileInput.files ?? []);
   measurementFileInput.value = '';
 
   if (files.length > 0) {
     void importMeasurementFiles(files);
+  }
+});
+
+referenceFileInput.addEventListener('change', () => {
+  const files = Array.from(referenceFileInput.files ?? []);
+  referenceFileInput.value = '';
+
+  if (files.length > 0) {
+    void importReferenceFiles(files);
+  }
+});
+
+configFileInput.addEventListener('change', () => {
+  const file = configFileInput.files?.[0] ?? null;
+  configFileInput.value = '';
+
+  if (file) {
+    void importConfiguration(file);
   }
 });
 
@@ -285,11 +351,15 @@ plotCard.addEventListener('change', (event) => {
   }
 
   const measurementId = target.dataset.measurementToggle;
-  if (!measurementId) {
+  if (measurementId) {
+    setMeasurementVisibility(measurementId, target.checked);
     return;
   }
 
-  setMeasurementVisibility(measurementId, target.checked);
+  const referenceId = target.dataset.referenceToggle;
+  if (referenceId) {
+    setReferenceVisibility(referenceId, target.checked);
+  }
 });
 
 plotCard.addEventListener('click', (event) => {
@@ -308,6 +378,11 @@ plotCard.addEventListener('click', (event) => {
     exportButton instanceof HTMLButtonElement
       ? exportButton.dataset.measurementExport
       : undefined;
+  const referenceRemoveButton = target.closest('[data-reference-remove]');
+  const referenceId =
+    referenceRemoveButton instanceof HTMLButtonElement
+      ? referenceRemoveButton.dataset.referenceRemove
+      : undefined;
 
   if (measurementId) {
     removeMeasurement(measurementId);
@@ -316,6 +391,11 @@ plotCard.addEventListener('click', (event) => {
 
   if (exportMeasurementId) {
     void exportMeasurement(exportMeasurementId);
+    return;
+  }
+
+  if (referenceId) {
+    removeReferenceCurve(referenceId);
   }
 });
 
@@ -345,6 +425,12 @@ normalizePlotToggle.addEventListener('change', () => {
   renderMeasurements();
 });
 
+smoothingModeSelect.addEventListener('change', () => {
+  state.smoothingMode = getSelectedSmoothingMode();
+  localStorage.setItem(SMOOTHING_MODE_STORAGE_KEY, state.smoothingMode);
+  renderMeasurements();
+});
+
 toastButton.addEventListener('click', () => {
   const toast = state.toast;
   if (!toast) {
@@ -364,6 +450,7 @@ updateMeasurementBackendUi();
 syncVolumeControls('slider');
 syncSplOffsetControl(true);
 normalizePlotToggle.checked = state.normalizePlot;
+smoothingModeSelect.value = state.smoothingMode;
 hideToast();
 updateMeasurementActionState();
 appendLog('Click Refresh to access microphones and outputs.');
@@ -387,6 +474,8 @@ function setBusy(isBusy: boolean): void {
   microphoneSelect.disabled = isBusy;
   refreshDevicesButton.disabled = isBusy;
   chooseFolderButton.disabled = isBusy;
+  saveConfigButton.disabled = isBusy;
+  importConfigButton.disabled = isBusy;
   outputChannelSelect.disabled = isBusy;
   outputSelect.disabled = isBusy;
   startFrequencyInput.disabled = isBusy;
@@ -396,12 +485,15 @@ function setBusy(isBusy: boolean): void {
   volumeNumberInput.disabled = isBusy;
   runMeasurementButton.disabled = isBusy;
   measurementFileInput.disabled = isBusy;
+  referenceFileInput.disabled = isBusy;
+  configFileInput.disabled = isBusy;
   measurementBackendSelect.disabled = isBusy;
+  smoothingModeSelect.disabled = isBusy;
   updateMeasurementBackendUi();
 
   updateMeasurementActionState();
 
-  if (state.measurements.length > 0) {
+  if (state.measurements.length > 0 || state.referenceCurves.length > 0) {
     renderMeasurements();
   }
 }
@@ -422,13 +514,16 @@ function updateSelectedFolder(): void {
   selectedFolder.textContent = state.outputFolder ?? 'None';
   updateMeasurementActionState();
 
-  if (state.measurements.length > 0) {
+  if (state.measurements.length > 0 || state.referenceCurves.length > 0) {
     renderMeasurements();
   }
 }
 
 function updateMeasurementActionState(): void {
   importMeasurementsButton.disabled = state.busy;
+  importReferenceButton.disabled = state.busy;
+  saveConfigButton.disabled = state.busy;
+  importConfigButton.disabled = state.busy;
 }
 
 function updateMeasurementBackendUi(): void {
@@ -905,6 +1000,14 @@ function takeMeasurement(importedMeasurement: Parameters<typeof createLoadedMeas
   return measurement;
 }
 
+function takeReferenceCurve(
+  importedMeasurement: Parameters<typeof createReferenceCurve>[0],
+): ReferenceCurve {
+  const referenceCurve = createReferenceCurve(importedMeasurement, state.nextReferenceIndex);
+  state.nextReferenceIndex += 1;
+  return referenceCurve;
+}
+
 function takeMeasurementFromAnalysis(
   analysis: Parameters<typeof createMeasurementFromAnalysis>[0],
   sessionDirectory: string,
@@ -924,10 +1027,29 @@ function addMeasurement(measurement: LoadedMeasurement): void {
   renderMeasurements();
 }
 
+function addReferenceCurve(referenceCurve: ReferenceCurve): void {
+  state.referenceCurves = [
+    ...state.referenceCurves.map((entry) => ({ ...entry, visible: false })),
+    referenceCurve,
+  ];
+  renderMeasurements();
+}
+
 function setMeasurementVisibility(measurementId: string, visible: boolean): void {
   state.measurements = state.measurements.map((measurement) =>
     measurement.id === measurementId ? { ...measurement, visible } : measurement,
   );
+  renderMeasurements();
+}
+
+function setReferenceVisibility(referenceId: string, visible: boolean): void {
+  state.referenceCurves = state.referenceCurves.map((referenceCurve) => {
+    if (referenceCurve.id === referenceId) {
+      return { ...referenceCurve, visible };
+    }
+
+    return visible ? { ...referenceCurve, visible: false } : referenceCurve;
+  });
   renderMeasurements();
 }
 
@@ -951,9 +1073,28 @@ function removeMeasurement(measurementId: string): void {
   renderMeasurements();
 }
 
+function removeReferenceCurve(referenceId: string): void {
+  const removedReference = state.referenceCurves.find(
+    (referenceCurve) => referenceCurve.id === referenceId,
+  );
+
+  state.referenceCurves = state.referenceCurves.filter(
+    (referenceCurve) => referenceCurve.id !== referenceId,
+  );
+
+  if (removedReference) {
+    appendLog(`Removed reference curve ${removedReference.name}.`);
+  }
+
+  renderMeasurements();
+}
+
 function renderMeasurements(): void {
   const visibleMeasurements = state.measurements.filter(
     (measurement) => measurement.visible,
+  );
+  const visibleReferenceCurves = state.referenceCurves.filter(
+    (referenceCurve) => referenceCurve.visible,
   );
 
   if (
@@ -968,7 +1109,10 @@ function renderMeasurements(): void {
   plotCard.innerHTML = renderResponsePlot({
     visibleMeasurements,
     allMeasurements: state.measurements,
+    visibleReferenceCurves,
+    allReferenceCurves: state.referenceCurves,
     normalizePlot: state.normalizePlot,
+    smoothingMode: state.smoothingMode,
     splOffsetDb: state.splOffsetDb,
     busy: state.busy,
     outputFolder: state.outputFolder,
@@ -976,7 +1120,9 @@ function renderMeasurements(): void {
   attachPlotInteractions({
     plotCard,
     measurements: visibleMeasurements,
+    referenceCurves: visibleReferenceCurves,
     normalizePlot: state.normalizePlot,
+    smoothingMode: state.smoothingMode,
     splOffsetDb: state.splOffsetDb,
   });
   updateMeasurementSummary();
@@ -1032,6 +1178,201 @@ function getSelectedMeasurementBackend(): MeasurementBackend {
   return measurementBackendSelect.value === 'sox' ? 'sox' : 'web-audio';
 }
 
+async function importReferenceFiles(files: File[]): Promise<void> {
+  if (state.busy || files.length === 0) {
+    return;
+  }
+
+  const importedReferences: ReferenceCurve[] = [];
+  const importFailures: string[] = [];
+
+  try {
+    setBusy(true);
+    setStatus('Importing reference curves...', 'working');
+
+    for (const file of files) {
+      try {
+        const contents = await file.text();
+        const imported = parseImportedMeasurementFile(file, contents);
+        importedReferences.push(takeReferenceCurve(imported));
+      } catch (error) {
+        importFailures.push(`${file.name}: ${getErrorMessage(error)}`);
+      }
+    }
+
+    for (const referenceCurve of importedReferences) {
+      addReferenceCurve(referenceCurve);
+    }
+
+    if (importedReferences.length > 0) {
+      setStatus(
+        `Imported ${importedReferences.length} reference curve${importedReferences.length === 1 ? '' : 's'}.`,
+        'success',
+      );
+      appendLog(
+        `Imported ${importedReferences.length} reference curve${importedReferences.length === 1 ? '' : 's'} for target overlay and normalization.`,
+        'success',
+      );
+    }
+
+    if (importFailures.length > 0) {
+      for (const failure of importFailures) {
+        appendLog(`Reference import failed: ${failure}`, 'error');
+      }
+
+      if (importedReferences.length === 0) {
+        setStatus('Unable to import the selected reference curves.', 'error');
+      }
+    }
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function saveConfiguration(): Promise<void> {
+  if (state.busy) {
+    return;
+  }
+
+  const outputFolder = state.outputFolder;
+  if (!outputFolder) {
+    setStatus('Choose a save folder before exporting a config.', 'error');
+    appendLog('Config export aborted because no save folder is selected.', 'error');
+    return;
+  }
+
+  try {
+    setBusy(true);
+    setStatus('Saving configuration...', 'working');
+
+    const payload = {
+      savedAt: new Date().toISOString(),
+      backend: getSelectedMeasurementBackend(),
+      sampleRate: getSelectedSampleRate(),
+      inputChannel: getSelectedChannel(inputChannelSelect),
+      outputChannel: getSelectedChannel(outputChannelSelect),
+      inputDeviceId: microphoneSelect.value,
+      inputDeviceLabel: microphoneSelect.selectedOptions[0]?.textContent ?? null,
+      outputDeviceId: outputSelect.value,
+      outputDeviceLabel: outputSelect.selectedOptions[0]?.textContent ?? null,
+      startFrequency: Number(startFrequencyInput.value),
+      endFrequency: Number(endFrequencyInput.value),
+      durationSeconds: Number(durationInput.value),
+      sweepLevelDb: Number(volumeInput.value),
+      splOffsetDb: Number(splOffsetInput.value),
+      smoothingMode: getSelectedSmoothingMode(),
+      normalizePlot: normalizePlotToggle.checked,
+    };
+
+    const saveResult = await window.freakishEars.saveMeasurementSession({
+      folderPath: outputFolder,
+      sessionName: `configuration-${formatTimestampForPath(new Date())}`,
+      files: [
+        {
+          name: 'measurement-config.json',
+          contents: new TextEncoder().encode(JSON.stringify(payload, null, 2)),
+        },
+      ],
+    });
+
+    setStatus('Configuration saved.', 'success');
+    appendLog(`Saved configuration to ${saveResult.filePaths[0] ?? saveResult.sessionDirectory}.`, 'success');
+    showToast({
+      message: 'Configuration saved',
+      actionLabel: 'View in Finder',
+      actionPath: saveResult.filePaths[0] ?? saveResult.sessionDirectory,
+    });
+  } catch (error) {
+    const message = getErrorMessage(error);
+    setStatus(`Configuration save failed: ${message}`, 'error');
+    appendLog(`Configuration save failed: ${message}`, 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function importConfiguration(file: File): Promise<void> {
+  if (state.busy) {
+    return;
+  }
+
+  try {
+    setBusy(true);
+    setStatus('Importing configuration...', 'working');
+
+    const parsed = JSON.parse(await file.text()) as Record<string, unknown>;
+    applyImportedConfiguration(parsed);
+
+    setStatus('Configuration imported.', 'success');
+    appendLog(`Imported configuration from ${file.name}.`, 'success');
+  } catch (error) {
+    const message = getErrorMessage(error);
+    setStatus(`Configuration import failed: ${message}`, 'error');
+    appendLog(`Configuration import failed: ${message}`, 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
+function applyImportedConfiguration(config: Record<string, unknown>): void {
+  const backend = config.backend === 'sox' ? 'sox' : 'web-audio';
+  measurementBackendSelect.value = backend;
+  state.measurementBackend = backend;
+  localStorage.setItem(MEASUREMENT_BACKEND_STORAGE_KEY, backend);
+
+  const sampleRate = Number(config.sampleRate);
+  if (Number.isFinite(sampleRate)) {
+    sampleRateSelect.value = String(sampleRate);
+  }
+
+  inputChannelSelect.value =
+    config.inputChannel === 'left' || config.inputChannel === 'right'
+      ? String(config.inputChannel)
+      : 'both';
+  outputChannelSelect.value =
+    config.outputChannel === 'left' || config.outputChannel === 'right'
+      ? String(config.outputChannel)
+      : 'both';
+
+  selectOptionIfPresent(microphoneSelect, String(config.inputDeviceId ?? ''));
+  selectOptionIfPresent(outputSelect, String(config.outputDeviceId ?? ''));
+
+  setNumericInputValue(startFrequencyInput, config.startFrequency);
+  setNumericInputValue(endFrequencyInput, config.endFrequency);
+  setNumericInputValue(durationInput, config.durationSeconds);
+  setNumericInputValue(volumeInput, config.sweepLevelDb);
+  setNumericInputValue(volumeNumberInput, config.sweepLevelDb);
+  setNumericInputValue(splOffsetInput, config.splOffsetDb);
+
+  smoothingModeSelect.value = isSmoothingMode(String(config.smoothingMode ?? ''))
+    ? String(config.smoothingMode)
+    : DEFAULT_SMOOTHING_MODE;
+  state.smoothingMode = getSelectedSmoothingMode();
+  localStorage.setItem(SMOOTHING_MODE_STORAGE_KEY, state.smoothingMode);
+
+  state.normalizePlot = Boolean(config.normalizePlot);
+  normalizePlotToggle.checked = state.normalizePlot;
+  localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(state.normalizePlot));
+
+  syncVolumeControls('slider');
+  syncSplOffsetControl(true);
+  updateMeasurementBackendUi();
+  renderMeasurements();
+}
+
+function setNumericInputValue(input: HTMLInputElement, value: unknown): void {
+  const numericValue = Number(value);
+  if (Number.isFinite(numericValue)) {
+    input.value = String(numericValue);
+  }
+}
+
+function selectOptionIfPresent(select: HTMLSelectElement, value: string): void {
+  if (Array.from(select.options).some((option) => option.value === value)) {
+    select.value = value;
+  }
+}
+
 function getSelectedSampleRate(): number {
   const sampleRate = Number(sampleRateSelect.value);
   return Number.isFinite(sampleRate) ? sampleRate : DEFAULT_SAMPLE_RATE;
@@ -1041,4 +1382,25 @@ function getSelectedChannel(
   select: HTMLSelectElement,
 ): MeasurementChannelSelection {
   return select.value === 'left' || select.value === 'right' ? select.value : 'both';
+}
+
+function readStoredSmoothingMode(): MeasurementSmoothingMode {
+  const stored = localStorage.getItem(SMOOTHING_MODE_STORAGE_KEY);
+  return isSmoothingMode(stored)
+    ? stored
+    : DEFAULT_SMOOTHING_MODE;
+}
+
+function getSelectedSmoothingMode(): MeasurementSmoothingMode {
+  return isSmoothingMode(smoothingModeSelect.value)
+    ? smoothingModeSelect.value
+    : DEFAULT_SMOOTHING_MODE;
+}
+
+function isSmoothingMode(value: string | null): value is MeasurementSmoothingMode {
+  return value !== null && SMOOTHING_MODE_OPTIONS.includes(value as typeof SMOOTHING_MODE_OPTIONS[number]);
+}
+
+function formatSmoothingModeLabel(value: MeasurementSmoothingMode): string {
+  return value === 'raw' ? 'Off' : `${value} oct`;
 }
