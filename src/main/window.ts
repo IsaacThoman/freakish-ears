@@ -7,6 +7,8 @@ export function createWindow(): BrowserWindow {
     height: 840,
     minWidth: 960,
     minHeight: 720,
+    backgroundColor: '#151515',
+    darkTheme: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
