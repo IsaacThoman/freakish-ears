@@ -584,7 +584,7 @@ export function attachApoPlotInteractions(input: {
 
   const handleMouseDown = (event: MouseEvent) => {
     const target = event.target;
-    if (!(target instanceof Element) || !target.classList.contains('apo-filter-node')) {
+    if (!(target instanceof SVGCircleElement) || !target.classList.contains('apo-filter-node')) {
       return;
     }
 
@@ -595,7 +595,40 @@ export function attachApoPlotInteractions(input: {
     }
 
     controller.draggingFilterId = target.getAttribute('data-apo-filter-id');
+    target.classList.add('is-dragging');
     target.setAttribute('cursor', 'grabbing');
+
+    // Create tooltip positioned above the node (append to body to survive re-renders)
+    const filterId = target.getAttribute('data-apo-filter-id');
+    const filter = controller.filters.find((f) => f.id === filterId);
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'apo-node-tooltip';
+    tooltip.id = 'apo-node-tooltip';
+
+    // Set initial content from filter values
+    const initialFreq = filter ? filter.frequencyHz.toFixed(0) : '0';
+    const initialGain = filter ? filter.gainDb.toFixed(1) : '0.0';
+    tooltip.textContent = `${initialFreq} Hz, ${initialGain} dB`;
+
+    // Position using the node's screen coordinates
+    const svgRect = target.ownerSVGElement?.getBoundingClientRect();
+    if (svgRect) {
+      const nodeCx = parseFloat(target.getAttribute('cx') || '0');
+      const nodeCy = parseFloat(target.getAttribute('cy') || '0');
+      const scaleX = svgRect.width / 960;
+      const scaleY = svgRect.height / 356;
+
+      // Calculate screen position
+      const screenX = svgRect.left + nodeCx * scaleX;
+      const screenY = svgRect.top + nodeCy * scaleY;
+
+      // Position above the node (fixed offset of 32px above center)
+      tooltip.style.left = `${screenX}px`;
+      tooltip.style.top = `${screenY - 32}px`;
+    }
+
+    document.body.appendChild(tooltip);
   };
 
   const handleMouseMove = (event: MouseEvent) => {
@@ -635,6 +668,24 @@ export function attachApoPlotInteractions(input: {
       24,
     );
 
+    // Update tooltip text and position above the node
+    const tooltip = document.getElementById('apo-node-tooltip');
+    if (tooltip) {
+      tooltip.textContent = `${frequencyHz.toFixed(0)} Hz, ${gainDb.toFixed(1)} dB`;
+
+      const svgRect = svg.getBoundingClientRect();
+      const nodeX = getPlotX(frequencyHz, geometry);
+      const nodeY = getPlotY(gainDb, geometry);
+      const scaleX = svgRect.width / 960;
+      const scaleY = svgRect.height / 356;
+
+      // Position above the node using screen coordinates
+      const screenX = svgRect.left + nodeX * scaleX;
+      const screenY = svgRect.top + nodeY * scaleY;
+      tooltip.style.left = `${screenX}px`;
+      tooltip.style.top = `${screenY - 32}px`;
+    }
+
     controller.onFilterDrag(controller.draggingFilterId, frequencyHz, gainDb, axis);
   };
 
@@ -644,12 +695,17 @@ export function attachApoPlotInteractions(input: {
       return;
     }
 
+    // Remove dragging class from all nodes (in case re-render happened)
     const svg = plotCard.querySelector('svg');
-    const node = svg?.querySelector(
-      `[data-apo-filter-id="${controller.draggingFilterId}"]`,
-    );
-    if (node instanceof Element) {
+    svg?.querySelectorAll('.apo-filter-node.is-dragging').forEach((node) => {
+      node.classList.remove('is-dragging');
       node.setAttribute('cursor', 'grab');
+    });
+
+    // Remove tooltip from body
+    const tooltip = document.getElementById('apo-node-tooltip');
+    if (tooltip && tooltip.parentElement) {
+      tooltip.parentElement.removeChild(tooltip);
     }
 
     controller.draggingFilterId = null;
@@ -660,6 +716,12 @@ export function attachApoPlotInteractions(input: {
     plotCard.removeEventListener('mousedown', handleMouseDown);
     window.removeEventListener('mousemove', handleMouseMove);
     window.removeEventListener('mouseup', handleMouseUp);
+
+    // Clean up tooltip from body if it exists
+    const tooltip = document.getElementById('apo-node-tooltip');
+    if (tooltip && tooltip.parentElement) {
+      tooltip.parentElement.removeChild(tooltip);
+    }
   };
 
   plotCard.addEventListener('mousedown', handleMouseDown);

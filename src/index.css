@@ -651,12 +651,33 @@ input {
 }
 
 .apo-filter-node {
-  transition: r 0.15s ease, stroke-width 0.15s ease;
+  transition: none;
 }
 
 .apo-filter-node:hover {
   r: 10;
   stroke-width: 3;
+}
+
+.apo-filter-node.is-dragging {
+  r: 6 !important;
+  stroke-width: 2 !important;
+}
+
+.apo-node-tooltip {
+  position: fixed;
+  padding: 6px 10px;
+  border: 1px solid rgba(248, 161, 69, 0.5);
+  border-radius: 4px;
+  background: rgba(77, 43, 11, 0.96);
+  color: #ffd4a6;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  pointer-events: none;
+  z-index: 10000;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transform: translateX(-50%);
 }
 
 .apo-config-preview {
