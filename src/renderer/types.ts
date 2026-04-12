@@ -116,7 +116,6 @@ export type AppState = {
   apoMaxBoostDb: number;
   apoMaxCutDb: number;
   nextApoFilterIndex: number;
-  plotViewMode: PlotViewMode;
   equalizerApoStatus: EqualizerApoStatus | null;
   toast: ToastState | null;
   toastTimeoutId: number;

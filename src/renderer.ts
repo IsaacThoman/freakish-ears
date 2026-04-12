@@ -30,7 +30,6 @@ import {
   NORMALIZE_PLOT_STORAGE_KEY,
   OUTPUT_CHANNEL_STORAGE_KEY,
   OUTPUT_DEVICE_STORAGE_KEY,
-  PLOT_VIEW_MODE_STORAGE_KEY,
   POST_ROLL_SECONDS,
   PRE_ROLL_SECONDS,
   SAMPLE_RATE_OPTIONS,
@@ -59,6 +58,7 @@ import {
   attachPlotInteractions,
   renderApoEqPlot,
   renderResponsePlot,
+  DEFAULT_PLOT_WIDTH,
 } from './renderer/plot';
 import type {
   ApoFilter,
@@ -68,7 +68,6 @@ import type {
   MeasurementBackend,
   MeasurementChannelSelection,
   MeasurementSmoothingMode,
-  PlotViewMode,
   ReferenceCurve,
   StatusTone,
   ToastState,
@@ -226,10 +225,6 @@ app.innerHTML = `
         </div>
 
         <div class="plot-toolbar">
-          <div class="plot-view-switch" role="tablist" aria-label="Plot views">
-            <button id="measurementsViewButton" class="btn btn-secondary plot-view-button" type="button">Measurements</button>
-            <button id="apoViewButton" class="btn btn-secondary plot-view-button" type="button">EQ Graph</button>
-          </div>
           <div class="plot-toolbar-actions">
             <label class="plot-toggle">
               <input id="normalizePlotToggle" type="checkbox" />
@@ -254,8 +249,13 @@ app.innerHTML = `
         <input id="referenceFileInput" type="file" accept=".txt,.csv,.targetcurve,text/plain" multiple hidden />
         <input id="configFileInput" type="file" accept=".json,application/json,text/plain" hidden />
 
-        <div id="plotCard" class="plot-card">
-          <span style="color:var(--text-muted);font-size:11px">Run or import measurements to plot response</span>
+        <div id="plotsContainer" class="plots-container">
+          <div id="measurementsPlotCard" class="plot-card">
+            <span style="color:var(--text-muted);font-size:11px">Run or import measurements to plot response</span>
+          </div>
+          <div id="apoPlotCard" class="plot-card">
+            <span style="color:var(--text-muted);font-size:11px">Enable filters to see EQ graph</span>
+          </div>
         </div>
 
         <div class="apo-card">
@@ -367,12 +367,13 @@ const importMeasurementsButton = getElement<HTMLButtonElement>('importMeasuremen
 const importReferenceButton = getElement<HTMLButtonElement>('importReferenceButton');
 const normalizePlotToggle = getElement<HTMLInputElement>('normalizePlotToggle');
 const smoothingModeSelect = getElement<HTMLSelectElement>('smoothingModeSelect');
-const measurementsViewButton = getElement<HTMLButtonElement>('measurementsViewButton');
-const apoViewButton = getElement<HTMLButtonElement>('apoViewButton');
+
 const measurementFileInput = getElement<HTMLInputElement>('measurementFileInput');
 const referenceFileInput = getElement<HTMLInputElement>('referenceFileInput');
 const configFileInput = getElement<HTMLInputElement>('configFileInput');
-const plotCard = getElement<HTMLDivElement>('plotCard');
+const plotsContainer = getElement<HTMLDivElement>('plotsContainer');
+const measurementsPlotCard = getElement<HTMLDivElement>('measurementsPlotCard');
+const apoPlotCard = getElement<HTMLDivElement>('apoPlotCard');
 const generateApoFiltersButton = getElement<HTMLButtonElement>('generateApoFiltersButton');
 const addApoFilterButton = getElement<HTMLButtonElement>('addApoFilterButton');
 const clearApoFiltersButton = getElement<HTMLButtonElement>('clearApoFiltersButton');
@@ -389,6 +390,10 @@ const apoConfigPreview = getElement<HTMLTextAreaElement>('apoConfigPreview');
 const apoApplyStatus = getElement<HTMLSpanElement>('apoApplyStatus');
 const logList = getElement<HTMLUListElement>('logList');
 const toastButton = getElement<HTMLButtonElement>('toastButton');
+
+const PLOT_ASPECT_RATIO = 960 / 356;
+const PLOTS_GAP_PX = 12;
+const MIN_SPLIT_PLOT_HEIGHT_PX = 220;
 
 const state: AppState = {
   busy: false,
@@ -421,7 +426,6 @@ const state: AppState = {
     24,
   ),
   nextApoFilterIndex: 1,
-  plotViewMode: readStoredPlotViewMode(),
   equalizerApoStatus: null,
   toast: null,
   toastTimeoutId: 0,
@@ -459,13 +463,11 @@ refreshDevicesButton.addEventListener('click', () => {
 microphoneSelect.addEventListener('change', () => {
   localStorage.setItem(INPUT_DEVICE_STORAGE_KEY, microphoneSelect.value);
   microphoneSelect.dataset.storedDeviceId = microphoneSelect.value;
-  persistActiveConfiguration();
 });
 
 outputSelect.addEventListener('change', () => {
   localStorage.setItem(OUTPUT_DEVICE_STORAGE_KEY, outputSelect.value);
   outputSelect.dataset.storedDeviceId = outputSelect.value;
-  persistActiveConfiguration();
 });
 
 importMeasurementsButton.addEventListener('click', () => {
@@ -507,7 +509,7 @@ runMeasurementButton.addEventListener('click', () => {
   void runMeasurement();
 });
 
-plotCard.addEventListener('change', (event) => {
+measurementsPlotCard.addEventListener('change', (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) {
     return;
@@ -525,7 +527,7 @@ plotCard.addEventListener('change', (event) => {
   }
 });
 
-plotCard.addEventListener('click', (event) => {
+measurementsPlotCard.addEventListener('click', (event) => {
   const target = event.target;
   if (!(target instanceof Element)) {
     return;
@@ -644,16 +646,6 @@ volumeInput.addEventListener('input', () => {
   }
 });
 
-measurementsViewButton.addEventListener('click', () => {
-  setPlotViewMode('measurements');
-  persistActiveConfiguration();
-});
-
-apoViewButton.addEventListener('click', () => {
-  setPlotViewMode('apo');
-  persistActiveConfiguration();
-});
-
 generateApoFiltersButton.addEventListener('click', () => {
   void generateApoFilters();
 });
@@ -759,6 +751,20 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => {
   void refreshMicrophones(false);
 });
 
+let plotsResizeTimeoutId: number | null = null;
+const plotsResizeObserver = new ResizeObserver(() => {
+  updatePlotsLayout();
+  // Debounce re-render to avoid excessive redraws during resize
+  if (plotsResizeTimeoutId) {
+    window.clearTimeout(plotsResizeTimeoutId);
+  }
+  plotsResizeTimeoutId = window.setTimeout(() => {
+    renderMeasurements();
+    renderApoSection();
+  }, 100);
+});
+plotsResizeObserver.observe(plotsContainer);
+
 updateSelectedFolder();
 measurementBackendSelect.value = state.measurementBackend;
 updateMeasurementBackendUi();
@@ -810,8 +816,6 @@ function setBusy(isBusy: boolean): void {
   configFileInput.disabled = isBusy;
   measurementBackendSelect.disabled = isBusy;
   smoothingModeSelect.disabled = isBusy;
-  measurementsViewButton.disabled = isBusy;
-  apoViewButton.disabled = isBusy;
   generateApoFiltersButton.disabled = isBusy;
   addApoFilterButton.disabled = isBusy;
   clearApoFiltersButton.disabled = isBusy;
@@ -1164,7 +1168,6 @@ async function refreshMicrophones(requestPermission: boolean): Promise<void> {
 
     localStorage.setItem(INPUT_DEVICE_STORAGE_KEY, microphoneSelect.value);
     localStorage.setItem(OUTPUT_DEVICE_STORAGE_KEY, outputSelect.value);
-    persistActiveConfiguration();
     delete microphoneSelect.dataset.storedDeviceId;
     delete outputSelect.dataset.storedDeviceId;
 
@@ -1492,28 +1495,13 @@ function renderPlotCard(
   visibleMeasurements: LoadedMeasurement[],
   visibleReferenceCurves: ReferenceCurve[],
 ): void {
-  updatePlotViewButtons();
+  const measurementsCompact = measurementsPlotCard.clientWidth < 560;
+  const apoCompact = apoPlotCard.clientWidth < 560;
+  const measurementsContainerWidth = measurementsPlotCard.clientWidth;
+  const apoContainerWidth = apoPlotCard.clientWidth;
 
-  if (state.plotViewMode === 'apo') {
-    const measurement = getSelectedApoMeasurement();
-    const referenceCurve = getSelectedApoReference();
-
-    plotCard.innerHTML = renderApoEqPlot({
-      filters: state.apoFilters,
-      measurementName: measurement?.name ?? null,
-      targetName: referenceCurve?.name ?? null,
-    });
-
-    attachApoPlotInteractions({
-      plotCard,
-      filters: state.apoFilters,
-      onFilterDrag: handleApoFilterDrag,
-      onDragEnd: handleApoFilterDragEnd,
-    });
-    return;
-  }
-
-  plotCard.innerHTML = renderResponsePlot({
+  // Render measurements plot
+  measurementsPlotCard.innerHTML = renderResponsePlot({
     visibleMeasurements,
     allMeasurements: state.measurements,
     visibleReferenceCurves,
@@ -1523,15 +1511,51 @@ function renderPlotCard(
     splOffsetDb: state.splOffsetDb,
     busy: state.busy,
     outputFolder: state.outputFolder,
+    compact: measurementsCompact,
+    containerWidth: measurementsContainerWidth > 0 ? measurementsContainerWidth : DEFAULT_PLOT_WIDTH,
   });
   attachPlotInteractions({
-    plotCard,
+    plotCard: measurementsPlotCard,
     measurements: visibleMeasurements,
     referenceCurves: visibleReferenceCurves,
     normalizePlot: state.normalizePlot,
     smoothingMode: state.smoothingMode,
     splOffsetDb: state.splOffsetDb,
   });
+
+  // Render APO EQ plot
+  const measurement = getSelectedApoMeasurement();
+  const referenceCurve = getSelectedApoReference();
+
+  apoPlotCard.innerHTML = renderApoEqPlot({
+    filters: state.apoFilters,
+    measurementName: measurement?.name ?? null,
+    targetName: referenceCurve?.name ?? null,
+    compact: apoCompact,
+    containerWidth: apoContainerWidth > 0 ? apoContainerWidth : DEFAULT_PLOT_WIDTH,
+  });
+
+  attachApoPlotInteractions({
+    plotCard: apoPlotCard,
+    filters: state.apoFilters,
+    onFilterDrag: handleApoFilterDrag,
+    onDragEnd: handleApoFilterDragEnd,
+  });
+
+  updatePlotsLayout();
+}
+
+function updatePlotsLayout(): void {
+  plotsContainer.classList.remove('is-split');
+
+  const availableWidth = plotsContainer.clientWidth;
+  const splitPlotWidth = Math.max((availableWidth - PLOTS_GAP_PX) / 2, 0);
+  const splitPlotHeight = splitPlotWidth / PLOT_ASPECT_RATIO;
+
+  // Keep side-by-side only when the resulting graph height remains usable.
+  if (splitPlotHeight >= MIN_SPLIT_PLOT_HEIGHT_PX) {
+    plotsContainer.classList.add('is-split');
+  }
 }
 
 function updateMeasurementSummary(): void {
@@ -1577,12 +1601,6 @@ function readStoredMeasurementBackend(): MeasurementBackend {
   return localStorage.getItem(MEASUREMENT_BACKEND_STORAGE_KEY) === 'sox'
     ? 'sox'
     : DEFAULT_MEASUREMENT_BACKEND;
-}
-
-function readStoredPlotViewMode(): PlotViewMode {
-  return localStorage.getItem(PLOT_VIEW_MODE_STORAGE_KEY) === 'apo'
-    ? 'apo'
-    : 'measurements';
 }
 
 function initializeMeasurementConfigFromStorage(): void {
@@ -1671,7 +1689,6 @@ function persistActiveConfiguration(): void {
     splOffsetDb: Number(splOffsetInput.value),
     smoothingMode: getSelectedSmoothingMode(),
     normalizePlot: normalizePlotToggle.checked,
-    plotViewMode: state.plotViewMode,
     apoSelectedMeasurementId: state.apoSelectedMeasurementId,
     apoSelectedReferenceId: state.apoSelectedReferenceId,
     apoMaxFilters: state.apoMaxFilters,
@@ -1699,22 +1716,6 @@ function getPreferredOutputDeviceId(): string {
     localStorage.getItem(OUTPUT_DEVICE_STORAGE_KEY) ||
     ''
   );
-}
-
-function setPlotViewMode(viewMode: PlotViewMode): void {
-  if (state.plotViewMode === viewMode) {
-    return;
-  }
-
-  state.plotViewMode = viewMode;
-  localStorage.setItem(PLOT_VIEW_MODE_STORAGE_KEY, viewMode);
-  persistActiveConfiguration();
-  renderMeasurements();
-}
-
-function updatePlotViewButtons(): void {
-  measurementsViewButton.dataset.active = state.plotViewMode === 'measurements' ? 'true' : 'false';
-  apoViewButton.dataset.active = state.plotViewMode === 'apo' ? 'true' : 'false';
 }
 
 function getSelectedMeasurementBackend(): MeasurementBackend {
@@ -1805,16 +1806,15 @@ async function saveConfiguration(): Promise<void> {
       splOffsetDb: Number(splOffsetInput.value),
       smoothingMode: getSelectedSmoothingMode(),
       normalizePlot: normalizePlotToggle.checked,
-      plotViewMode: state.plotViewMode,
-      apoSelectedMeasurementId: state.apoSelectedMeasurementId,
-      apoSelectedReferenceId: state.apoSelectedReferenceId,
-      apoMaxFilters: state.apoMaxFilters,
-      apoMaxBoostDb: state.apoMaxBoostDb,
-      apoMaxCutDb: state.apoMaxCutDb,
-      apoFilters: state.apoFilters,
-    };
+    apoSelectedMeasurementId: state.apoSelectedMeasurementId,
+    apoSelectedReferenceId: state.apoSelectedReferenceId,
+    apoMaxFilters: state.apoMaxFilters,
+    apoMaxBoostDb: state.apoMaxBoostDb,
+    apoMaxCutDb: state.apoMaxCutDb,
+    apoFilters: state.apoFilters,
+  };
 
-    const saveResult = await window.freakishEars.saveMeasurementSession({
+  const saveResult = await window.freakishEars.saveMeasurementSession({
       folderPath: outputFolder,
       sessionName: `configuration-${formatTimestampForPath(new Date())}`,
       files: [
@@ -1916,9 +1916,6 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   state.normalizePlot = Boolean(config.normalizePlot);
   normalizePlotToggle.checked = state.normalizePlot;
   localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(state.normalizePlot));
-
-  state.plotViewMode = config.plotViewMode === 'apo' ? 'apo' : 'measurements';
-  localStorage.setItem(PLOT_VIEW_MODE_STORAGE_KEY, state.plotViewMode);
 
   state.apoFilters = normalizeApoFilters(config.apoFilters);
   state.apoSelectedMeasurementId = toOptionalString(config.apoSelectedMeasurementId);
@@ -2138,18 +2135,15 @@ function syncApoGenerationSettings(normalize: boolean): void {
 }
 
 function renderApoSection(): void {
-  updatePlotViewButtons();
   syncApoSelectionOptions();
   apoFilterList.innerHTML = renderApoFilterList();
   apoConfigPreview.value = buildApoConfigText();
   apoApplyStatus.textContent = getApoApplyStatusText();
   apoApplyWarning.hidden = !state.equalizerApoStatus?.peaceRunning;
-  if (state.plotViewMode === 'apo') {
-    renderPlotCard(
-      state.measurements.filter((measurement) => measurement.visible),
-      state.referenceCurves.filter((referenceCurve) => referenceCurve.visible),
-    );
-  }
+  renderPlotCard(
+    state.measurements.filter((measurement) => measurement.visible),
+    state.referenceCurves.filter((referenceCurve) => referenceCurve.visible),
+  );
   updateMeasurementActionState();
 }
 

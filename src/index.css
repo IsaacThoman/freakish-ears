@@ -309,13 +309,36 @@ input {
   margin-top: 2px;
 }
 
+.plots-container {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.plots-container.is-split {
+  grid-template-columns: 1fr 1fr;
+}
+
 .plot-card {
   position: relative;
   padding: 12px;
   background: var(--input-bg);
   border: 1px solid var(--input-border);
   border-radius: 4px;
-  overflow: auto;
+  overflow: hidden;
+  width: 100%;
+  min-width: 0;
+}
+
+.plot-card.is-hidden {
+  display: none;
+}
+
+.plot-card > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
 }
 
 .plot-toolbar {
@@ -323,18 +346,6 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-
-.plot-view-switch {
-  display: inline-flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.plot-view-button[data-active='true'] {
-  border-color: var(--accent);
-  background: rgba(240, 121, 0, 0.14);
-  color: var(--text);
 }
 
 .plot-toolbar-actions {
@@ -414,22 +425,16 @@ input {
   text-align: center;
 }
 
-.plot-card svg {
-  display: block;
-  width: auto;
-  min-width: 0;
-  max-width: none;
-  height: auto;
-}
+
 
 .plot-axis-text {
   fill: var(--text-muted);
-  font-size: 13px;
+  font-size: 11px !important;
 }
 
 .plot-axis-label {
   fill: var(--text-muted);
-  font-size: 14px;
+  font-size: 11px !important;
 }
 
 .plot-caption {

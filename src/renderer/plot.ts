@@ -21,6 +21,41 @@ import {
 } from './utils';
 
 const EQ_GRAPH_FREQUENCIES = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+const COMPACT_GRAPH_FREQUENCIES = [20, 100, 1000, 10000, 20000];
+
+type PlotLabelSizing = {
+  axisTextSize: number;
+  axisLabelSize: number;
+  yTickCount: number;
+  xTicks: number[];
+};
+
+export const DEFAULT_PLOT_WIDTH = 960;
+const DEFAULT_PLOT_HEIGHT = 356;
+const DEFAULT_PLOT_LEFT = 84;
+const DEFAULT_PLOT_RIGHT = 24;
+const DEFAULT_PLOT_TOP = 18;
+const DEFAULT_PLOT_BOTTOM = 94;
+
+function scaleGeometry(
+  containerWidth: number,
+  baseWidth: number,
+  baseHeight: number,
+  baseLeft: number,
+  baseRight: number,
+  baseTop: number,
+  baseBottom: number,
+): { width: number; height: number; left: number; right: number; top: number; bottom: number } {
+  const scale = containerWidth / baseWidth;
+  return {
+    width: containerWidth,
+    height: baseHeight * scale,
+    left: baseLeft * scale,
+    right: baseRight * scale,
+    top: baseTop * scale,
+    bottom: baseBottom * scale,
+  };
+}
 
 export function renderResponsePlot(input: {
   visibleMeasurements: LoadedMeasurement[];
@@ -32,6 +67,8 @@ export function renderResponsePlot(input: {
   splOffsetDb: number;
   busy: boolean;
   outputFolder: string | null;
+  compact: boolean;
+  containerWidth: number;
 }): string {
   if (input.allMeasurements.length === 0 && input.allReferenceCurves.length === 0) {
     return `
@@ -82,13 +119,15 @@ export function renderResponsePlot(input: {
   }));
   const geometry = getResponsePlotGeometry(
     [...plottedMeasurements.map((entry) => entry.points), ...plottedReferenceCurves.map((entry) => entry.points)],
+    input.containerWidth,
   );
-  const xTicks = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].filter(
+  const labelSizing = getPlotLabelSizing(input.compact);
+  const xTicks = labelSizing.xTicks.filter(
     (frequency) =>
       frequency >= geometry.minFrequency && frequency <= geometry.maxFrequency,
   );
-  const yTicks = Array.from({ length: 5 }, (_unused, index) => {
-    const ratio = index / 4;
+  const yTicks = Array.from({ length: labelSizing.yTickCount }, (_unused, index) => {
+    const ratio = index / (labelSizing.yTickCount - 1);
     return geometry.maxDb - (geometry.maxDb - geometry.minDb) * ratio;
   });
 
@@ -97,7 +136,7 @@ export function renderResponsePlot(input: {
 
   return `
     <div class="plot-hover" id="plotHover">Hover: --</div>
-      <svg id="responsePlot" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response overlay with logarithmic frequency axis">
+      <svg id="responsePlot" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response overlay with logarithmic frequency axis">
       <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
       ${yTicks
         .map((value) => {
@@ -150,8 +189,8 @@ export function renderResponsePlot(input: {
         .map((value) => {
           const y = getPlotY(value, geometry);
             return `<text x="${geometry.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="plot-axis-text">${formatDbLabel(value)}</text>`;
-         })
-         .join('')}
+          })
+          .join('')}
       ${xTicks
         .map((frequency) => {
           const x = getPlotX(frequency, geometry);
@@ -159,7 +198,7 @@ export function renderResponsePlot(input: {
          })
          .join('')}
       <text x="${(geometry.left + (geometry.width - geometry.right)) / 2}" y="${geometry.height - 12}" text-anchor="middle" class="plot-axis-label">Frequency (Hz, log)</text>
-      <text x="28" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 28 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">${input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)'}</text>
+      <text x="${Math.min(28, geometry.left - 12)}" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 ${Math.min(28, geometry.left - 12)} ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">${input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)'}</text>
     </svg>
     ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.busy, input.outputFolder)}
   `;
@@ -281,6 +320,8 @@ export function renderApoEqPlot(input: {
   filters: ApoFilter[];
   measurementName: string | null;
   targetName: string | null;
+  compact: boolean;
+  containerWidth: number;
 }): string {
   const enabledFilters = input.filters.filter((filter) => filter.enabled);
   const sampledPoints = Array.from({ length: 256 }, (_unused, index) => {
@@ -304,9 +345,10 @@ export function renderApoEqPlot(input: {
       totalDb: getApoFilterResponseDb(filter, point.frequencyHz),
     })),
   }));
-  const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets);
-  const yTicks = Array.from({ length: 7 }, (_unused, index) => {
-    const ratio = index / 6;
+  const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets, input.containerWidth);
+  const labelSizing = getPlotLabelSizing(input.compact);
+  const yTicks = Array.from({ length: labelSizing.yTickCount }, (_unused, index) => {
+    const ratio = index / (labelSizing.yTickCount - 1);
     return geometry.maxDb - (geometry.maxDb - geometry.minDb) * ratio;
   });
   const xAxisY = getPlotY(0, geometry);
@@ -317,7 +359,7 @@ export function renderApoEqPlot(input: {
 
   return `
     <div class="plot-hover">EQ Graph: ${escapeHtml(input.measurementName ?? 'No measurement')} -> ${escapeHtml(input.targetName ?? 'No target')}</div>
-    <svg width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Equalizer APO frequency response graph">
+    <svg viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Equalizer APO frequency response graph">
       <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
       ${yTicks
         .map((value) => {
@@ -325,7 +367,7 @@ export function renderApoEqPlot(input: {
           return `<line x1="${geometry.left}" y1="${y.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.07)" vector-effect="non-scaling-stroke" />`;
         })
         .join('')}
-      ${EQ_GRAPH_FREQUENCIES.map((frequency) => {
+      ${labelSizing.xTicks.map((frequency) => {
         const x = getPlotX(frequency, geometry);
         return `<line x1="${x.toFixed(1)}" y1="${geometry.top}" x2="${x.toFixed(1)}" y2="${geometry.height - geometry.bottom}" stroke="rgba(255,255,255,0.06)" vector-effect="non-scaling-stroke" />`;
       }).join('')}
@@ -354,14 +396,32 @@ export function renderApoEqPlot(input: {
           return `<text x="${geometry.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="plot-axis-text">${formatDbLabel(value)}</text>`;
         })
         .join('')}
-      ${EQ_GRAPH_FREQUENCIES.map((frequency) => {
+      ${labelSizing.xTicks.map((frequency) => {
         const x = getPlotX(frequency, geometry);
         return `<text x="${x.toFixed(1)}" y="${geometry.height - 42}" text-anchor="middle" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
       }).join('')}
       <text x="${(geometry.left + (geometry.width - geometry.right)) / 2}" y="${geometry.height - 12}" text-anchor="middle" class="plot-axis-label">Frequency (Hz, log)</text>
-      <text x="28" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 28 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">EQ Gain (dB)</text>
+      <text x="${Math.min(28, geometry.left - 12)}" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 ${Math.min(28, geometry.left - 12)} ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">EQ Gain (dB)</text>
     </svg>
   `;
+}
+
+function getPlotLabelSizing(compact: boolean): PlotLabelSizing {
+  if (compact) {
+    return {
+      axisTextSize: 12,
+      axisLabelSize: 12,
+      yTickCount: 4,
+      xTicks: COMPACT_GRAPH_FREQUENCIES,
+    };
+  }
+
+  return {
+    axisTextSize: 12,
+    axisLabelSize: 12,
+      yTickCount: 5,
+      xTicks: EQ_GRAPH_FREQUENCIES,
+  };
 }
 
 function getApoEqPlotGeometry(
@@ -371,6 +431,7 @@ function getApoEqPlotGeometry(
     filter: ApoFilter;
     points: Array<{ frequencyHz: number; totalDb: number }>;
   }>,
+  containerWidth: number,
 ): ResponsePlotGeometry {
   const allValues = [
     ...sampledPoints.map((point) => point.totalDb),
@@ -381,13 +442,23 @@ function getApoEqPlotGeometry(
   const minDb = Math.min(-12, Math.floor((Math.min(...allValues) - 1) / 3) * 3);
   const maxDb = Math.max(12, Math.ceil((Math.max(...allValues) + 1) / 3) * 3);
 
+  const scaled = scaleGeometry(
+    containerWidth,
+    DEFAULT_PLOT_WIDTH,
+    DEFAULT_PLOT_HEIGHT,
+    DEFAULT_PLOT_LEFT,
+    DEFAULT_PLOT_RIGHT,
+    DEFAULT_PLOT_TOP,
+    DEFAULT_PLOT_BOTTOM,
+  );
+
   return {
-    width: 960,
-    height: 356,
-    left: 84,
-    right: 24,
-    top: 18,
-    bottom: 94,
+    width: scaled.width,
+    height: scaled.height,
+    left: scaled.left,
+    right: scaled.right,
+    top: scaled.top,
+    bottom: scaled.bottom,
     minFrequency: DEFAULT_START_FREQUENCY,
     maxFrequency: DEFAULT_END_FREQUENCY,
     minDb,
@@ -464,6 +535,7 @@ function renderMeasurementList(
 
 function getResponsePlotGeometry(
   measurementPointSets: MeasurementPoint[][],
+  containerWidth: number,
 ): ResponsePlotGeometry {
   const points = measurementPointSets.flatMap((measurement) => measurement);
   const frequencies = points.map((point) => point.frequencyHz);
@@ -473,13 +545,23 @@ function getResponsePlotGeometry(
   const minDb = measuredBottom;
   const maxDb = measuredBottom + Math.max(24, measuredTop - measuredBottom);
 
+  const scaled = scaleGeometry(
+    containerWidth,
+    DEFAULT_PLOT_WIDTH,
+    DEFAULT_PLOT_HEIGHT,
+    DEFAULT_PLOT_LEFT,
+    DEFAULT_PLOT_RIGHT,
+    DEFAULT_PLOT_TOP,
+    DEFAULT_PLOT_BOTTOM,
+  );
+
   return {
-    width: 960,
-    height: 356,
-    left: 84,
-    right: 24,
-    top: 18,
-    bottom: 94,
+    width: scaled.width,
+    height: scaled.height,
+    left: scaled.left,
+    right: scaled.right,
+    top: scaled.top,
+    bottom: scaled.bottom,
     minFrequency:
       frequencies.length > 0 ? Math.min(...frequencies) : DEFAULT_START_FREQUENCY,
     maxFrequency:
@@ -578,7 +660,7 @@ export function attachApoPlotInteractions(input: {
       })),
     }));
 
-    const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets);
+    const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets, width);
     return { ...geometry, width, height };
   };
 
