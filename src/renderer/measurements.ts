@@ -7,6 +7,7 @@ import {
 import type {
   LoadedMeasurement,
   MeasurementAnalysis,
+  MeasurementBackend,
   MeasurementImport,
   MeasurementMagnitudeMode,
   MeasurementPoint,
@@ -27,6 +28,7 @@ export function buildMeasurementJson(input: {
   microphoneLabel: string;
   outputDeviceLabel: string;
   settings: {
+    backend: MeasurementBackend;
     startFrequency: number;
     endFrequency: number;
     durationSeconds: number;

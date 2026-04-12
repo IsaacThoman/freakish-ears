@@ -14,6 +14,8 @@ export type MeasurementPoint = {
 
 export type MeasurementMagnitudeMode = 'relative' | 'spl';
 
+export type MeasurementBackend = 'web-audio' | 'sox';
+
 export type MeasurementAnalysis = {
   sampleRate: number;
   sweepStartSample: number;
@@ -79,6 +81,7 @@ export type MeasurementImport = {
 export type AppState = {
   busy: boolean;
   outputFolder: string | null;
+  measurementBackend: MeasurementBackend;
   splOffsetDb: number;
   normalizePlot: boolean;
   measurements: LoadedMeasurement[];

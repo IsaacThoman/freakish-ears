@@ -1,6 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from './shared/ipc';
-import type { FreakishEarsApi, SaveMeasurementPayload } from './shared/ipc';
+import type {
+  FreakishEarsApi,
+  RunSoxMeasurementPayload,
+  SaveMeasurementPayload,
+} from './shared/ipc';
 
 const api: FreakishEarsApi = {
   selectOutputFolder: () => ipcRenderer.invoke(IPC_CHANNELS.selectOutputFolder),
@@ -8,6 +12,8 @@ const api: FreakishEarsApi = {
     ipcRenderer.invoke(IPC_CHANNELS.saveMeasurementSession, payload),
   showItemInFolder: (filePath: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.showItemInFolder, filePath),
+  runSoxMeasurement: (payload: RunSoxMeasurementPayload) =>
+    ipcRenderer.invoke(IPC_CHANNELS.runSoxMeasurement, payload),
 };
 
 contextBridge.exposeInMainWorld('freakishEars', api);

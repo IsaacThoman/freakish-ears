@@ -1,11 +1,13 @@
 import './index.css';
 
 import {
+  DEFAULT_MEASUREMENT_BACKEND,
   DEFAULT_DURATION_SECONDS,
   DEFAULT_END_FREQUENCY,
   DEFAULT_SPL_OFFSET_DB,
   DEFAULT_START_FREQUENCY,
   DEFAULT_SWEEP_LEVEL_DB,
+  MEASUREMENT_BACKEND_STORAGE_KEY,
   MAX_SWEEP_LEVEL_DB,
   MIN_SWEEP_LEVEL_DB,
   NORMALIZE_PLOT_STORAGE_KEY,
@@ -28,6 +30,7 @@ import type {
   AppState,
   LoadedMeasurement,
   LogTone,
+  MeasurementBackend,
   StatusTone,
   ToastState,
 } from './renderer/types';
@@ -54,6 +57,15 @@ app.innerHTML = `
     <section class="grid">
       <section class="panel section">
         <span class="section-title">Input</span>
+
+        <div class="field">
+          <label for="measurementBackendSelect">Backend</label>
+          <select id="measurementBackendSelect">
+            <option value="web-audio">Built-in</option>
+            <option value="sox">SoX</option>
+          </select>
+          <span style="color:var(--text-muted);font-size:11px">SoX uses the system default input/output devices.</span>
+        </div>
 
         <div class="field">
           <select id="microphoneSelect"></select>
@@ -167,6 +179,7 @@ app.innerHTML = `
 `;
 
 const microphoneSelect = getElement<HTMLSelectElement>('microphoneSelect');
+const measurementBackendSelect = getElement<HTMLSelectElement>('measurementBackendSelect');
 const refreshDevicesButton = getElement<HTMLButtonElement>('refreshDevicesButton');
 const chooseFolderButton = getElement<HTMLButtonElement>('chooseFolderButton');
 const selectedFolder = getElement<HTMLDivElement>('selectedFolder');
@@ -193,6 +206,7 @@ const toastButton = getElement<HTMLButtonElement>('toastButton');
 const state: AppState = {
   busy: false,
   outputFolder: localStorage.getItem(STORAGE_KEY),
+  measurementBackend: readStoredMeasurementBackend(),
   splOffsetDb: readStoredNumber(SPL_OFFSET_STORAGE_KEY, DEFAULT_SPL_OFFSET_DB),
   normalizePlot: localStorage.getItem(NORMALIZE_PLOT_STORAGE_KEY) === 'true',
   measurements: [],
@@ -204,6 +218,12 @@ const state: AppState = {
 
 chooseFolderButton.addEventListener('click', () => {
   void chooseOutputFolder();
+});
+
+measurementBackendSelect.addEventListener('change', () => {
+  state.measurementBackend = getSelectedMeasurementBackend();
+  localStorage.setItem(MEASUREMENT_BACKEND_STORAGE_KEY, state.measurementBackend);
+  updateMeasurementBackendUi();
 });
 
 refreshDevicesButton.addEventListener('click', () => {
@@ -308,6 +328,8 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => {
 });
 
 updateSelectedFolder();
+measurementBackendSelect.value = state.measurementBackend;
+updateMeasurementBackendUi();
 syncVolumeControls('slider');
 syncSplOffsetControl(true);
 normalizePlotToggle.checked = state.normalizePlot;
@@ -340,6 +362,8 @@ function setBusy(isBusy: boolean): void {
   volumeNumberInput.disabled = isBusy;
   runMeasurementButton.disabled = isBusy;
   measurementFileInput.disabled = isBusy;
+  measurementBackendSelect.disabled = isBusy;
+  updateMeasurementBackendUi();
 
   updateMeasurementActionState();
 
@@ -371,6 +395,13 @@ function updateSelectedFolder(): void {
 
 function updateMeasurementActionState(): void {
   importMeasurementsButton.disabled = state.busy;
+}
+
+function updateMeasurementBackendUi(): void {
+  const usesSox = state.measurementBackend === 'sox';
+  microphoneSelect.disabled = state.busy || usesSox;
+  refreshDevicesButton.disabled = state.busy || usesSox;
+  outputSelect.disabled = state.busy || usesSox;
 }
 
 function showToast(toast: ToastState): void {
@@ -654,6 +685,7 @@ async function refreshMicrophones(requestPermission: boolean): Promise<void> {
       `Loaded ${microphones.length} microphone input(s) and ${seenOutputIds.size + 1} output option(s).`,
       'success',
     );
+    updateMeasurementBackendUi();
   } catch (error) {
     const message = getErrorMessage(error);
     setStatus(`Microphone setup failed: ${message}`, 'error');
@@ -667,6 +699,7 @@ async function runMeasurement(): Promise<void> {
   }
 
   const outputFolder = state.outputFolder;
+  const measurementBackend = getSelectedMeasurementBackend();
   const deviceId = microphoneSelect.value;
   const outputDeviceId = outputSelect.value;
   const startFrequency = Number(startFrequencyInput.value);
@@ -680,7 +713,7 @@ async function runMeasurement(): Promise<void> {
     return;
   }
 
-  if (!deviceId) {
+  if (measurementBackend === 'web-audio' && !deviceId) {
     setStatus('Select a microphone before measuring.', 'error');
     appendLog('Measurement aborted because no microphone is selected.', 'error');
     return;
@@ -706,24 +739,58 @@ async function runMeasurement(): Promise<void> {
 
   try {
     setBusy(true);
-    setStatus('Capturing sweep measurement...', 'working');
-    appendLog('Opening the selected microphone and preparing the sweep.');
+    state.measurementBackend = measurementBackend;
 
-    const capture = await recordSweepMeasurement({
-      deviceId,
-      outputDeviceId,
-      startFrequency,
-      endFrequency,
-      durationSeconds,
-      sweepLevelDb,
-    });
+    let capture: Parameters<typeof analyzeMeasurement>[0];
+    let captureWav: Uint8Array;
+    let microphoneLabel: string;
+    let outputDeviceLabel: string;
+
+    if (measurementBackend === 'sox') {
+      setStatus('Capturing sweep measurement via SoX...', 'working');
+      appendLog('Running SoX with the system default input and output devices.');
+
+      const soxCapture = await window.freakishEars.runSoxMeasurement({
+        startFrequency,
+        endFrequency,
+        durationSeconds,
+        sweepLevelDb,
+        preRollSeconds: PRE_ROLL_SECONDS,
+        postRollSeconds: POST_ROLL_SECONDS,
+      });
+
+      capture = {
+        recording: soxCapture.recording,
+        sweep: soxCapture.sweep,
+        sampleRate: soxCapture.sampleRate,
+        preRollSamples: soxCapture.preRollSamples,
+      };
+      captureWav = soxCapture.recordingWav;
+      microphoneLabel = 'System default (SoX)';
+      outputDeviceLabel = 'System default (SoX)';
+    } else {
+      setStatus('Capturing sweep measurement...', 'working');
+      appendLog('Opening the selected microphone and preparing the sweep.');
+
+      capture = await recordSweepMeasurement({
+        deviceId,
+        outputDeviceId,
+        startFrequency,
+        endFrequency,
+        durationSeconds,
+        sweepLevelDb,
+      });
+      captureWav = encodeWavFile(capture.recording, capture.sampleRate);
+      microphoneLabel =
+        microphoneSelect.selectedOptions[0]?.textContent ?? 'Unknown microphone';
+      outputDeviceLabel =
+        outputSelect.selectedOptions[0]?.textContent ?? 'System default';
+    }
 
     setStatus('Processing response values...', 'working');
     appendLog('Captured raw PCM. Aligning the sweep and computing the response.');
 
     const analysis = analyzeMeasurement(capture, startFrequency, endFrequency);
-    const microphoneLabel = microphoneSelect.selectedOptions[0]?.textContent ?? 'Unknown microphone';
-    const outputDeviceLabel = outputSelect.selectedOptions[0]?.textContent ?? 'System default';
     const sessionName = `measurement-${formatTimestampForPath(new Date())}`;
     const measurementJson = buildMeasurementJson({
       analysis,
@@ -731,6 +798,7 @@ async function runMeasurement(): Promise<void> {
       microphoneLabel,
       outputDeviceLabel,
       settings: {
+        backend: measurementBackend,
         startFrequency,
         endFrequency,
         durationSeconds,
@@ -741,7 +809,6 @@ async function runMeasurement(): Promise<void> {
       splOffsetDb: state.splOffsetDb,
     });
     const measurementCsv = buildMeasurementCsv(analysis.points);
-    const captureWav = encodeWavFile(capture.recording, capture.sampleRate);
 
     const saveResult = await window.freakishEars.saveMeasurementSession({
       folderPath: outputFolder,
@@ -897,4 +964,14 @@ function formatOptionalMeasurementValue(
   unit: string,
 ): string {
   return Number.isFinite(value) ? `${value.toFixed(1)} ${unit}` : '--';
+}
+
+function readStoredMeasurementBackend(): MeasurementBackend {
+  return localStorage.getItem(MEASUREMENT_BACKEND_STORAGE_KEY) === 'sox'
+    ? 'sox'
+    : DEFAULT_MEASUREMENT_BACKEND;
+}
+
+function getSelectedMeasurementBackend(): MeasurementBackend {
+  return measurementBackendSelect.value === 'sox' ? 'sox' : 'web-audio';
 }
