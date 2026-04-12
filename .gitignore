@@ -90,3 +90,6 @@ typings/
 
 # Electron-Forge
 out/
+
+# Local Python env for external analysis
+.venv/

@@ -5,7 +5,7 @@ import {
   buildMeasurementCsv,
   buildMeasurementJson,
 } from '../renderer/measurements';
-import { analyzeMeasurement } from '../shared/measurement-analysis';
+import { analyzeMeasurement } from '../main/measurement-analysis';
 
 type CliOptions = {
   outputFolder: string;
@@ -34,7 +34,7 @@ async function main(): Promise<void> {
       preRollSeconds: PRE_ROLL_SECONDS,
       postRollSeconds: POST_ROLL_SECONDS,
     });
-    const analysis = analyzeMeasurement(
+    const analysis = await analyzeMeasurement(
       {
         recording: capture.recording,
         sweep: capture.sweep,

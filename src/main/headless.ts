@@ -7,7 +7,7 @@ import {
   buildMeasurementCsv,
   buildMeasurementJson,
 } from '../renderer/measurements';
-import { analyzeMeasurement } from '../shared/measurement-analysis';
+import { analyzeMeasurement } from './measurement-analysis';
 
 type HeadlessMeasurementOptions = {
   outputFolder: string;
@@ -40,7 +40,7 @@ export async function runHeadlessMeasurementMode(argv: string[]): Promise<void> 
       preRollSeconds: PRE_ROLL_SECONDS,
       postRollSeconds: POST_ROLL_SECONDS,
     });
-    const analysis = analyzeMeasurement(
+    const analysis = await analyzeMeasurement(
       {
         recording: capture.recording,
         sweep: capture.sweep,

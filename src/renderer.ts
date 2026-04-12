@@ -16,7 +16,7 @@ import {
   SPL_OFFSET_STORAGE_KEY,
   STORAGE_KEY,
 } from './renderer/constants';
-import { analyzeMeasurement, encodeWavFile, recordSweepMeasurement } from './renderer/audio';
+import { encodeWavFile, recordSweepMeasurement } from './renderer/audio';
 import {
   buildMeasurementCsv,
   buildMeasurementJson,
@@ -790,7 +790,11 @@ async function runMeasurement(): Promise<void> {
     setStatus('Processing response values...', 'working');
     appendLog('Captured raw PCM. Aligning the sweep and computing the response.');
 
-    const analysis = analyzeMeasurement(capture, startFrequency, endFrequency);
+    const analysis = await window.freakishEars.analyzeMeasurement({
+      capture,
+      startFrequency,
+      endFrequency,
+    });
     const sessionName = `measurement-${formatTimestampForPath(new Date())}`;
     const measurementJson = buildMeasurementJson({
       analysis,

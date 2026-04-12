@@ -1,5 +1,4 @@
 import { POST_ROLL_SECONDS, PRE_ROLL_SECONDS } from './constants';
-export { analyzeMeasurement } from '../shared/measurement-analysis';
 export { encodeWavFile } from '../shared/audio';
 import type {
   MeasurementCapture,

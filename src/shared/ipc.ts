@@ -3,6 +3,7 @@ export const IPC_CHANNELS = {
   saveMeasurementSession: 'files:saveMeasurementSession',
   showItemInFolder: 'files:showItemInFolder',
   runSoxMeasurement: 'measurement:runSoxMeasurement',
+  analyzeMeasurement: 'measurement:analyzeMeasurement',
 } as const;
 
 export type MeasurementBackend = 'web-audio' | 'sox';
@@ -28,6 +29,31 @@ export type SaveMeasurementResult = {
   filePaths: string[];
 };
 
+export type MeasurementPoint = {
+  frequencyHz: number;
+  magnitudeDbRelative: number;
+  phaseDegrees: number;
+  smoothedMagnitudeDbRelative: number;
+  smoothedPhaseDegrees: number;
+};
+
+export type MeasurementCapture = {
+  recording: Float32Array;
+  sweep: Float32Array;
+  sampleRate: number;
+  preRollSamples: number;
+};
+
+export type MeasurementAnalysis = {
+  sampleRate: number;
+  sweepStartSample: number;
+  latencyMs: number;
+  recordingLengthSeconds: number;
+  peakDbfs: number;
+  rmsDbfs: number;
+  points: MeasurementPoint[];
+};
+
 export type RunSoxMeasurementPayload = {
   startFrequency: number;
   endFrequency: number;
@@ -45,6 +71,12 @@ export type RunSoxMeasurementResult = {
   preRollSamples: number;
 };
 
+export type AnalyzeMeasurementPayload = {
+  capture: MeasurementCapture;
+  startFrequency: number;
+  endFrequency: number;
+};
+
 export type FreakishEarsApi = {
   selectOutputFolder: () => Promise<FolderSelectionResult>;
   saveMeasurementSession: (
@@ -54,4 +86,7 @@ export type FreakishEarsApi = {
   runSoxMeasurement: (
     payload: RunSoxMeasurementPayload,
   ) => Promise<RunSoxMeasurementResult>;
+  analyzeMeasurement: (
+    payload: AnalyzeMeasurementPayload,
+  ) => Promise<MeasurementAnalysis>;
 };
