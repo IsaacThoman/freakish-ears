@@ -914,11 +914,17 @@ function buildMeasurementPoints(
   const pointCount = 256;
   const binWidth = sampleRate / fftSize;
   const highestBin = responseReal.length - 1;
+  const nyquistLimitedEndFrequency = sampleRate * 0.45;
+  const effectiveEndFrequency = Math.min(
+    endFrequency * 0.97,
+    nyquistLimitedEndFrequency,
+  );
 
   for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
     const position = pointIndex / (pointCount - 1);
     const frequencyHz =
-      startFrequency * Math.pow(endFrequency / startFrequency, position);
+      startFrequency *
+      Math.pow(effectiveEndFrequency / startFrequency, position);
     const centerBin = clamp(
       Math.round(frequencyHz / binWidth),
       1,
