@@ -38,6 +38,8 @@ type MeasurementPoint = {
   smoothedMagnitudeDbRelative: number;
 };
 
+type MeasurementMagnitudeMode = 'relative' | 'spl';
+
 type MeasurementAnalysis = {
   sampleRate: number;
   sweepStartSample: number;
@@ -61,6 +63,7 @@ type LoadedMeasurement = {
   exportName: string;
   color: string;
   visible: boolean;
+  magnitudeMode: MeasurementMagnitudeMode;
   sourcePath: string | null;
   summary: MeasurementSummary;
   points: MeasurementPoint[];
@@ -91,15 +94,19 @@ type LogTone = 'neutral' | 'success' | 'error';
 type StatusTone = 'idle' | 'working' | 'success' | 'error';
 
 const STORAGE_KEY = 'freakish-ears-output-folder';
+const SPL_OFFSET_STORAGE_KEY = 'freakish-ears-spl-offset-db';
+const NORMALIZE_PLOT_STORAGE_KEY = 'freakish-ears-normalize-plot';
 const DEFAULT_START_FREQUENCY = 20;
 const DEFAULT_END_FREQUENCY = 20000;
 const DEFAULT_DURATION_SECONDS = 8;
 const MIN_SWEEP_LEVEL_DB = -60;
 const MAX_SWEEP_LEVEL_DB = 0;
 const DEFAULT_SWEEP_LEVEL_DB = -6;
+const DEFAULT_SPL_OFFSET_DB = 0;
 const DEFAULT_SWEEP_AMPLITUDE = 0.72;
 const PRE_ROLL_SECONDS = 0.35;
 const POST_ROLL_SECONDS = 0.55;
+const PLOT_NORMALIZATION_FREQUENCY_HZ = 1000;
 const PLOT_COLORS = ['#7ee7ff', '#ff8fab', '#8fe388', '#ffcc66', '#c7a6ff', '#ff9e64'];
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -166,6 +173,14 @@ app.innerHTML = `
           </div>
         </div>
 
+        <div class="field">
+          <label for="splOffsetInput">SPL Offset</label>
+          <div class="number-input-row">
+            <input id="splOffsetInput" class="level-number-input" type="number" min="-120" max="180" step="0.1" value="${DEFAULT_SPL_OFFSET_DB}" />
+            <span>dB</span>
+          </div>
+        </div>
+
         <button id="runMeasurementButton" class="btn btn-primary" type="button">
           Run
         </button>
@@ -196,6 +211,10 @@ app.innerHTML = `
         <div class="plot-toolbar">
           <span class="section-title">Measurements</span>
           <div class="plot-toolbar-actions">
+            <label class="plot-toggle">
+              <input id="normalizePlotToggle" type="checkbox" />
+              <span>Normalize @ 1 kHz</span>
+            </label>
             <button id="importMeasurementsButton" class="btn btn-secondary" type="button">
               Import
             </button>
@@ -225,6 +244,7 @@ const endFrequencyInput = getElement<HTMLInputElement>('endFrequencyInput');
 const durationInput = getElement<HTMLInputElement>('durationInput');
 const volumeInput = getElement<HTMLInputElement>('volumeInput');
 const volumeNumberInput = getElement<HTMLInputElement>('volumeNumberInput');
+const splOffsetInput = getElement<HTMLInputElement>('splOffsetInput');
 const runMeasurementButton = getElement<HTMLButtonElement>('runMeasurementButton');
 const statusPill = getElement<HTMLDivElement>('statusPill');
 const latencyValue = getElement<HTMLSpanElement>('latencyValue');
@@ -234,6 +254,7 @@ const savedPathValue = getElement<HTMLSpanElement>('savedPathValue');
 const importMeasurementsButton = getElement<HTMLButtonElement>(
   'importMeasurementsButton',
 );
+const normalizePlotToggle = getElement<HTMLInputElement>('normalizePlotToggle');
 const measurementFileInput = getElement<HTMLInputElement>('measurementFileInput');
 const plotCard = getElement<HTMLDivElement>('plotCard');
 const logList = getElement<HTMLUListElement>('logList');
@@ -241,6 +262,8 @@ const logList = getElement<HTMLUListElement>('logList');
 const state = {
   busy: false,
   outputFolder: localStorage.getItem(STORAGE_KEY),
+  splOffsetDb: readStoredNumber(SPL_OFFSET_STORAGE_KEY, DEFAULT_SPL_OFFSET_DB),
+  normalizePlot: localStorage.getItem(NORMALIZE_PLOT_STORAGE_KEY) === 'true',
   measurements: [] as LoadedMeasurement[],
   focusedMeasurementId: null as string | null,
   nextMeasurementIndex: 1,
@@ -324,12 +347,28 @@ volumeNumberInput.addEventListener('blur', () => {
   syncVolumeControls('number');
 });
 
+splOffsetInput.addEventListener('input', () => {
+  syncSplOffsetControl(false);
+});
+
+splOffsetInput.addEventListener('blur', () => {
+  syncSplOffsetControl(true);
+});
+
+normalizePlotToggle.addEventListener('change', () => {
+  state.normalizePlot = normalizePlotToggle.checked;
+  localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(state.normalizePlot));
+  renderMeasurements();
+});
+
 navigator.mediaDevices?.addEventListener?.('devicechange', () => {
   void refreshMicrophones(false);
 });
 
 updateSelectedFolder();
 syncVolumeControls('slider');
+syncSplOffsetControl(true);
+normalizePlotToggle.checked = state.normalizePlot;
 updateMeasurementActionState();
 appendLog('Click Refresh to access microphones and outputs.');
 void refreshMicrophones(false);
@@ -421,6 +460,33 @@ function syncVolumeControls(
 
   if (normalize) {
     volumeNumberInput.value = level.toFixed(0);
+  }
+}
+
+function syncSplOffsetControl(normalize: boolean): void {
+  const parsed = Number(splOffsetInput.value);
+  if (!Number.isFinite(parsed)) {
+    if (normalize) {
+      splOffsetInput.value = state.splOffsetDb.toFixed(1);
+    }
+
+    return;
+  }
+
+  const nextOffsetDb = clamp(parsed, -120, 180);
+  splOffsetInput.value = normalize
+    ? nextOffsetDb.toFixed(1)
+    : String(nextOffsetDb);
+
+  if (nextOffsetDb === state.splOffsetDb) {
+    return;
+  }
+
+  state.splOffsetDb = nextOffsetDb;
+  localStorage.setItem(SPL_OFFSET_STORAGE_KEY, String(nextOffsetDb));
+
+  if (state.measurements.length > 0) {
+    renderMeasurements();
   }
 }
 
@@ -1221,6 +1287,7 @@ function buildMeasurementJson(
         postRollSeconds: POST_ROLL_SECONDS,
         captureFormat: 'mono pcm 16-bit wav export',
         magnitudeUnits: 'relative dB',
+        splCalibrationOffsetDb: state.splOffsetDb,
       },
       sampleRate: analysis.sampleRate,
       sweepStartSample: analysis.sweepStartSample,
@@ -1248,15 +1315,22 @@ function buildMeasurementCsv(points: MeasurementPoint[]): string {
 }
 
 function buildRewMeasurementText(measurement: LoadedMeasurement): string {
+  const exportPoints = getMeasurementPointsForDisplay(measurement.points, measurement, false);
+  const exportUnitLabel =
+    measurement.magnitudeMode === 'relative' && state.splOffsetDb !== 0
+      ? `* Note: Magnitude values include the current SPL offset of ${state.splOffsetDb.toFixed(1)} dB.`
+      : measurement.magnitudeMode === 'relative'
+        ? '* Note: Magnitude values are exported in relative dB using the plotted response trace.'
+        : '* Note: Magnitude values are exported from the imported SPL trace.';
   const lines = [
     '* Measurement data exported by Freakish Ears',
     `* Source: ${measurement.sourcePath ?? 'Freakish Ears'}`,
     `* Dated: ${new Date().toLocaleString()}`,
     `* Measurement: ${measurement.name}`,
-    '* Note: Magnitude values are exported in dB using the plotted response trace.',
+    exportUnitLabel,
     '*',
     '* Freq(Hz) SPL(dB) Phase(degrees)',
-    ...measurement.points.map(
+    ...exportPoints.map(
       (point) =>
         `${point.frequencyHz.toFixed(6)} ${point.smoothedMagnitudeDbRelative.toFixed(4)} 0.0000`,
     ),
@@ -1273,6 +1347,7 @@ function parseImportedMeasurementFile(
   const baseName = stripFileExtension(file.name);
   const trimmed = contents.trim();
   let parsedPoints: MeasurementPoint[];
+  let magnitudeMode: MeasurementMagnitudeMode = 'spl';
   let displayName = baseName;
   let summary: MeasurementSummary = {
     latencyMs: null,
@@ -1283,12 +1358,13 @@ function parseImportedMeasurementFile(
 
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     const parsed = JSON.parse(trimmed) as
-      | {
+        | {
           microphoneLabel?: unknown;
           latencyMs?: unknown;
           peakDbfs?: unknown;
           responsePoints?: unknown;
           rmsDbfs?: unknown;
+          settings?: unknown;
         }
       | MeasurementPoint[];
 
@@ -1303,6 +1379,7 @@ function parseImportedMeasurementFile(
     }
 
     parsedPoints = normalizeMeasurementPoints(rawPoints);
+    magnitudeMode = inferJsonMeasurementMagnitudeMode(parsed);
 
     if (!Array.isArray(parsed) && typeof parsed.microphoneLabel === 'string') {
       displayName = parsed.microphoneLabel;
@@ -1318,17 +1395,52 @@ function parseImportedMeasurementFile(
     }
   } else if (looksLikeCsvMeasurement(contents)) {
     parsedPoints = parseCsvMeasurementPoints(contents);
+    magnitudeMode = 'relative';
   } else {
     parsedPoints = parseRewMeasurementPoints(contents);
+    magnitudeMode = inferTextMeasurementMagnitudeMode(contents);
   }
 
   return createLoadedMeasurement({
     name: displayName,
     exportName: baseName,
+    magnitudeMode,
     sourcePath: filePath,
     points: parsedPoints,
     summary,
   });
+}
+
+function inferJsonMeasurementMagnitudeMode(
+  parsed:
+    | {
+        settings?: unknown;
+      }
+    | MeasurementPoint[],
+): MeasurementMagnitudeMode {
+  if (Array.isArray(parsed) || !parsed.settings || typeof parsed.settings !== 'object') {
+    return 'relative';
+  }
+
+  const units = String(
+    (parsed.settings as Record<string, unknown>).magnitudeUnits ?? 'relative dB',
+  ).toLowerCase();
+
+  return units.includes('relative') ? 'relative' : 'spl';
+}
+
+function inferTextMeasurementMagnitudeMode(contents: string): MeasurementMagnitudeMode {
+  const lowerContents = contents.toLowerCase();
+  if (
+    lowerContents.includes('measurement data exported by freakish ears') ||
+    lowerContents.includes('relative db using the plotted response trace') ||
+    lowerContents.includes('relative dB using the plotted response trace'.toLowerCase()) ||
+    lowerContents.includes('include the current spl offset')
+  ) {
+    return 'relative';
+  }
+
+  return 'spl';
 }
 
 function looksLikeCsvMeasurement(contents: string): boolean {
@@ -1445,6 +1557,7 @@ function ensureMeasurementPoints(points: MeasurementPoint[]): MeasurementPoint[]
 function createLoadedMeasurement(input: {
   name: string;
   exportName: string;
+  magnitudeMode: MeasurementMagnitudeMode;
   sourcePath: string | null;
   points: MeasurementPoint[];
   summary: MeasurementSummary;
@@ -1458,6 +1571,7 @@ function createLoadedMeasurement(input: {
     exportName: sanitizeMeasurementName(input.exportName),
     color: PLOT_COLORS[(measurementIndex - 1) % PLOT_COLORS.length],
     visible: true,
+    magnitudeMode: input.magnitudeMode,
     sourcePath: input.sourcePath,
     summary: input.summary,
     points: input.points,
@@ -1679,6 +1793,7 @@ function renderMeasurement(
     createLoadedMeasurement({
       name: getPathBaseName(sessionDirectory),
       exportName: getPathBaseName(sessionDirectory),
+      magnitudeMode: 'relative',
       sourcePath: sessionDirectory,
       points: analysis.points,
       summary: {
@@ -1713,7 +1828,15 @@ function renderResponsePlot(
     `;
   }
 
-  const geometry = getResponsePlotGeometry(visibleMeasurements);
+  const plottedMeasurements = visibleMeasurements.map((measurement) => ({
+    measurement,
+    points: getMeasurementPointsForDisplay(
+      measurement.plotPoints,
+      measurement,
+      state.normalizePlot,
+    ),
+  }));
+  const geometry = getResponsePlotGeometry(plottedMeasurements.map((entry) => entry.points));
   const xTicks = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].filter(
     (frequency) =>
       frequency >= geometry.minFrequency && frequency <= geometry.maxFrequency,
@@ -1744,9 +1867,9 @@ function renderResponsePlot(
         .join('')}
       <line x1="${yAxisX}" y1="${xAxisY}" x2="${geometry.width - geometry.right}" y2="${xAxisY}" stroke="rgba(170,190,228,0.28)" />
       <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${xAxisY}" stroke="rgba(170,190,228,0.28)" />
-      ${visibleMeasurements
-        .map((measurement) => {
-          const path = measurement.plotPoints
+      ${plottedMeasurements
+        .map(({ measurement, points }) => {
+          const path = points
             .map((point) => {
               const x = getPlotX(point.frequencyHz, geometry);
               const y = getPlotY(point.smoothedMagnitudeDbRelative, geometry);
@@ -1777,7 +1900,7 @@ function renderResponsePlot(
         })
         .join('')}
       <text x="${(geometry.left + (geometry.width - geometry.right)) / 2}" y="${geometry.height - 12}" text-anchor="middle" class="plot-axis-label">Frequency (Hz, log)</text>
-      <text x="22" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 22 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">Response (dB)</text>
+      <text x="22" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 22 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">${state.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)'}</text>
     </svg>
     ${renderMeasurementList(allMeasurements)}
   `;
@@ -1834,7 +1957,15 @@ function attachPlotInteractions(measurements: LoadedMeasurement[]): void {
     return;
   }
 
-  const geometry = getResponsePlotGeometry(measurements);
+  const plottedMeasurements = measurements.map((measurement) => ({
+    measurement,
+    points: getMeasurementPointsForDisplay(
+      measurement.plotPoints,
+      measurement,
+      state.normalizePlot,
+    ),
+  }));
+  const geometry = getResponsePlotGeometry(plottedMeasurements.map((entry) => entry.points));
 
   const updateHover = (clientX: number) => {
     const bounds = svg.getBoundingClientRect();
@@ -1844,8 +1975,8 @@ function attachPlotInteractions(measurements: LoadedMeasurement[]): void {
     const hoverDetails: string[] = [];
     const hoverLineX = getPlotX(hoveredFrequency, geometry);
 
-    measurements.forEach((measurement, index) => {
-      const closestPoint = findClosestPoint(measurement.plotPoints, hoveredFrequency);
+    plottedMeasurements.forEach(({ measurement, points }, index) => {
+      const closestPoint = findClosestPoint(points, hoveredFrequency);
       const x = getPlotX(closestPoint.frequencyHz, geometry);
       const y = getPlotY(closestPoint.smoothedMagnitudeDbRelative, geometry);
 
@@ -1853,7 +1984,7 @@ function attachPlotInteractions(measurements: LoadedMeasurement[]): void {
       hoverDots[index]?.setAttribute('cy', y.toFixed(1));
       hoverDots[index]?.setAttribute('opacity', '1');
       hoverDetails.push(
-        `${measurement.name}: ${closestPoint.smoothedMagnitudeDbRelative.toFixed(1)} dB`,
+        `${measurement.name}: ${closestPoint.smoothedMagnitudeDbRelative.toFixed(1)} ${state.normalizePlot ? 'dB rel' : 'dB'}`,
       );
     });
 
@@ -1878,9 +2009,9 @@ function attachPlotInteractions(measurements: LoadedMeasurement[]): void {
 }
 
 function getResponsePlotGeometry(
-  measurements: LoadedMeasurement[],
+  measurementPointSets: MeasurementPoint[][],
 ): ResponsePlotGeometry {
-  const points = measurements.flatMap((measurement) => measurement.plotPoints);
+  const points = measurementPointSets.flatMap((measurement) => measurement);
   const frequencies = points.map((point) => point.frequencyHz);
   const smoothedValues = points.map((point) => point.smoothedMagnitudeDbRelative);
   const measuredTop = Math.max(...smoothedValues) + 3;
@@ -1900,6 +2031,30 @@ function getResponsePlotGeometry(
     minDb,
     maxDb,
   };
+}
+
+function getMeasurementPointsForDisplay(
+  points: MeasurementPoint[],
+  measurement: LoadedMeasurement,
+  normalizePlot: boolean,
+): MeasurementPoint[] {
+  const totalOffsetDb = normalizePlot
+    ? -findClosestPoint(points, PLOT_NORMALIZATION_FREQUENCY_HZ).smoothedMagnitudeDbRelative
+    : getMeasurementCalibrationOffsetDb(measurement);
+
+  if (totalOffsetDb === 0) {
+    return points;
+  }
+
+  return points.map((point) => ({
+    ...point,
+    magnitudeDbRelative: point.magnitudeDbRelative + totalOffsetDb,
+    smoothedMagnitudeDbRelative: point.smoothedMagnitudeDbRelative + totalOffsetDb,
+  }));
+}
+
+function getMeasurementCalibrationOffsetDb(measurement: LoadedMeasurement): number {
+  return measurement.magnitudeMode === 'relative' ? state.splOffsetDb : 0;
 }
 
 function getFrequencyForPlotX(
@@ -1949,6 +2104,12 @@ function getPathBaseName(filePath: string): string {
   const normalizedPath = filePath.replace(/\\/gu, '/');
   const baseName = normalizedPath.split('/').at(-1) ?? filePath;
   return baseName || 'measurement';
+}
+
+function readStoredNumber(storageKey: string, fallback: number): number {
+  const storedValue = localStorage.getItem(storageKey);
+  const parsed = Number(storedValue);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function escapeHtml(value: string): string {

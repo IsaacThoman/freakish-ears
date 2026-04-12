@@ -308,6 +308,21 @@ input {
   flex-wrap: wrap;
 }
 
+.plot-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-muted);
+}
+
+.plot-toggle input {
+  accent-color: var(--accent);
+}
+
 .plot-hover {
   margin-bottom: 8px;
   font-size: 13px;
