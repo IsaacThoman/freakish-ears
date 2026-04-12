@@ -127,13 +127,34 @@ input {
   align-items: center;
 }
 
+.number-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
 .range-input {
   width: 100%;
   accent-color: var(--accent);
 }
 
+.level-number-input {
+  width: 68px;
+  padding: 6px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text);
+  text-align: right;
+}
+
+.level-number-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .value-chip {
-  min-width: 56px;
+  min-width: 34px;
   padding: 4px 8px;
   text-align: right;
   background: var(--input-bg);
@@ -268,9 +289,16 @@ input {
 }
 
 .plot-card {
+  position: relative;
   padding: 12px;
   background: var(--input-bg);
   border-radius: 4px;
+}
+
+.plot-hover {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 .plot-card svg {
@@ -279,11 +307,21 @@ input {
   height: auto;
 }
 
+.plot-axis-text {
+  fill: var(--text-muted);
+  font-size: 13px;
+}
+
+.plot-axis-label {
+  fill: var(--text-muted);
+  font-size: 14px;
+}
+
 .plot-caption {
   display: flex;
   justify-content: space-between;
   margin-top: 8px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 

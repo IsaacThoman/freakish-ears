@@ -48,6 +48,19 @@ type MeasurementAnalysis = {
   points: MeasurementPoint[];
 };
 
+type ResponsePlotGeometry = {
+  width: number;
+  height: number;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  minFrequency: number;
+  maxFrequency: number;
+  minDb: number;
+  maxDb: number;
+};
+
 type MeasurementCapture = {
   recording: Float32Array;
   sweep: Float32Array;
@@ -85,7 +98,6 @@ app.innerHTML = `
         <span class="section-title">Input</span>
 
         <div class="field">
-          <label for="microphoneSelect">Microphone</label>
           <select id="microphoneSelect"></select>
         </div>
 
@@ -94,6 +106,10 @@ app.innerHTML = `
         </button>
 
         <span class="section-title">Output</span>
+
+        <div class="field">
+          <select id="outputSelect"></select>
+        </div>
 
         <div class="folder-row">
           <button id="chooseFolderButton" class="btn btn-secondary" type="button">
@@ -123,7 +139,10 @@ app.innerHTML = `
           <label for="volumeInput">Level</label>
           <div class="slider-row">
             <input id="volumeInput" class="range-input" type="range" min="${MIN_SWEEP_LEVEL_DB}" max="${MAX_SWEEP_LEVEL_DB}" step="1" value="${DEFAULT_SWEEP_LEVEL_DB}" />
-            <span id="volumeValue" class="value-chip">${DEFAULT_SWEEP_LEVEL_DB} dB</span>
+            <div class="number-input-row">
+              <input id="volumeNumberInput" class="level-number-input" type="number" min="${MIN_SWEEP_LEVEL_DB}" max="${MAX_SWEEP_LEVEL_DB}" step="1" value="${DEFAULT_SWEEP_LEVEL_DB}" />
+              <span>dB</span>
+            </div>
           </div>
         </div>
 
@@ -169,11 +188,12 @@ const microphoneSelect = getElement<HTMLSelectElement>('microphoneSelect');
 const refreshDevicesButton = getElement<HTMLButtonElement>('refreshDevicesButton');
 const chooseFolderButton = getElement<HTMLButtonElement>('chooseFolderButton');
 const selectedFolder = getElement<HTMLDivElement>('selectedFolder');
+const outputSelect = getElement<HTMLSelectElement>('outputSelect');
 const startFrequencyInput = getElement<HTMLInputElement>('startFrequencyInput');
 const endFrequencyInput = getElement<HTMLInputElement>('endFrequencyInput');
 const durationInput = getElement<HTMLInputElement>('durationInput');
 const volumeInput = getElement<HTMLInputElement>('volumeInput');
-const volumeValue = getElement<HTMLSpanElement>('volumeValue');
+const volumeNumberInput = getElement<HTMLInputElement>('volumeNumberInput');
 const runMeasurementButton = getElement<HTMLButtonElement>('runMeasurementButton');
 const statusPill = getElement<HTMLDivElement>('statusPill');
 const latencyValue = getElement<HTMLSpanElement>('latencyValue');
@@ -201,7 +221,15 @@ runMeasurementButton.addEventListener('click', () => {
 });
 
 volumeInput.addEventListener('input', () => {
-  updateVolumeLabel();
+  syncVolumeControls('slider');
+});
+
+volumeNumberInput.addEventListener('input', () => {
+  syncVolumeControls('number', false);
+});
+
+volumeNumberInput.addEventListener('blur', () => {
+  syncVolumeControls('number');
 });
 
 navigator.mediaDevices?.addEventListener?.('devicechange', () => {
@@ -209,8 +237,8 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => {
 });
 
 updateSelectedFolder();
-updateVolumeLabel();
-appendLog('Click Refresh to access microphones.');
+syncVolumeControls('slider');
+appendLog('Click Refresh to access microphones and outputs.');
 void refreshMicrophones(false);
 
 function getElement<TElement extends HTMLElement>(id: string): TElement {
@@ -229,10 +257,12 @@ function setBusy(isBusy: boolean): void {
   microphoneSelect.disabled = isBusy;
   refreshDevicesButton.disabled = isBusy;
   chooseFolderButton.disabled = isBusy;
+  outputSelect.disabled = isBusy;
   startFrequencyInput.disabled = isBusy;
   endFrequencyInput.disabled = isBusy;
   durationInput.disabled = isBusy;
   volumeInput.disabled = isBusy;
+  volumeNumberInput.disabled = isBusy;
   runMeasurementButton.disabled = isBusy;
 }
 
@@ -252,8 +282,37 @@ function updateSelectedFolder(): void {
   selectedFolder.textContent = state.outputFolder ?? 'None';
 }
 
-function updateVolumeLabel(): void {
-  volumeValue.textContent = `${clamp(Number(volumeInput.value), MIN_SWEEP_LEVEL_DB, MAX_SWEEP_LEVEL_DB).toFixed(0)} dB`;
+function syncVolumeControls(
+  source: 'slider' | 'number',
+  normalize = true,
+): void {
+  if (source === 'slider') {
+    const level = clamp(
+      Number(volumeInput.value),
+      MIN_SWEEP_LEVEL_DB,
+      MAX_SWEEP_LEVEL_DB,
+    );
+
+    volumeInput.value = level.toFixed(0);
+    volumeNumberInput.value = level.toFixed(0);
+    return;
+  }
+
+  const parsed = Number(volumeNumberInput.value);
+  if (!Number.isFinite(parsed)) {
+    if (normalize) {
+      volumeNumberInput.value = volumeInput.value;
+    }
+
+    return;
+  }
+
+  const level = clamp(parsed, MIN_SWEEP_LEVEL_DB, MAX_SWEEP_LEVEL_DB);
+  volumeInput.value = level.toFixed(0);
+
+  if (normalize) {
+    volumeNumberInput.value = level.toFixed(0);
+  }
 }
 
 async function chooseOutputFolder(): Promise<void> {
@@ -274,6 +333,7 @@ async function refreshMicrophones(requestPermission: boolean): Promise<void> {
     }
 
     const priorSelection = microphoneSelect.value;
+    const priorOutputSelection = outputSelect.value;
 
     if (requestPermission) {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -290,8 +350,15 @@ async function refreshMicrophones(requestPermission: boolean): Promise<void> {
     const microphones = devices.filter(
       (device) => device.kind === 'audioinput',
     );
+    const outputs = devices.filter((device) => device.kind === 'audiooutput');
 
     microphoneSelect.innerHTML = '';
+    outputSelect.innerHTML = '';
+
+    const defaultOutputOption = document.createElement('option');
+    defaultOutputOption.value = '';
+    defaultOutputOption.textContent = 'System default';
+    outputSelect.append(defaultOutputOption);
 
     if (microphones.length === 0) {
       const emptyOption = document.createElement('option');
@@ -309,6 +376,19 @@ async function refreshMicrophones(requestPermission: boolean): Promise<void> {
       microphoneSelect.append(option);
     }
 
+    const seenOutputIds = new Set<string>();
+    for (const output of outputs) {
+      if (!output.deviceId || seenOutputIds.has(output.deviceId)) {
+        continue;
+      }
+
+      seenOutputIds.add(output.deviceId);
+      const option = document.createElement('option');
+      option.value = output.deviceId;
+      option.textContent = output.label || 'Unnamed output';
+      outputSelect.append(option);
+    }
+
     const selectionStillExists = microphones.some(
       (microphone) => microphone.deviceId === priorSelection,
     );
@@ -317,7 +397,18 @@ async function refreshMicrophones(requestPermission: boolean): Promise<void> {
       microphoneSelect.value = priorSelection;
     }
 
-    appendLog(`Loaded ${microphones.length} microphone input(s).`, 'success');
+    const outputSelectionStillExists = Array.from(outputSelect.options).some(
+      (option) => option.value === priorOutputSelection,
+    );
+
+    if (outputSelectionStillExists) {
+      outputSelect.value = priorOutputSelection;
+    }
+
+    appendLog(
+      `Loaded ${microphones.length} microphone input(s) and ${seenOutputIds.size + 1} output option(s).`,
+      'success',
+    );
   } catch (error) {
     const message = getErrorMessage(error);
     setStatus(`Microphone setup failed: ${message}`, 'error');
@@ -332,6 +423,7 @@ async function runMeasurement(): Promise<void> {
 
   const outputFolder = state.outputFolder;
   const deviceId = microphoneSelect.value;
+  const outputDeviceId = outputSelect.value;
   const startFrequency = Number(startFrequencyInput.value);
   const endFrequency = Number(endFrequencyInput.value);
   const durationSeconds = Number(durationInput.value);
@@ -374,6 +466,7 @@ async function runMeasurement(): Promise<void> {
 
     const capture = await recordSweepMeasurement({
       deviceId,
+      outputDeviceId,
       startFrequency,
       endFrequency,
       durationSeconds,
@@ -391,11 +484,14 @@ async function runMeasurement(): Promise<void> {
 
     const microphoneLabel =
       microphoneSelect.selectedOptions[0]?.textContent ?? 'Unknown microphone';
+    const outputDeviceLabel =
+      outputSelect.selectedOptions[0]?.textContent ?? 'System default';
     const sessionName = `measurement-${formatTimestampForPath(new Date())}`;
     const measurementJson = buildMeasurementJson(
       analysis,
       capture,
       microphoneLabel,
+      outputDeviceLabel,
       { startFrequency, endFrequency, durationSeconds, sweepLevelDb },
     );
     const measurementCsv = buildMeasurementCsv(analysis.points);
@@ -434,6 +530,7 @@ async function runMeasurement(): Promise<void> {
 
 async function recordSweepMeasurement(settings: {
   deviceId: string;
+  outputDeviceId: string;
   startFrequency: number;
   endFrequency: number;
   durationSeconds: number;
@@ -462,6 +559,7 @@ async function recordSweepMeasurement(settings: {
   const processorNode = audioContext.createScriptProcessor(4096, 1, 1);
   const mutedGain = audioContext.createGain();
   const playbackGain = audioContext.createGain();
+  const playbackDestination = audioContext.createMediaStreamDestination();
   mutedGain.gain.value = 0;
   playbackGain.gain.value = Math.pow(10, settings.sweepLevelDb / 20);
 
@@ -479,6 +577,7 @@ async function recordSweepMeasurement(settings: {
   sourceNode.connect(processorNode);
   processorNode.connect(mutedGain);
   mutedGain.connect(audioContext.destination);
+  playbackGain.connect(playbackDestination);
 
   const sweepBuffer = audioContext.createBuffer(1, sweep.length, sampleRate);
   sweepBuffer.copyToChannel(sweep, 0);
@@ -486,7 +585,11 @@ async function recordSweepMeasurement(settings: {
   const sweepNode = audioContext.createBufferSource();
   sweepNode.buffer = sweepBuffer;
   sweepNode.connect(playbackGain);
-  playbackGain.connect(audioContext.destination);
+
+  const outputElement = await createOutputPlaybackElement(
+    playbackDestination.stream,
+    settings.outputDeviceId,
+  );
 
   await audioContext.resume();
 
@@ -502,6 +605,8 @@ async function recordSweepMeasurement(settings: {
   mutedGain.disconnect();
   playbackGain.disconnect();
   sourceNode.disconnect();
+  outputElement.pause();
+  outputElement.srcObject = null;
 
   for (const track of stream.getTracks()) {
     track.stop();
@@ -879,6 +984,7 @@ function buildMeasurementJson(
   analysis: MeasurementAnalysis,
   capture: MeasurementCapture,
   microphoneLabel: string,
+  outputDeviceLabel: string,
   settings: {
     startFrequency: number;
     endFrequency: number;
@@ -890,6 +996,7 @@ function buildMeasurementJson(
     {
       measuredAt: new Date().toISOString(),
       microphoneLabel,
+      outputDeviceLabel,
       settings: {
         ...settings,
         preRollSeconds: PRE_ROLL_SECONDS,
@@ -971,48 +1078,203 @@ function renderMeasurement(
   savedPathValue.textContent = sessionDirectory;
 
   plotCard.innerHTML = renderResponsePlot(analysis.points);
+  attachPlotInteractions(analysis.points);
 }
 
 function renderResponsePlot(points: MeasurementPoint[]): string {
-  const width = 960;
-  const height = 280;
-  const inset = 24;
-  const smoothedValues = points.map((point) => point.smoothedMagnitudeDbRelative);
-  const top = Math.max(...smoothedValues) + 3;
-  const bottom = Math.min(...smoothedValues) - 3;
-  const range = Math.max(24, top - bottom);
-  const normalizedTop = bottom + range;
-  const firstFrequency = points[0]?.frequencyHz ?? DEFAULT_START_FREQUENCY;
-  const lastFrequency = points.at(-1)?.frequencyHz ?? DEFAULT_END_FREQUENCY;
+  const geometry = getResponsePlotGeometry(points);
+  const xTicks = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].filter(
+    (frequency) =>
+      frequency >= geometry.minFrequency && frequency <= geometry.maxFrequency,
+  );
+  const yTicks = Array.from({ length: 5 }, (_unused, index) => {
+    const ratio = index / 4;
+    return geometry.maxDb - (geometry.maxDb - geometry.minDb) * ratio;
+  });
 
   const path = points
     .map((point) => {
-      const x =
-        inset +
-        ((Math.log10(point.frequencyHz) - Math.log10(firstFrequency)) /
-          (Math.log10(lastFrequency) - Math.log10(firstFrequency))) *
-          (width - inset * 2);
-      const y =
-        inset +
-        ((normalizedTop - point.smoothedMagnitudeDbRelative) / range) *
-          (height - inset * 2);
+      const x = getPlotX(point.frequencyHz, geometry);
+      const y = getPlotY(point.smoothedMagnitudeDbRelative, geometry);
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(' ');
 
+  const xAxisY = geometry.height - geometry.bottom;
+  const yAxisX = geometry.left;
+
   return `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Measured frequency response">
-      <rect x="0" y="0" width="${width}" height="${height}" rx="18" fill="rgba(255,255,255,0.02)"></rect>
-      <line x1="${inset}" y1="${height - inset}" x2="${width - inset}" y2="${height - inset}" stroke="rgba(170,190,228,0.28)" />
-      <line x1="${inset}" y1="${inset}" x2="${inset}" y2="${height - inset}" stroke="rgba(170,190,228,0.28)" />
+    <div class="plot-hover" id="plotHover">Hover: --</div>
+    <svg id="responsePlot" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response with logarithmic frequency axis">
+      <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
+      ${yTicks
+        .map((value) => {
+          const y = getPlotY(value, geometry);
+          return `<line x1="${geometry.left}" y1="${y.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.07)" />`;
+        })
+        .join('')}
+      ${xTicks
+        .map((frequency) => {
+          const x = getPlotX(frequency, geometry);
+          return `<line x1="${x.toFixed(1)}" y1="${geometry.top}" x2="${x.toFixed(1)}" y2="${xAxisY}" stroke="rgba(255,255,255,0.06)" />`;
+        })
+        .join('')}
+      <line x1="${yAxisX}" y1="${xAxisY}" x2="${geometry.width - geometry.right}" y2="${xAxisY}" stroke="rgba(170,190,228,0.28)" />
+      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${xAxisY}" stroke="rgba(170,190,228,0.28)" />
       <polyline points="${path}" fill="none" stroke="#7ee7ff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"></polyline>
+      <line id="plotHoverLine" x1="0" y1="${geometry.top}" x2="0" y2="${xAxisY}" stroke="#7ee7ff" stroke-width="1" opacity="0"></line>
+      <circle id="plotHoverDot" cx="0" cy="0" r="4" fill="#7ee7ff" opacity="0"></circle>
+      ${yTicks
+        .map((value) => {
+          const y = getPlotY(value, geometry);
+          return `<text x="${geometry.left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="plot-axis-text">${formatDbLabel(value)}</text>`;
+        })
+        .join('')}
+      ${xTicks
+        .map((frequency) => {
+          const x = getPlotX(frequency, geometry);
+          return `<text x="${x.toFixed(1)}" y="${geometry.height - 10}" text-anchor="middle" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
+        })
+        .join('')}
+      <text x="${(geometry.left + (geometry.width - geometry.right)) / 2}" y="${geometry.height - 12}" text-anchor="middle" class="plot-axis-label">Frequency (Hz, log)</text>
+      <text x="22" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 22 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">Relative response (dB)</text>
     </svg>
-    <div class="plot-caption">
-      <span>${firstFrequency.toFixed(0)} Hz</span>
-      <span>Relative response (smoothed)</span>
-      <span>${(lastFrequency >= 1000 ? lastFrequency / 1000 : lastFrequency).toFixed(lastFrequency >= 1000 ? 1 : 0)} ${lastFrequency >= 1000 ? 'kHz' : 'Hz'}</span>
-    </div>
   `;
+}
+
+function attachPlotInteractions(points: MeasurementPoint[]): void {
+  const svg = plotCard.querySelector<SVGSVGElement>('#responsePlot');
+  const hoverLine = plotCard.querySelector<SVGLineElement>('#plotHoverLine');
+  const hoverDot = plotCard.querySelector<SVGCircleElement>('#plotHoverDot');
+  const hoverLabel = plotCard.querySelector<HTMLDivElement>('#plotHover');
+
+  if (!svg || !hoverLine || !hoverDot || !hoverLabel || points.length === 0) {
+    return;
+  }
+
+  const geometry = getResponsePlotGeometry(points);
+
+  const updateHover = (clientX: number) => {
+    const bounds = svg.getBoundingClientRect();
+    const plotX =
+      ((clientX - bounds.left) / bounds.width) * geometry.width;
+    let closestPoint = points[0];
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    for (const point of points) {
+      const pointX = getPlotX(point.frequencyHz, geometry);
+      const distance = Math.abs(pointX - plotX);
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestPoint = point;
+      }
+    }
+
+    const x = getPlotX(closestPoint.frequencyHz, geometry);
+    const y = getPlotY(closestPoint.smoothedMagnitudeDbRelative, geometry);
+
+    hoverLine.setAttribute('x1', x.toFixed(1));
+    hoverLine.setAttribute('x2', x.toFixed(1));
+    hoverLine.setAttribute('opacity', '1');
+    hoverDot.setAttribute('cx', x.toFixed(1));
+    hoverDot.setAttribute('cy', y.toFixed(1));
+    hoverDot.setAttribute('opacity', '1');
+    hoverLabel.textContent = `Hover: ${formatFrequencyDetailed(closestPoint.frequencyHz)}, ${closestPoint.smoothedMagnitudeDbRelative.toFixed(1)} dB`;
+  };
+
+  svg.addEventListener('pointermove', (event) => {
+    updateHover(event.clientX);
+  });
+
+  svg.addEventListener('pointerleave', () => {
+    hoverLine.setAttribute('opacity', '0');
+    hoverDot.setAttribute('opacity', '0');
+    hoverLabel.textContent = 'Hover: --';
+  });
+}
+
+function getResponsePlotGeometry(points: MeasurementPoint[]): ResponsePlotGeometry {
+  const smoothedValues = points.map((point) => point.smoothedMagnitudeDbRelative);
+  const measuredTop = Math.max(...smoothedValues) + 3;
+  const measuredBottom = Math.min(...smoothedValues) - 3;
+  const minDb = measuredBottom;
+  const maxDb = measuredBottom + Math.max(24, measuredTop - measuredBottom);
+
+  return {
+    width: 960,
+    height: 320,
+    left: 72,
+    right: 24,
+    top: 18,
+    bottom: 56,
+    minFrequency: points[0]?.frequencyHz ?? DEFAULT_START_FREQUENCY,
+    maxFrequency: points.at(-1)?.frequencyHz ?? DEFAULT_END_FREQUENCY,
+    minDb,
+    maxDb,
+  };
+}
+
+function getPlotX(frequencyHz: number, geometry: ResponsePlotGeometry): number {
+  return (
+    geometry.left +
+    ((Math.log10(frequencyHz) - Math.log10(geometry.minFrequency)) /
+      (Math.log10(geometry.maxFrequency) - Math.log10(geometry.minFrequency))) *
+      (geometry.width - geometry.left - geometry.right)
+  );
+}
+
+function getPlotY(valueDb: number, geometry: ResponsePlotGeometry): number {
+  return (
+    geometry.top +
+    ((geometry.maxDb - valueDb) / (geometry.maxDb - geometry.minDb)) *
+      (geometry.height - geometry.top - geometry.bottom)
+  );
+}
+
+function formatFrequencyLabel(frequencyHz: number): string {
+  if (frequencyHz >= 1000) {
+    return `${(frequencyHz / 1000).toFixed(frequencyHz >= 10000 ? 0 : 1)}k`;
+  }
+
+  return frequencyHz.toFixed(0);
+}
+
+function formatFrequencyDetailed(frequencyHz: number): string {
+  if (frequencyHz >= 1000) {
+    return `${(frequencyHz / 1000).toFixed(2)} kHz`;
+  }
+
+  return `${frequencyHz.toFixed(1)} Hz`;
+}
+
+function formatDbLabel(valueDb: number): string {
+  return `${valueDb.toFixed(0)} dB`;
+}
+
+async function createOutputPlaybackElement(
+  stream: MediaStream,
+  outputDeviceId: string,
+): Promise<HTMLAudioElement> {
+  const audioElement = new Audio();
+  const sinkAudioElement = audioElement as HTMLAudioElement & {
+    setSinkId?: (sinkId: string) => Promise<void>;
+  };
+
+  audioElement.autoplay = true;
+  audioElement.volume = 1;
+  audioElement.srcObject = stream;
+
+  if (outputDeviceId) {
+    if (!sinkAudioElement.setSinkId) {
+      throw new Error('Output device selection is not supported on this platform.');
+    }
+
+    await sinkAudioElement.setSinkId(outputDeviceId);
+  }
+
+  await audioElement.play();
+  return audioElement;
 }
 
 function clamp(value: number, min: number, max: number): number {

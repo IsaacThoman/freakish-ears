@@ -54,7 +54,7 @@ const createWindow = () => {
 
   mainWindow.webContents.session.setPermissionRequestHandler(
     (_webContents, permission, callback) => {
-      callback(permission === 'media');
+      callback(permission === 'media' || permission === 'speaker-selection');
     },
   );
 
