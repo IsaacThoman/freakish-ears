@@ -325,6 +325,18 @@ input {
   gap: 8px;
 }
 
+.plot-view-switch {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plot-view-button[data-active='true'] {
+  border-color: var(--accent);
+  background: rgba(240, 121, 0, 0.14);
+  color: var(--text);
+}
+
 .plot-toolbar-actions {
   display: flex;
   gap: 8px;
@@ -475,6 +487,7 @@ input {
 
 .measurement-toggle input {
   flex: 0 0 auto;
+  accent-color: var(--accent);
 }
 
 .measurement-swatch {
@@ -506,6 +519,129 @@ input {
 
 .measurement-remove-button {
   flex: 0 0 auto;
+}
+
+.apo-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.apo-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.apo-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.apo-apply-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.apo-apply-warning {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  display: none;
+  align-items: center;
+  gap: 12px;
+  min-width: 280px;
+  padding: 12px 14px;
+  border: 1px solid rgba(248, 161, 69, 0.5);
+  border-radius: 6px;
+  background: rgba(77, 43, 11, 0.96);
+  color: #ffd4a6;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+  z-index: 5;
+}
+
+.apo-apply-warning span {
+  white-space: nowrap;
+}
+
+.apo-apply-anchor:hover .apo-apply-warning,
+.apo-apply-anchor:focus-within .apo-apply-warning,
+.apo-apply-warning:hover,
+.apo-apply-warning:focus-within {
+  display: inline-flex;
+}
+
+.apo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.apo-settings-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.apo-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.apo-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.apo-filter-row {
+  display: grid;
+  grid-template-columns: auto 70px minmax(90px, 1fr) minmax(90px, 1fr) minmax(80px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.apo-filter-row.is-hidden {
+  opacity: 0.6;
+}
+
+.apo-filter-row select,
+.apo-filter-row input,
+.apo-config-preview {
+  padding: 6px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.apo-filter-enabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.apo-filter-enabled input {
+  accent-color: var(--accent);
+}
+
+.apo-config-preview {
+  min-height: 132px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.apo-config-preview:focus,
+.apo-filter-row select:focus,
+.apo-filter-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(240, 121, 0, 0.2);
 }
 
 .log-list {
@@ -620,6 +756,17 @@ input {
   .measurement-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .apo-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .apo-grid,
+  .apo-settings-row,
+  .apo-filter-row {
+    grid-template-columns: 1fr;
   }
 
   .measurement-toggle {

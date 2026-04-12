@@ -3,6 +3,9 @@ export const IPC_CHANNELS = {
   saveMeasurementSession: 'files:saveMeasurementSession',
   showItemInFolder: 'files:showItemInFolder',
   runSoxMeasurement: 'measurement:runSoxMeasurement',
+  getEqualizerApoStatus: 'equalizerApo:getStatus',
+  applyEqualizerApoConfig: 'equalizerApo:applyConfig',
+  disablePeace: 'equalizerApo:disablePeace',
 } as const;
 
 export type MeasurementBackend = 'web-audio' | 'sox';
@@ -50,6 +53,31 @@ export type RunSoxMeasurementResult = {
   preRollSamples: number;
 };
 
+export type EqualizerApoStatus = {
+  installed: boolean;
+  configFolderPath: string | null;
+  configPath: string | null;
+  profilePath: string | null;
+  peaceInstalled: boolean;
+  peaceRunning: boolean;
+  peaceIncludedInConfig: boolean;
+  freakishEarsIncludedInConfig: boolean;
+};
+
+export type ApplyEqualizerApoConfigPayload = {
+  configText: string;
+};
+
+export type ApplyEqualizerApoConfigResult = {
+  configPath: string;
+  profilePath: string;
+};
+
+export type DisablePeaceResult = {
+  disabled: boolean;
+  processKilled: boolean;
+};
+
 export type FreakishEarsApi = {
   selectOutputFolder: () => Promise<FolderSelectionResult>;
   saveMeasurementSession: (
@@ -59,4 +87,9 @@ export type FreakishEarsApi = {
   runSoxMeasurement: (
     payload: RunSoxMeasurementPayload,
   ) => Promise<RunSoxMeasurementResult>;
+  getEqualizerApoStatus: () => Promise<EqualizerApoStatus>;
+  applyEqualizerApoConfig: (
+    payload: ApplyEqualizerApoConfigPayload,
+  ) => Promise<ApplyEqualizerApoConfigResult>;
+  disablePeace: () => Promise<DisablePeaceResult>;
 };

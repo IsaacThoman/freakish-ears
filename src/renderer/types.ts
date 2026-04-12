@@ -1,3 +1,5 @@
+import type { EqualizerApoStatus } from '../shared/ipc';
+
 export type ToastState = {
   message: string;
   actionLabel: string;
@@ -82,6 +84,19 @@ export type MeasurementImport = {
   summary: MeasurementSummary;
 };
 
+export type ApoFilterKind = 'PK';
+
+export type ApoFilter = {
+  id: string;
+  enabled: boolean;
+  kind: ApoFilterKind;
+  frequencyHz: number;
+  gainDb: number;
+  q: number;
+};
+
+export type PlotViewMode = 'measurements' | 'apo';
+
 export type AppState = {
   busy: boolean;
   outputFolder: string | null;
@@ -94,6 +109,15 @@ export type AppState = {
   focusedMeasurementId: string | null;
   nextMeasurementIndex: number;
   nextReferenceIndex: number;
+  apoFilters: ApoFilter[];
+  apoSelectedMeasurementId: string | null;
+  apoSelectedReferenceId: string | null;
+  apoMaxFilters: number;
+  apoMaxBoostDb: number;
+  apoMaxCutDb: number;
+  nextApoFilterIndex: number;
+  plotViewMode: PlotViewMode;
+  equalizerApoStatus: EqualizerApoStatus | null;
   toast: ToastState | null;
   toastTimeoutId: number;
 };

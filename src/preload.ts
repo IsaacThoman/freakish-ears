@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from './shared/ipc';
 import type {
+  ApplyEqualizerApoConfigPayload,
   FreakishEarsApi,
   RunSoxMeasurementPayload,
   SaveMeasurementPayload,
@@ -14,6 +15,10 @@ const api: FreakishEarsApi = {
     ipcRenderer.invoke(IPC_CHANNELS.showItemInFolder, filePath),
   runSoxMeasurement: (payload: RunSoxMeasurementPayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.runSoxMeasurement, payload),
+  getEqualizerApoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getEqualizerApoStatus),
+  applyEqualizerApoConfig: (payload: ApplyEqualizerApoConfigPayload) =>
+    ipcRenderer.invoke(IPC_CHANNELS.applyEqualizerApoConfig, payload),
+  disablePeace: () => ipcRenderer.invoke(IPC_CHANNELS.disablePeace),
 };
 
 contextBridge.exposeInMainWorld('freakishEars', api);

@@ -2,7 +2,16 @@ import './index.css';
 import logoUrl from './assets/dutocal-logo.webp';
 
 import {
+  APO_FILTERS_STORAGE_KEY,
+  APO_MAX_BOOST_STORAGE_KEY,
+  APO_MAX_CUT_STORAGE_KEY,
+  APO_MAX_FILTERS_STORAGE_KEY,
+  APO_SELECTED_MEASUREMENT_STORAGE_KEY,
+  APO_SELECTED_REFERENCE_STORAGE_KEY,
   DEFAULT_MEASUREMENT_BACKEND,
+  DEFAULT_APO_MAX_BOOST_DB,
+  DEFAULT_APO_MAX_CUT_DB,
+  DEFAULT_APO_MAX_FILTERS,
   DEFAULT_DURATION_SECONDS,
   DEFAULT_END_FREQUENCY,
   DEFAULT_SAMPLE_RATE,
@@ -14,6 +23,7 @@ import {
   MAX_SWEEP_LEVEL_DB,
   MIN_SWEEP_LEVEL_DB,
   NORMALIZE_PLOT_STORAGE_KEY,
+  PLOT_VIEW_MODE_STORAGE_KEY,
   POST_ROLL_SECONDS,
   PRE_ROLL_SECONDS,
   SAMPLE_RATE_OPTIONS,
@@ -30,16 +40,19 @@ import {
   createReferenceCurve,
   createLoadedMeasurement,
   createMeasurementFromAnalysis,
+  getMeasurementPointsForDisplay,
   parseImportedMeasurementFile,
 } from './renderer/measurements';
-import { attachPlotInteractions, renderResponsePlot } from './renderer/plot';
+import { attachPlotInteractions, renderApoEqPlot, renderResponsePlot } from './renderer/plot';
 import type {
+  ApoFilter,
   AppState,
   LoadedMeasurement,
   LogTone,
   MeasurementBackend,
   MeasurementChannelSelection,
   MeasurementSmoothingMode,
+  PlotViewMode,
   ReferenceCurve,
   StatusTone,
   ToastState,
@@ -47,6 +60,7 @@ import type {
 import {
   clamp,
   escapeHtml,
+  findClosestPoint,
   formatTimestampForPath,
   getErrorMessage,
   readStoredNumber,
@@ -196,7 +210,10 @@ app.innerHTML = `
         </div>
 
         <div class="plot-toolbar">
-          <span class="section-title">Measurements</span>
+          <div class="plot-view-switch" role="tablist" aria-label="Plot views">
+            <button id="measurementsViewButton" class="btn btn-secondary plot-view-button" type="button">Measurements</button>
+            <button id="apoViewButton" class="btn btn-secondary plot-view-button" type="button">EQ Graph</button>
+          </div>
           <div class="plot-toolbar-actions">
             <label class="plot-toggle">
               <input id="normalizePlotToggle" type="checkbox" />
@@ -223,6 +240,68 @@ app.innerHTML = `
 
         <div id="plotCard" class="plot-card">
           <span style="color:var(--text-muted);font-size:11px">Run or import measurements to plot response</span>
+        </div>
+
+        <div class="apo-card">
+          <div class="apo-toolbar">
+            <span class="section-title">Equalizer APO</span>
+            <div class="apo-toolbar-actions">
+              <button id="generateApoFiltersButton" class="btn btn-secondary" type="button">
+                Generate
+              </button>
+              <button id="addApoFilterButton" class="btn btn-secondary" type="button">
+                Add Filter
+              </button>
+              <button id="exportApoConfigButton" class="btn btn-secondary" type="button">
+                Export APO
+              </button>
+              <div class="apo-apply-anchor">
+                <button id="applyApoConfigButton" class="btn btn-secondary" type="button">
+                  Apply APO
+                </button>
+                <div id="apoApplyWarning" class="apo-apply-warning" hidden>
+                  <span>PEACE is running</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="apo-grid">
+            <div class="field">
+              <label for="apoMeasurementSelect">Measurement</label>
+              <select id="apoMeasurementSelect"></select>
+            </div>
+
+            <div class="field">
+              <label for="apoReferenceSelect">Target</label>
+              <select id="apoReferenceSelect"></select>
+            </div>
+          </div>
+
+          <div class="inline-row apo-settings-row">
+            <div class="inline-field">
+              <label for="apoMaxFiltersInput">Filters</label>
+              <input id="apoMaxFiltersInput" type="number" min="1" max="16" step="1" value="${DEFAULT_APO_MAX_FILTERS}" />
+            </div>
+            <div class="inline-field">
+              <label for="apoMaxBoostInput">Max Boost</label>
+              <input id="apoMaxBoostInput" type="number" min="0" max="24" step="0.5" value="${DEFAULT_APO_MAX_BOOST_DB}" />
+            </div>
+            <div class="inline-field">
+              <label for="apoMaxCutInput">Max Cut</label>
+              <input id="apoMaxCutInput" type="number" min="0" max="24" step="0.5" value="${DEFAULT_APO_MAX_CUT_DB}" />
+            </div>
+          </div>
+
+          <span class="apo-hint">Generate a basic peaking-EQ set from the difference between the selected measurement and target curve, then fine-tune the filters below.</span>
+          <span id="apoApplyStatus" class="apo-hint"></span>
+
+          <div id="apoFilterList" class="apo-filter-list"></div>
+
+          <div class="field">
+            <label for="apoConfigPreview">APO Config Preview</label>
+            <textarea id="apoConfigPreview" class="apo-config-preview" readonly></textarea>
+          </div>
         </div>
 
         <span class="section-title">Log</span>
@@ -260,10 +339,25 @@ const importMeasurementsButton = getElement<HTMLButtonElement>('importMeasuremen
 const importReferenceButton = getElement<HTMLButtonElement>('importReferenceButton');
 const normalizePlotToggle = getElement<HTMLInputElement>('normalizePlotToggle');
 const smoothingModeSelect = getElement<HTMLSelectElement>('smoothingModeSelect');
+const measurementsViewButton = getElement<HTMLButtonElement>('measurementsViewButton');
+const apoViewButton = getElement<HTMLButtonElement>('apoViewButton');
 const measurementFileInput = getElement<HTMLInputElement>('measurementFileInput');
 const referenceFileInput = getElement<HTMLInputElement>('referenceFileInput');
 const configFileInput = getElement<HTMLInputElement>('configFileInput');
 const plotCard = getElement<HTMLDivElement>('plotCard');
+const generateApoFiltersButton = getElement<HTMLButtonElement>('generateApoFiltersButton');
+const addApoFilterButton = getElement<HTMLButtonElement>('addApoFilterButton');
+const exportApoConfigButton = getElement<HTMLButtonElement>('exportApoConfigButton');
+const applyApoConfigButton = getElement<HTMLButtonElement>('applyApoConfigButton');
+const apoApplyWarning = getElement<HTMLDivElement>('apoApplyWarning');
+const apoMeasurementSelect = getElement<HTMLSelectElement>('apoMeasurementSelect');
+const apoReferenceSelect = getElement<HTMLSelectElement>('apoReferenceSelect');
+const apoMaxFiltersInput = getElement<HTMLInputElement>('apoMaxFiltersInput');
+const apoMaxBoostInput = getElement<HTMLInputElement>('apoMaxBoostInput');
+const apoMaxCutInput = getElement<HTMLInputElement>('apoMaxCutInput');
+const apoFilterList = getElement<HTMLDivElement>('apoFilterList');
+const apoConfigPreview = getElement<HTMLTextAreaElement>('apoConfigPreview');
+const apoApplyStatus = getElement<HTMLSpanElement>('apoApplyStatus');
 const logList = getElement<HTMLUListElement>('logList');
 const toastButton = getElement<HTMLButtonElement>('toastButton');
 
@@ -279,9 +373,36 @@ const state: AppState = {
   focusedMeasurementId: null,
   nextMeasurementIndex: 1,
   nextReferenceIndex: 1,
+  apoFilters: readStoredApoFilters(),
+  apoSelectedMeasurementId: localStorage.getItem(APO_SELECTED_MEASUREMENT_STORAGE_KEY),
+  apoSelectedReferenceId: localStorage.getItem(APO_SELECTED_REFERENCE_STORAGE_KEY),
+  apoMaxFilters: clamp(
+    readStoredNumber(APO_MAX_FILTERS_STORAGE_KEY, DEFAULT_APO_MAX_FILTERS),
+    1,
+    16,
+  ),
+  apoMaxBoostDb: clamp(
+    readStoredNumber(APO_MAX_BOOST_STORAGE_KEY, DEFAULT_APO_MAX_BOOST_DB),
+    0,
+    24,
+  ),
+  apoMaxCutDb: clamp(
+    readStoredNumber(APO_MAX_CUT_STORAGE_KEY, DEFAULT_APO_MAX_CUT_DB),
+    0,
+    24,
+  ),
+  nextApoFilterIndex: 1,
+  plotViewMode: readStoredPlotViewMode(),
+  equalizerApoStatus: null,
   toast: null,
   toastTimeoutId: 0,
 };
+
+state.nextApoFilterIndex =
+  state.apoFilters.reduce((maxId, filter) => {
+    const numericId = Number(filter.id.replace('apo-filter-', ''));
+    return Number.isFinite(numericId) ? Math.max(maxId, numericId) : maxId;
+  }, 0) + 1;
 
 chooseFolderButton.addEventListener('click', () => {
   void chooseOutputFolder();
@@ -429,6 +550,103 @@ smoothingModeSelect.addEventListener('change', () => {
   state.smoothingMode = getSelectedSmoothingMode();
   localStorage.setItem(SMOOTHING_MODE_STORAGE_KEY, state.smoothingMode);
   renderMeasurements();
+  renderApoSection();
+});
+
+measurementsViewButton.addEventListener('click', () => {
+  setPlotViewMode('measurements');
+});
+
+apoViewButton.addEventListener('click', () => {
+  setPlotViewMode('apo');
+});
+
+generateApoFiltersButton.addEventListener('click', () => {
+  void generateApoFilters();
+});
+
+addApoFilterButton.addEventListener('click', () => {
+  addApoFilter();
+});
+
+exportApoConfigButton.addEventListener('click', () => {
+  void exportApoConfig();
+});
+
+applyApoConfigButton.addEventListener('click', () => {
+  void applyApoConfig();
+});
+
+apoMeasurementSelect.addEventListener('change', () => {
+  state.apoSelectedMeasurementId = apoMeasurementSelect.value || null;
+  persistApoSelections();
+  renderApoSection();
+});
+
+apoReferenceSelect.addEventListener('change', () => {
+  state.apoSelectedReferenceId = apoReferenceSelect.value || null;
+  persistApoSelections();
+  renderApoSection();
+});
+
+apoMaxFiltersInput.addEventListener('input', () => {
+  syncApoGenerationSettings(false);
+});
+
+apoMaxFiltersInput.addEventListener('blur', () => {
+  syncApoGenerationSettings(true);
+});
+
+apoMaxBoostInput.addEventListener('input', () => {
+  syncApoGenerationSettings(false);
+});
+
+apoMaxBoostInput.addEventListener('blur', () => {
+  syncApoGenerationSettings(true);
+});
+
+apoMaxCutInput.addEventListener('input', () => {
+  syncApoGenerationSettings(false);
+});
+
+apoMaxCutInput.addEventListener('blur', () => {
+  syncApoGenerationSettings(true);
+});
+
+apoFilterList.addEventListener('change', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const filterId = target.dataset.apoFilterId;
+  const field = target.dataset.apoField;
+  if (!filterId || !field) {
+    return;
+  }
+
+  if (field === 'enabled' && target instanceof HTMLInputElement) {
+    updateApoFilter(filterId, field, target.checked);
+    return;
+  }
+
+  if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
+    updateApoFilter(filterId, field, target.value);
+  }
+});
+
+apoFilterList.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+
+  const removeButton = target.closest<HTMLButtonElement>('[data-apo-filter-remove]');
+  const filterId = removeButton?.dataset.apoFilterRemove;
+
+  if (filterId) {
+    removeApoFilter(filterId);
+  }
 });
 
 toastButton.addEventListener('click', () => {
@@ -451,9 +669,14 @@ syncVolumeControls('slider');
 syncSplOffsetControl(true);
 normalizePlotToggle.checked = state.normalizePlot;
 smoothingModeSelect.value = state.smoothingMode;
+apoMaxFiltersInput.value = String(state.apoMaxFilters);
+apoMaxBoostInput.value = String(state.apoMaxBoostDb);
+apoMaxCutInput.value = String(state.apoMaxCutDb);
 hideToast();
 updateMeasurementActionState();
+renderApoSection();
 appendLog('Click Refresh to access microphones and outputs.');
+void refreshEqualizerApoStatus();
 void refreshMicrophones(false);
 
 function getElement<TElement extends HTMLElement>(id: string): TElement {
@@ -489,6 +712,17 @@ function setBusy(isBusy: boolean): void {
   configFileInput.disabled = isBusy;
   measurementBackendSelect.disabled = isBusy;
   smoothingModeSelect.disabled = isBusy;
+  measurementsViewButton.disabled = isBusy;
+  apoViewButton.disabled = isBusy;
+  generateApoFiltersButton.disabled = isBusy;
+  addApoFilterButton.disabled = isBusy;
+  exportApoConfigButton.disabled = isBusy;
+  applyApoConfigButton.disabled = isBusy;
+  apoMeasurementSelect.disabled = isBusy;
+  apoReferenceSelect.disabled = isBusy;
+  apoMaxFiltersInput.disabled = isBusy;
+  apoMaxBoostInput.disabled = isBusy;
+  apoMaxCutInput.disabled = isBusy;
   updateMeasurementBackendUi();
 
   updateMeasurementActionState();
@@ -524,6 +758,13 @@ function updateMeasurementActionState(): void {
   importReferenceButton.disabled = state.busy;
   saveConfigButton.disabled = state.busy;
   importConfigButton.disabled = state.busy;
+  generateApoFiltersButton.disabled =
+    state.busy || !state.apoSelectedMeasurementId || !state.apoSelectedReferenceId;
+  addApoFilterButton.disabled = state.busy;
+  exportApoConfigButton.disabled = state.busy || !state.outputFolder;
+  const enabledFilterCount = state.apoFilters.filter((filter) => filter.enabled).length;
+  const apoInstalled = state.equalizerApoStatus?.installed ?? false;
+  applyApoConfigButton.disabled = state.busy || enabledFilterCount === 0 || !apoInstalled;
 }
 
 function updateMeasurementBackendUi(): void {
@@ -1020,7 +1261,12 @@ function takeMeasurementFromAnalysis(
 function addMeasurement(measurement: LoadedMeasurement): void {
   state.measurements = [...state.measurements, measurement];
   state.focusedMeasurementId = measurement.id;
+  if (!state.apoSelectedMeasurementId) {
+    state.apoSelectedMeasurementId = measurement.id;
+    persistApoSelections();
+  }
   renderMeasurements();
+  renderApoSection();
 }
 
 function addReferenceCurve(referenceCurve: ReferenceCurve): void {
@@ -1029,6 +1275,11 @@ function addReferenceCurve(referenceCurve: ReferenceCurve): void {
     referenceCurve,
   ];
   renderMeasurements();
+  if (!state.apoSelectedReferenceId) {
+    state.apoSelectedReferenceId = referenceCurve.id;
+    persistApoSelections();
+  }
+  renderApoSection();
 }
 
 function setMeasurementVisibility(measurementId: string, visible: boolean): void {
@@ -1066,7 +1317,13 @@ function removeMeasurement(measurementId: string): void {
     state.focusedMeasurementId = state.measurements.at(-1)?.id ?? null;
   }
 
+  if (state.apoSelectedMeasurementId === measurementId) {
+    state.apoSelectedMeasurementId = state.measurements.at(-1)?.id ?? null;
+    persistApoSelections();
+  }
+
   renderMeasurements();
+  renderApoSection();
 }
 
 function removeReferenceCurve(referenceId: string): void {
@@ -1082,7 +1339,13 @@ function removeReferenceCurve(referenceId: string): void {
     appendLog(`Removed reference curve ${removedReference.name}.`);
   }
 
+  if (state.apoSelectedReferenceId === referenceId) {
+    state.apoSelectedReferenceId = state.referenceCurves.at(-1)?.id ?? null;
+    persistApoSelections();
+  }
+
   renderMeasurements();
+  renderApoSection();
 }
 
 function renderMeasurements(): void {
@@ -1100,6 +1363,30 @@ function renderMeasurements(): void {
     )
   ) {
     state.focusedMeasurementId = state.measurements.at(-1)?.id ?? null;
+  }
+
+  renderPlotCard(visibleMeasurements, visibleReferenceCurves);
+  updateMeasurementSummary();
+  updateMeasurementActionState();
+  renderApoSection();
+}
+
+function renderPlotCard(
+  visibleMeasurements: LoadedMeasurement[],
+  visibleReferenceCurves: ReferenceCurve[],
+): void {
+  updatePlotViewButtons();
+
+  if (state.plotViewMode === 'apo') {
+    const measurement = getSelectedApoMeasurement();
+    const referenceCurve = getSelectedApoReference();
+
+    plotCard.innerHTML = renderApoEqPlot({
+      filters: state.apoFilters,
+      measurementName: measurement?.name ?? null,
+      targetName: referenceCurve?.name ?? null,
+    });
+    return;
   }
 
   plotCard.innerHTML = renderResponsePlot({
@@ -1121,8 +1408,6 @@ function renderMeasurements(): void {
     smoothingMode: state.smoothingMode,
     splOffsetDb: state.splOffsetDb,
   });
-  updateMeasurementSummary();
-  updateMeasurementActionState();
 }
 
 function updateMeasurementSummary(): void {
@@ -1168,6 +1453,27 @@ function readStoredMeasurementBackend(): MeasurementBackend {
   return localStorage.getItem(MEASUREMENT_BACKEND_STORAGE_KEY) === 'sox'
     ? 'sox'
     : DEFAULT_MEASUREMENT_BACKEND;
+}
+
+function readStoredPlotViewMode(): PlotViewMode {
+  return localStorage.getItem(PLOT_VIEW_MODE_STORAGE_KEY) === 'apo'
+    ? 'apo'
+    : 'measurements';
+}
+
+function setPlotViewMode(viewMode: PlotViewMode): void {
+  if (state.plotViewMode === viewMode) {
+    return;
+  }
+
+  state.plotViewMode = viewMode;
+  localStorage.setItem(PLOT_VIEW_MODE_STORAGE_KEY, viewMode);
+  renderMeasurements();
+}
+
+function updatePlotViewButtons(): void {
+  measurementsViewButton.dataset.active = state.plotViewMode === 'measurements' ? 'true' : 'false';
+  apoViewButton.dataset.active = state.plotViewMode === 'apo' ? 'true' : 'false';
 }
 
 function getSelectedMeasurementBackend(): MeasurementBackend {
@@ -1258,6 +1564,13 @@ async function saveConfiguration(): Promise<void> {
       splOffsetDb: Number(splOffsetInput.value),
       smoothingMode: getSelectedSmoothingMode(),
       normalizePlot: normalizePlotToggle.checked,
+      plotViewMode: state.plotViewMode,
+      apoSelectedMeasurementId: state.apoSelectedMeasurementId,
+      apoSelectedReferenceId: state.apoSelectedReferenceId,
+      apoMaxFilters: state.apoMaxFilters,
+      apoMaxBoostDb: state.apoMaxBoostDb,
+      apoMaxCutDb: state.apoMaxCutDb,
+      apoFilters: state.apoFilters,
     };
 
     const saveResult = await window.freakishEars.saveMeasurementSession({
@@ -1350,6 +1663,37 @@ function applyImportedConfiguration(config: Record<string, unknown>): void {
   normalizePlotToggle.checked = state.normalizePlot;
   localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(state.normalizePlot));
 
+  state.plotViewMode = config.plotViewMode === 'apo' ? 'apo' : 'measurements';
+  localStorage.setItem(PLOT_VIEW_MODE_STORAGE_KEY, state.plotViewMode);
+
+  state.apoFilters = normalizeApoFilters(config.apoFilters);
+  state.apoSelectedMeasurementId = toOptionalString(config.apoSelectedMeasurementId);
+  state.apoSelectedReferenceId = toOptionalString(config.apoSelectedReferenceId);
+  state.apoMaxFilters = clamp(
+    Number(config.apoMaxFilters) || DEFAULT_APO_MAX_FILTERS,
+    1,
+    16,
+  );
+  state.apoMaxBoostDb = clamp(
+    Number(config.apoMaxBoostDb) || DEFAULT_APO_MAX_BOOST_DB,
+    0,
+    24,
+  );
+  state.apoMaxCutDb = clamp(
+    Number(config.apoMaxCutDb) || DEFAULT_APO_MAX_CUT_DB,
+    0,
+    24,
+  );
+  state.nextApoFilterIndex =
+    state.apoFilters.reduce((maxId, filter) => {
+      const numericId = Number(filter.id.replace('apo-filter-', ''));
+      return Number.isFinite(numericId) ? Math.max(maxId, numericId) : maxId;
+    }, 0) + 1;
+  persistApoState();
+  apoMaxFiltersInput.value = String(state.apoMaxFilters);
+  apoMaxBoostInput.value = String(state.apoMaxBoostDb);
+  apoMaxCutInput.value = String(state.apoMaxCutDb);
+
   syncVolumeControls('slider');
   syncSplOffsetControl(true);
   updateMeasurementBackendUi();
@@ -1399,4 +1743,624 @@ function isSmoothingMode(value: string | null): value is MeasurementSmoothingMod
 
 function formatSmoothingModeLabel(value: MeasurementSmoothingMode): string {
   return value === 'raw' ? 'Off' : `${value} oct`;
+}
+
+function readStoredApoFilters(): ApoFilter[] {
+  const stored = localStorage.getItem(APO_FILTERS_STORAGE_KEY);
+
+  if (!stored) {
+    return [];
+  }
+
+  try {
+    return normalizeApoFilters(JSON.parse(stored));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeApoFilters(value: unknown): ApoFilter[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry, index) => {
+    if (!entry || typeof entry !== 'object') {
+      return [];
+    }
+
+    const record = entry as Record<string, unknown>;
+    const frequencyHz = clamp(Number(record.frequencyHz), 20, 20000);
+    const gainDb = clamp(Number(record.gainDb), -24, 24);
+    const q = clamp(Number(record.q), 0.1, 10);
+
+    if (!Number.isFinite(frequencyHz) || !Number.isFinite(gainDb) || !Number.isFinite(q)) {
+      return [];
+    }
+
+    return [
+      {
+        id:
+          typeof record.id === 'string' && record.id.length > 0
+            ? record.id
+            : `apo-filter-${index + 1}`,
+        enabled: record.enabled !== false,
+        kind: 'PK',
+        frequencyHz,
+        gainDb,
+        q,
+      },
+    ];
+  });
+}
+
+function toOptionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function persistApoSelections(): void {
+  if (state.apoSelectedMeasurementId) {
+    localStorage.setItem(APO_SELECTED_MEASUREMENT_STORAGE_KEY, state.apoSelectedMeasurementId);
+  } else {
+    localStorage.removeItem(APO_SELECTED_MEASUREMENT_STORAGE_KEY);
+  }
+
+  if (state.apoSelectedReferenceId) {
+    localStorage.setItem(APO_SELECTED_REFERENCE_STORAGE_KEY, state.apoSelectedReferenceId);
+  } else {
+    localStorage.removeItem(APO_SELECTED_REFERENCE_STORAGE_KEY);
+  }
+}
+
+function persistApoState(): void {
+  localStorage.setItem(APO_FILTERS_STORAGE_KEY, JSON.stringify(state.apoFilters));
+  localStorage.setItem(APO_MAX_FILTERS_STORAGE_KEY, String(state.apoMaxFilters));
+  localStorage.setItem(APO_MAX_BOOST_STORAGE_KEY, String(state.apoMaxBoostDb));
+  localStorage.setItem(APO_MAX_CUT_STORAGE_KEY, String(state.apoMaxCutDb));
+  persistApoSelections();
+}
+
+function syncApoGenerationSettings(normalize: boolean): void {
+  const parsedMaxFilters = Number(apoMaxFiltersInput.value);
+  const parsedMaxBoostDb = Number(apoMaxBoostInput.value);
+  const parsedMaxCutDb = Number(apoMaxCutInput.value);
+
+  if (Number.isFinite(parsedMaxFilters)) {
+    state.apoMaxFilters = clamp(Math.round(parsedMaxFilters), 1, 16);
+  }
+
+  if (Number.isFinite(parsedMaxBoostDb)) {
+    state.apoMaxBoostDb = clamp(parsedMaxBoostDb, 0, 24);
+  }
+
+  if (Number.isFinite(parsedMaxCutDb)) {
+    state.apoMaxCutDb = clamp(parsedMaxCutDb, 0, 24);
+  }
+
+  if (normalize) {
+    apoMaxFiltersInput.value = String(state.apoMaxFilters);
+    apoMaxBoostInput.value = state.apoMaxBoostDb.toFixed(1);
+    apoMaxCutInput.value = state.apoMaxCutDb.toFixed(1);
+  }
+
+  persistApoState();
+}
+
+function renderApoSection(): void {
+  updatePlotViewButtons();
+  syncApoSelectionOptions();
+  apoFilterList.innerHTML = renderApoFilterList();
+  apoConfigPreview.value = buildApoConfigText();
+  apoApplyStatus.textContent = getApoApplyStatusText();
+  apoApplyWarning.hidden = !state.equalizerApoStatus?.peaceRunning;
+  if (state.plotViewMode === 'apo') {
+    renderPlotCard(
+      state.measurements.filter((measurement) => measurement.visible),
+      state.referenceCurves.filter((referenceCurve) => referenceCurve.visible),
+    );
+  }
+  updateMeasurementActionState();
+}
+
+function getApoApplyStatusText(): string {
+  const enabledFilterCount = state.apoFilters.filter((filter) => filter.enabled).length;
+
+  if (enabledFilterCount === 0) {
+    return 'Enable at least one filter to apply APO.';
+  }
+
+  const status = state.equalizerApoStatus;
+
+  if (!status) {
+    return 'Checking Equalizer APO status...';
+  }
+
+  if (!status.installed) {
+    return 'Equalizer APO not detected in the default install path.';
+  }
+
+  if (status.peaceRunning) {
+    return 'PEACE is running. Apply APO is still available, but PEACE may override the active profile until it is closed.';
+  }
+
+  if (status.peaceIncludedInConfig) {
+    return 'PEACE is included in config.txt. Apply APO will still update FreakishEars.txt.';
+  }
+
+  if (status.freakishEarsIncludedInConfig) {
+    return `Apply APO writes to ${status.profilePath ?? 'FreakishEars.txt'} and is currently enabled in Equalizer APO.`;
+  }
+
+  return `Apply APO writes to ${status.profilePath ?? 'FreakishEars.txt'} and will enable it in Equalizer APO.`;
+}
+
+function syncApoSelectionOptions(): void {
+  const measurementOptions = state.measurements
+    .map(
+      (measurement) =>
+        `<option value="${escapeHtml(measurement.id)}">${escapeHtml(measurement.name)}</option>`,
+    )
+    .join('');
+  const referenceOptions = state.referenceCurves
+    .map(
+      (referenceCurve) =>
+        `<option value="${escapeHtml(referenceCurve.id)}">${escapeHtml(referenceCurve.name)}</option>`,
+    )
+    .join('');
+
+  apoMeasurementSelect.innerHTML = `<option value="">Select measurement</option>${measurementOptions}`;
+  apoReferenceSelect.innerHTML = `<option value="">Select target</option>${referenceOptions}`;
+
+  if (
+    state.apoSelectedMeasurementId &&
+    state.measurements.some((measurement) => measurement.id === state.apoSelectedMeasurementId)
+  ) {
+    apoMeasurementSelect.value = state.apoSelectedMeasurementId;
+  } else {
+    state.apoSelectedMeasurementId = state.measurements.at(-1)?.id ?? null;
+    apoMeasurementSelect.value = state.apoSelectedMeasurementId ?? '';
+  }
+
+  if (
+    state.apoSelectedReferenceId &&
+    state.referenceCurves.some((referenceCurve) => referenceCurve.id === state.apoSelectedReferenceId)
+  ) {
+    apoReferenceSelect.value = state.apoSelectedReferenceId;
+  } else {
+    state.apoSelectedReferenceId = state.referenceCurves.find((referenceCurve) => referenceCurve.visible)?.id ?? state.referenceCurves.at(-1)?.id ?? null;
+    apoReferenceSelect.value = state.apoSelectedReferenceId ?? '';
+  }
+
+  persistApoSelections();
+}
+
+function renderApoFilterList(): string {
+  if (state.apoFilters.length === 0) {
+    return '<div class="measurement-empty">No APO filters yet. Generate from a target curve or add one manually.</div>';
+  }
+
+  return state.apoFilters
+    .map(
+      (filter, index) => `
+        <div class="apo-filter-row${filter.enabled ? '' : ' is-hidden'}">
+          <label class="apo-filter-enabled">
+            <input type="checkbox" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="enabled" ${filter.enabled ? 'checked' : ''} ${state.busy ? 'disabled' : ''} />
+            <span>F${index + 1}</span>
+          </label>
+          <select data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="kind" ${state.busy ? 'disabled' : ''}>
+            <option value="PK" selected>PK</option>
+          </select>
+          <input type="number" min="20" max="20000" step="1" value="${filter.frequencyHz.toFixed(0)}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="frequencyHz" ${state.busy ? 'disabled' : ''} />
+          <input type="number" min="-24" max="24" step="0.1" value="${filter.gainDb.toFixed(1)}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="gainDb" ${state.busy ? 'disabled' : ''} />
+          <input type="number" min="0.1" max="10" step="0.05" value="${filter.q.toFixed(2)}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="q" ${state.busy ? 'disabled' : ''} />
+          <button class="btn btn-secondary measurement-remove-button" type="button" data-apo-filter-remove="${escapeHtml(filter.id)}" ${state.busy ? 'disabled' : ''}>Remove</button>
+        </div>
+      `,
+    )
+    .join('');
+}
+
+function addApoFilter(partial: Partial<ApoFilter> = {}): void {
+  state.apoFilters = [
+    ...state.apoFilters,
+    {
+      id: `apo-filter-${state.nextApoFilterIndex}`,
+      enabled: partial.enabled ?? true,
+      kind: 'PK',
+      frequencyHz: partial.frequencyHz ?? 1000,
+      gainDb: partial.gainDb ?? 0,
+      q: partial.q ?? 1.41,
+    },
+  ];
+  state.nextApoFilterIndex += 1;
+  persistApoState();
+  renderApoSection();
+}
+
+function removeApoFilter(filterId: string): void {
+  state.apoFilters = state.apoFilters.filter((filter) => filter.id !== filterId);
+  persistApoState();
+  renderApoSection();
+}
+
+function updateApoFilter(filterId: string, field: string, value: string | boolean): void {
+  state.apoFilters = state.apoFilters.map((filter) => {
+    if (filter.id !== filterId) {
+      return filter;
+    }
+
+    if (field === 'enabled' && typeof value === 'boolean') {
+      return { ...filter, enabled: value };
+    }
+
+    if (field === 'frequencyHz') {
+      const frequencyHz = clamp(Number(value), 20, 20000);
+      return Number.isFinite(frequencyHz) ? { ...filter, frequencyHz } : filter;
+    }
+
+    if (field === 'gainDb') {
+      const gainDb = clamp(Number(value), -24, 24);
+      return Number.isFinite(gainDb) ? { ...filter, gainDb } : filter;
+    }
+
+    if (field === 'q') {
+      const q = clamp(Number(value), 0.1, 10);
+      return Number.isFinite(q) ? { ...filter, q } : filter;
+    }
+
+    return filter;
+  });
+
+  persistApoState();
+  renderApoSection();
+}
+
+async function generateApoFilters(): Promise<void> {
+  const measurement = getSelectedApoMeasurement();
+  const referenceCurve = getSelectedApoReference();
+
+  if (!measurement || !referenceCurve) {
+    setStatus('Load a measurement and target before generating APO filters.', 'error');
+    appendLog('APO generation aborted because a measurement or target curve is missing.', 'error');
+    return;
+  }
+
+  try {
+    setBusy(true);
+    setStatus('Generating Equalizer APO filters...', 'working');
+
+    const generatedFilters = buildApoFiltersFromCurves(measurement, referenceCurve);
+    state.apoFilters = generatedFilters;
+    state.nextApoFilterIndex = generatedFilters.length + 1;
+    persistApoState();
+    renderApoSection();
+
+    setStatus(`Generated ${generatedFilters.length} APO filter${generatedFilters.length === 1 ? '' : 's'}.`, 'success');
+    appendLog(
+      `Generated ${generatedFilters.length} APO peaking filter${generatedFilters.length === 1 ? '' : 's'} from ${measurement.name} to ${referenceCurve.name}.`,
+      'success',
+    );
+  } catch (error) {
+    const message = getErrorMessage(error);
+    setStatus(`APO generation failed: ${message}`, 'error');
+    appendLog(`APO generation failed: ${message}`, 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
+function buildApoFiltersFromCurves(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve,
+): ApoFilter[] {
+  const measurementPoints = getDisplayedMeasurementPoints(measurement, referenceCurve);
+  const referencePoints = getDisplayedReferencePoints(referenceCurve);
+  const samplePoints = buildApoSamplePoints(measurementPoints, referencePoints);
+
+  if (samplePoints.length === 0) {
+    throw new Error('There are not enough overlapping points to fit APO filters.');
+  }
+
+  const residuals = samplePoints.map((point) => point.targetGainDb);
+  const filters: ApoFilter[] = [];
+
+  for (let index = 0; index < state.apoMaxFilters; index += 1) {
+    let dominantIndex = -1;
+    let dominantMagnitude = 0;
+
+    for (let sampleIndex = 0; sampleIndex < residuals.length; sampleIndex += 1) {
+      const magnitude = Math.abs(residuals[sampleIndex] ?? 0);
+      if (magnitude > dominantMagnitude) {
+        dominantMagnitude = magnitude;
+        dominantIndex = sampleIndex;
+      }
+    }
+
+    if (dominantIndex < 0 || dominantMagnitude < 1) {
+      break;
+    }
+
+    const dominantPoint = samplePoints[dominantIndex];
+    const unclampedGainDb = residuals[dominantIndex] ?? 0;
+    const gainDb = clamp(
+      unclampedGainDb,
+      -state.apoMaxCutDb,
+      state.apoMaxBoostDb,
+    );
+
+    if (Math.abs(gainDb) < 0.5) {
+      break;
+    }
+
+    const q = estimateApoFilterQ(samplePoints, residuals, dominantIndex);
+    const filter: ApoFilter = {
+      id: `apo-filter-${index + 1}`,
+      enabled: true,
+      kind: 'PK',
+      frequencyHz: dominantPoint.frequencyHz,
+      gainDb: roundTo(gainDb, 0.1),
+      q: roundTo(q, 0.01),
+    };
+
+    filters.push(filter);
+
+    for (let sampleIndex = 0; sampleIndex < samplePoints.length; sampleIndex += 1) {
+      residuals[sampleIndex] -= getApoFilterResponseDb(filter, samplePoints[sampleIndex].frequencyHz);
+    }
+  }
+
+  return filters;
+}
+
+function buildApoSamplePoints(
+  measurementPoints: ReturnType<typeof getDisplayedMeasurementPoints>,
+  referencePoints: ReturnType<typeof getDisplayedReferencePoints>,
+): Array<{ frequencyHz: number; targetGainDb: number }> {
+  const minimumFrequency = Math.max(
+    measurementPoints[0]?.frequencyHz ?? DEFAULT_START_FREQUENCY,
+    referencePoints[0]?.frequencyHz ?? DEFAULT_START_FREQUENCY,
+    20,
+  );
+  const maximumFrequency = Math.min(
+    measurementPoints.at(-1)?.frequencyHz ?? DEFAULT_END_FREQUENCY,
+    referencePoints.at(-1)?.frequencyHz ?? DEFAULT_END_FREQUENCY,
+    20000,
+  );
+
+  if (maximumFrequency <= minimumFrequency) {
+    return [];
+  }
+
+  return Array.from({ length: 96 }, (_unused, index) => {
+    const ratio = index / 95;
+    const frequencyHz = minimumFrequency * Math.pow(maximumFrequency / minimumFrequency, ratio);
+    const measurementPoint = findClosestPoint(measurementPoints, frequencyHz);
+    const referencePoint = findClosestPoint(referencePoints, frequencyHz);
+    return {
+      frequencyHz,
+      targetGainDb: referencePoint.smoothedMagnitudeDbRelative - measurementPoint.smoothedMagnitudeDbRelative,
+    };
+  });
+}
+
+function estimateApoFilterQ(
+  samplePoints: Array<{ frequencyHz: number; targetGainDb: number }>,
+  residuals: number[],
+  dominantIndex: number,
+): number {
+  const dominantGainDb = residuals[dominantIndex] ?? 0;
+  const dominantSign = Math.sign(dominantGainDb) || 1;
+  const thresholdDb = Math.abs(dominantGainDb) * 0.5;
+  let leftIndex = dominantIndex;
+  let rightIndex = dominantIndex;
+
+  while (leftIndex > 0) {
+    const candidate = residuals[leftIndex - 1] ?? 0;
+    if (Math.sign(candidate) !== dominantSign || Math.abs(candidate) < thresholdDb) {
+      break;
+    }
+
+    leftIndex -= 1;
+  }
+
+  while (rightIndex < residuals.length - 1) {
+    const candidate = residuals[rightIndex + 1] ?? 0;
+    if (Math.sign(candidate) !== dominantSign || Math.abs(candidate) < thresholdDb) {
+      break;
+    }
+
+    rightIndex += 1;
+  }
+
+  const leftFrequency = samplePoints[leftIndex]?.frequencyHz ?? samplePoints[dominantIndex].frequencyHz / Math.SQRT2;
+  const rightFrequency = samplePoints[rightIndex]?.frequencyHz ?? samplePoints[dominantIndex].frequencyHz * Math.SQRT2;
+  const bandwidthOctaves = clamp(Math.log2(rightFrequency / leftFrequency), 0.1, 4);
+  const bandwidthRatio = Math.pow(2, bandwidthOctaves);
+  const q = Math.sqrt(bandwidthRatio) / (bandwidthRatio - 1);
+
+  return clamp(q, 0.3, 6);
+}
+
+function getDisplayedMeasurementPoints(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve | null,
+) {
+  const referenceNormalizationDb = referenceCurve
+    ? findClosestPoint(getDisplayedReferencePoints(referenceCurve), 1000)
+        .smoothedMagnitudeDbRelative
+    : null;
+
+  return getMeasurementPointsForDisplay(
+    measurement.plotPoints,
+    measurement,
+    state.normalizePlot,
+    state.splOffsetDb,
+    state.smoothingMode,
+    referenceNormalizationDb,
+  );
+}
+
+function getDisplayedReferencePoints(referenceCurve: ReferenceCurve) {
+  return getMeasurementPointsForDisplay(
+    referenceCurve.plotPoints,
+    referenceCurve,
+    false,
+    0,
+    state.smoothingMode,
+    null,
+  );
+}
+
+function getSelectedApoMeasurement(): LoadedMeasurement | null {
+  return state.measurements.find(
+    (measurement) => measurement.id === state.apoSelectedMeasurementId,
+  ) ?? null;
+}
+
+function getSelectedApoReference(): ReferenceCurve | null {
+  return state.referenceCurves.find(
+    (referenceCurve) => referenceCurve.id === state.apoSelectedReferenceId,
+  ) ?? null;
+}
+
+function getApoFilterResponseDb(filter: ApoFilter, frequencyHz: number): number {
+  const distanceOctaves = Math.log2(frequencyHz / filter.frequencyHz);
+  const sigma = 0.6 / Math.sqrt(filter.q);
+  return filter.gainDb * Math.exp(-(distanceOctaves * distanceOctaves) / (2 * sigma * sigma));
+}
+
+function getCombinedApoResponseDb(frequencyHz: number): number {
+  return state.apoFilters.reduce((total, filter) => {
+    if (!filter.enabled) {
+      return total;
+    }
+
+    return total + getApoFilterResponseDb(filter, frequencyHz);
+  }, 0);
+}
+
+function buildApoConfigText(): string {
+  const enabledFilters = state.apoFilters.filter((filter) => filter.enabled);
+  const measurement = getSelectedApoMeasurement();
+  const referenceCurve = getSelectedApoReference();
+  const previewFrequencies = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+  const peakBoostDb = previewFrequencies.reduce(
+    (peak, frequencyHz) => Math.max(peak, getCombinedApoResponseDb(frequencyHz)),
+    0,
+  );
+  const preampDb = peakBoostDb > 0 ? -roundTo(peakBoostDb, 0.1) : 0;
+  const lines = [
+    '# Equalizer APO config generated by Freakish Ears',
+    measurement ? `# Measurement: ${measurement.name}` : '# Measurement: none selected',
+    referenceCurve ? `# Target: ${referenceCurve.name}` : '# Target: none selected',
+    `Preamp: ${preampDb.toFixed(1)} dB`,
+  ];
+
+  if (enabledFilters.length === 0) {
+    lines.push('# No enabled filters');
+  } else {
+    enabledFilters.forEach((filter, index) => {
+      lines.push(
+        `Filter ${index + 1}: ON PK Fc ${filter.frequencyHz.toFixed(1)} Hz Gain ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}`,
+      );
+    });
+  }
+
+  return lines.join('\n');
+}
+
+async function exportApoConfig(): Promise<void> {
+  if (state.busy) {
+    return;
+  }
+
+  if (!state.outputFolder) {
+    setStatus('Choose a save folder before exporting an APO config.', 'error');
+    appendLog('APO export aborted because no save folder is selected.', 'error');
+    return;
+  }
+
+  try {
+    setBusy(true);
+    setStatus('Exporting Equalizer APO config...', 'working');
+
+    const saveResult = await window.freakishEars.saveMeasurementSession({
+      folderPath: state.outputFolder,
+      sessionName: `equalizer-apo-${formatTimestampForPath(new Date())}`,
+      files: [
+        {
+          name: 'config.txt',
+          contents: new TextEncoder().encode(buildApoConfigText()),
+        },
+      ],
+    });
+
+    setStatus('Equalizer APO config exported.', 'success');
+    appendLog(`Exported Equalizer APO config to ${saveResult.filePaths[0] ?? saveResult.sessionDirectory}.`, 'success');
+    showToast({
+      message: 'Equalizer APO config exported',
+      actionLabel: 'View in Finder',
+      actionPath: saveResult.filePaths[0] ?? saveResult.sessionDirectory,
+    });
+  } catch (error) {
+    const message = getErrorMessage(error);
+    setStatus(`APO export failed: ${message}`, 'error');
+    appendLog(`APO export failed: ${message}`, 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function refreshEqualizerApoStatus(): Promise<void> {
+  try {
+    state.equalizerApoStatus = await window.freakishEars.getEqualizerApoStatus();
+  } catch (error) {
+    appendLog(`Unable to read Equalizer APO status: ${getErrorMessage(error)}`, 'error');
+    state.equalizerApoStatus = null;
+  }
+
+  renderApoSection();
+}
+
+async function applyApoConfig(): Promise<void> {
+  const status = state.equalizerApoStatus;
+
+  if (state.busy) {
+    return;
+  }
+
+  if (!status?.installed) {
+    setStatus('Equalizer APO was not detected in the default install path.', 'error');
+    appendLog('Apply APO aborted because Equalizer APO is not installed in the default path.', 'error');
+    return;
+  }
+
+  try {
+    setBusy(true);
+    setStatus('Applying Equalizer APO profile...', 'working');
+
+    const result = await window.freakishEars.applyEqualizerApoConfig({
+      configText: buildApoConfigText(),
+    });
+
+    await refreshEqualizerApoStatus();
+    setStatus('Equalizer APO profile applied.', 'success');
+    appendLog(`Applied Equalizer APO profile to ${result.profilePath}.`, 'success');
+    showToast({
+      message: 'Equalizer APO profile applied',
+      actionLabel: 'View in Finder',
+      actionPath: result.profilePath,
+    });
+  } catch (error) {
+    const message = getErrorMessage(error);
+    await refreshEqualizerApoStatus();
+    setStatus(`Apply APO failed: ${message}`, 'error');
+    appendLog(`Apply APO failed: ${message}`, 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
+function roundTo(value: number, step: number): number {
+  return Math.round(value / step) * step;
 }

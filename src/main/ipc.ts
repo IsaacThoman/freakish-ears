@@ -1,9 +1,10 @@
 import { dialog, ipcMain, shell } from 'electron';
 
-import { saveMeasurementSession } from './files';
+import { applyEqualizerApoConfig, disablePeace, getEqualizerApoStatus, saveMeasurementSession } from './files';
 import { runSoxMeasurement } from './sox';
 import { IPC_CHANNELS } from '../shared/ipc';
 import type {
+  ApplyEqualizerApoConfigPayload,
   RunSoxMeasurementPayload,
   SaveMeasurementPayload,
 } from '../shared/ipc';
@@ -35,4 +36,13 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.runSoxMeasurement,
     async (_event, payload: RunSoxMeasurementPayload) => runSoxMeasurement(payload),
   );
+
+  ipcMain.handle(IPC_CHANNELS.getEqualizerApoStatus, async () => getEqualizerApoStatus());
+
+  ipcMain.handle(
+    IPC_CHANNELS.applyEqualizerApoConfig,
+    async (_event, payload: ApplyEqualizerApoConfigPayload) => applyEqualizerApoConfig(payload),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.disablePeace, async () => disablePeace());
 }

@@ -4,6 +4,7 @@ import {
 } from './constants';
 import { getMeasurementPointsForDisplay } from './measurements';
 import type {
+  ApoFilter,
   LoadedMeasurement,
   MeasurementPoint,
   MeasurementSmoothingMode,
@@ -18,6 +19,8 @@ import {
   formatFrequencyDetailed,
   formatFrequencyLabel,
 } from './utils';
+
+const EQ_GRAPH_FREQUENCIES = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
 
 export function renderResponsePlot(input: {
   visibleMeasurements: LoadedMeasurement[];
@@ -263,6 +266,110 @@ export function attachPlotInteractions(input: {
 
     hoverLabel.textContent = 'Hover: --';
   });
+}
+
+export function renderApoEqPlot(input: {
+  filters: ApoFilter[];
+  measurementName: string | null;
+  targetName: string | null;
+}): string {
+  const enabledFilters = input.filters.filter((filter) => filter.enabled);
+  const sampledPoints = Array.from({ length: 256 }, (_unused, index) => {
+    const ratio = index / 255;
+    const frequencyHz =
+      DEFAULT_START_FREQUENCY *
+      Math.pow(DEFAULT_END_FREQUENCY / DEFAULT_START_FREQUENCY, ratio);
+
+    return {
+      frequencyHz,
+      totalDb: enabledFilters.reduce(
+        (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz),
+        0,
+      ),
+    };
+  });
+  const individualPointSets = enabledFilters.map((filter) => ({
+    filter,
+    points: sampledPoints.map((point) => ({
+      frequencyHz: point.frequencyHz,
+      totalDb: getApoFilterResponseDb(filter, point.frequencyHz),
+    })),
+  }));
+  const allValues = [
+    ...sampledPoints.map((point) => point.totalDb),
+    ...individualPointSets.flatMap((entry) => entry.points.map((point) => point.totalDb)),
+    0,
+  ];
+  const minDb = Math.min(-12, Math.floor((Math.min(...allValues) - 1) / 3) * 3);
+  const maxDb = Math.max(12, Math.ceil((Math.max(...allValues) + 1) / 3) * 3);
+  const geometry: ResponsePlotGeometry = {
+    width: 960,
+    height: 356,
+    left: 84,
+    right: 24,
+    top: 18,
+    bottom: 94,
+    minFrequency: DEFAULT_START_FREQUENCY,
+    maxFrequency: DEFAULT_END_FREQUENCY,
+    minDb,
+    maxDb,
+  };
+  const yTicks = Array.from({ length: 7 }, (_unused, index) => {
+    const ratio = index / 6;
+    return geometry.maxDb - (geometry.maxDb - geometry.minDb) * ratio;
+  });
+  const xAxisY = getPlotY(0, geometry);
+  const yAxisX = geometry.left;
+  const combinedPath = sampledPoints
+    .map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`)
+    .join(' ');
+
+  return `
+    <div class="plot-hover">EQ Graph: ${escapeHtml(input.measurementName ?? 'No measurement')} -> ${escapeHtml(input.targetName ?? 'No target')}</div>
+    <svg width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Equalizer APO frequency response graph">
+      <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
+      ${yTicks
+        .map((value) => {
+          const y = getPlotY(value, geometry);
+          return `<line x1="${geometry.left}" y1="${y.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.07)" vector-effect="non-scaling-stroke" />`;
+        })
+        .join('')}
+      ${EQ_GRAPH_FREQUENCIES.map((frequency) => {
+        const x = getPlotX(frequency, geometry);
+        return `<line x1="${x.toFixed(1)}" y1="${geometry.top}" x2="${x.toFixed(1)}" y2="${geometry.height - geometry.bottom}" stroke="rgba(255,255,255,0.06)" vector-effect="non-scaling-stroke" />`;
+      }).join('')}
+      <line x1="${yAxisX}" y1="${xAxisY.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${xAxisY.toFixed(1)}" stroke="rgba(248,161,69,0.3)" vector-effect="non-scaling-stroke" />
+      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${geometry.height - geometry.bottom}" stroke="rgba(248,161,69,0.24)" vector-effect="non-scaling-stroke" />
+      ${individualPointSets
+        .map(({ filter, points }) => {
+          const path = points
+            .map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`)
+            .join(' ');
+
+          return `<polyline points="${path}" fill="none" stroke="rgba(125,125,125,0.65)" stroke-width="1.5" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"><title>${escapeHtml(`PK ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}`)}</title></polyline>`;
+        })
+        .join('')}
+      <polyline points="${combinedPath}" fill="none" stroke="#f8a145" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
+      ${yTicks
+        .map((value) => {
+          const y = getPlotY(value, geometry);
+          return `<text x="${geometry.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="plot-axis-text">${formatDbLabel(value)}</text>`;
+        })
+        .join('')}
+      ${EQ_GRAPH_FREQUENCIES.map((frequency) => {
+        const x = getPlotX(frequency, geometry);
+        return `<text x="${x.toFixed(1)}" y="${geometry.height - 42}" text-anchor="middle" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
+      }).join('')}
+      <text x="${(geometry.left + (geometry.width - geometry.right)) / 2}" y="${geometry.height - 12}" text-anchor="middle" class="plot-axis-label">Frequency (Hz, log)</text>
+      <text x="28" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 28 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">EQ Gain (dB)</text>
+    </svg>
+  `;
+}
+
+function getApoFilterResponseDb(filter: ApoFilter, frequencyHz: number): number {
+  const distanceOctaves = Math.log2(frequencyHz / filter.frequencyHz);
+  const sigma = 0.6 / Math.sqrt(filter.q);
+  return filter.gainDb * Math.exp(-(distanceOctaves * distanceOctaves) / (2 * sigma * sigma));
 }
 
 function renderMeasurementList(
