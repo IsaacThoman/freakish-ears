@@ -48,6 +48,25 @@ type MeasurementAnalysis = {
   points: MeasurementPoint[];
 };
 
+type MeasurementSummary = {
+  latencyMs: number | null;
+  peakDbfs: number | null;
+  rmsDbfs: number | null;
+  savedPath: string | null;
+};
+
+type LoadedMeasurement = {
+  id: string;
+  name: string;
+  exportName: string;
+  color: string;
+  visible: boolean;
+  sourcePath: string | null;
+  summary: MeasurementSummary;
+  points: MeasurementPoint[];
+  plotPoints: MeasurementPoint[];
+};
+
 type ResponsePlotGeometry = {
   width: number;
   height: number;
@@ -81,6 +100,7 @@ const DEFAULT_SWEEP_LEVEL_DB = -6;
 const DEFAULT_SWEEP_AMPLITUDE = 0.72;
 const PRE_ROLL_SECONDS = 0.35;
 const POST_ROLL_SECONDS = 0.55;
+const PLOT_COLORS = ['#7ee7ff', '#ff8fab', '#8fe388', '#ffcc66', '#c7a6ff', '#ff9e64'];
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
@@ -173,8 +193,19 @@ app.innerHTML = `
           </div>
         </div>
 
+        <div class="plot-toolbar">
+          <span class="section-title">Measurements</span>
+          <div class="plot-toolbar-actions">
+            <button id="importMeasurementsButton" class="btn btn-secondary" type="button">
+              Import
+            </button>
+          </div>
+        </div>
+
+        <input id="measurementFileInput" type="file" accept=".txt,.csv,.json,text/plain,application/json" multiple hidden />
+
         <div id="plotCard" class="plot-card">
-          <span style="color:var(--text-muted);font-size:11px">Run to plot response</span>
+          <span style="color:var(--text-muted);font-size:11px">Run or import measurements to plot response</span>
         </div>
 
         <span class="section-title">Log</span>
@@ -200,12 +231,19 @@ const latencyValue = getElement<HTMLSpanElement>('latencyValue');
 const peakValue = getElement<HTMLSpanElement>('peakValue');
 const rmsValue = getElement<HTMLSpanElement>('rmsValue');
 const savedPathValue = getElement<HTMLSpanElement>('savedPathValue');
+const importMeasurementsButton = getElement<HTMLButtonElement>(
+  'importMeasurementsButton',
+);
+const measurementFileInput = getElement<HTMLInputElement>('measurementFileInput');
 const plotCard = getElement<HTMLDivElement>('plotCard');
 const logList = getElement<HTMLUListElement>('logList');
 
 const state = {
   busy: false,
   outputFolder: localStorage.getItem(STORAGE_KEY),
+  measurements: [] as LoadedMeasurement[],
+  focusedMeasurementId: null as string | null,
+  nextMeasurementIndex: 1,
 };
 
 chooseFolderButton.addEventListener('click', () => {
@@ -216,8 +254,62 @@ refreshDevicesButton.addEventListener('click', () => {
   void refreshMicrophones(true);
 });
 
+importMeasurementsButton.addEventListener('click', () => {
+  measurementFileInput.click();
+});
+
+measurementFileInput.addEventListener('change', () => {
+  const files = Array.from(measurementFileInput.files ?? []);
+  measurementFileInput.value = '';
+
+  if (files.length > 0) {
+    void importMeasurementFiles(files);
+  }
+});
+
 runMeasurementButton.addEventListener('click', () => {
   void runMeasurement();
+});
+
+plotCard.addEventListener('change', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+
+  const measurementId = target.dataset.measurementToggle;
+  if (!measurementId) {
+    return;
+  }
+
+  setMeasurementVisibility(measurementId, target.checked);
+});
+
+plotCard.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+
+  const removeButton = target.closest('[data-measurement-remove]');
+  const measurementId =
+    removeButton instanceof HTMLButtonElement
+      ? removeButton.dataset.measurementRemove
+      : undefined;
+  const exportButton = target.closest('[data-measurement-export]');
+  const exportMeasurementId =
+    exportButton instanceof HTMLButtonElement
+      ? exportButton.dataset.measurementExport
+      : undefined;
+
+  if (measurementId) {
+    removeMeasurement(measurementId);
+    return;
+  }
+
+  if (exportMeasurementId) {
+    void exportMeasurement(exportMeasurementId);
+  }
 });
 
 volumeInput.addEventListener('input', () => {
@@ -238,6 +330,7 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => {
 
 updateSelectedFolder();
 syncVolumeControls('slider');
+updateMeasurementActionState();
 appendLog('Click Refresh to access microphones and outputs.');
 void refreshMicrophones(false);
 
@@ -264,6 +357,13 @@ function setBusy(isBusy: boolean): void {
   volumeInput.disabled = isBusy;
   volumeNumberInput.disabled = isBusy;
   runMeasurementButton.disabled = isBusy;
+  measurementFileInput.disabled = isBusy;
+
+  updateMeasurementActionState();
+
+  if (state.measurements.length > 0) {
+    renderMeasurements();
+  }
 }
 
 function setStatus(message: string, tone: StatusTone): void {
@@ -280,6 +380,15 @@ function appendLog(message: string, tone: LogTone = 'neutral'): void {
 
 function updateSelectedFolder(): void {
   selectedFolder.textContent = state.outputFolder ?? 'None';
+  updateMeasurementActionState();
+
+  if (state.measurements.length > 0) {
+    renderMeasurements();
+  }
+}
+
+function updateMeasurementActionState(): void {
+  importMeasurementsButton.disabled = state.busy;
 }
 
 function syncVolumeControls(
@@ -323,6 +432,109 @@ async function chooseOutputFolder(): Promise<void> {
     localStorage.setItem(STORAGE_KEY, result.folderPath);
     updateSelectedFolder();
     appendLog(`Save folder set to ${result.folderPath}.`, 'success');
+  }
+}
+
+async function importMeasurementFiles(files: File[]): Promise<void> {
+  if (state.busy || files.length === 0) {
+    return;
+  }
+
+  const importedMeasurements: LoadedMeasurement[] = [];
+  const importFailures: string[] = [];
+
+  try {
+    setBusy(true);
+    setStatus('Importing measurement files...', 'working');
+
+    for (const file of files) {
+      try {
+        const contents = await file.text();
+        const measurement = parseImportedMeasurementFile(file, contents);
+        importedMeasurements.push(measurement);
+      } catch (error) {
+        importFailures.push(`${file.name}: ${getErrorMessage(error)}`);
+      }
+    }
+
+    for (const measurement of importedMeasurements) {
+      addMeasurement(measurement);
+    }
+
+    if (importedMeasurements.length > 0) {
+      setStatus(
+        `Imported ${importedMeasurements.length} measurement file${importedMeasurements.length === 1 ? '' : 's'}.`,
+        'success',
+      );
+      appendLog(
+        `Imported ${importedMeasurements.length} measurement file${importedMeasurements.length === 1 ? '' : 's'} for overlay plotting.`,
+        'success',
+      );
+    }
+
+    if (importFailures.length > 0) {
+      for (const failure of importFailures) {
+        appendLog(`Import failed: ${failure}`, 'error');
+      }
+
+      if (importedMeasurements.length === 0) {
+        setStatus('Unable to import the selected measurement files.', 'error');
+      }
+    }
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function exportMeasurement(measurementId: string): Promise<void> {
+  if (state.busy) {
+    return;
+  }
+
+  const outputFolder = state.outputFolder;
+  const measurement = state.measurements.find(
+    (entry) => entry.id === measurementId,
+  );
+
+  if (!outputFolder) {
+    setStatus('Choose a save folder before exporting.', 'error');
+    appendLog('Export aborted because no save folder is selected.', 'error');
+    return;
+  }
+
+  if (!measurement) {
+    setStatus('Unable to find that measurement for export.', 'error');
+    appendLog('Export aborted because the selected measurement no longer exists.', 'error');
+    return;
+  }
+
+  try {
+    setBusy(true);
+    setStatus(`Exporting ${measurement.name}...`, 'working');
+
+    const saveResult = await window.freakishEars.saveMeasurementSession({
+      folderPath: outputFolder,
+      sessionName: `measurement-export-${measurement.exportName}-${formatTimestampForPath(new Date())}`,
+      files: [
+        {
+          name: `${measurement.exportName}.txt`,
+          contents: new TextEncoder().encode(buildRewMeasurementText(measurement)),
+        },
+      ],
+    });
+
+    savedPathValue.textContent = saveResult.sessionDirectory;
+    setStatus('Measurement export complete.', 'success');
+    appendLog(
+      `Exported ${measurement.name} to ${saveResult.sessionDirectory}.`,
+      'success',
+    );
+  } catch (error) {
+    const message = getErrorMessage(error);
+    setStatus(`Measurement export failed: ${message}`, 'error');
+    appendLog(`Measurement export failed: ${message}`, 'error');
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -1035,6 +1247,391 @@ function buildMeasurementCsv(points: MeasurementPoint[]): string {
   return [header, ...rows].join('\n');
 }
 
+function buildRewMeasurementText(measurement: LoadedMeasurement): string {
+  const lines = [
+    '* Measurement data exported by Freakish Ears',
+    `* Source: ${measurement.sourcePath ?? 'Freakish Ears'}`,
+    `* Dated: ${new Date().toLocaleString()}`,
+    `* Measurement: ${measurement.name}`,
+    '* Note: Magnitude values are exported in dB using the plotted response trace.',
+    '*',
+    '* Freq(Hz) SPL(dB) Phase(degrees)',
+    ...measurement.points.map(
+      (point) =>
+        `${point.frequencyHz.toFixed(6)} ${point.smoothedMagnitudeDbRelative.toFixed(4)} 0.0000`,
+    ),
+  ];
+
+  return lines.join('\n');
+}
+
+function parseImportedMeasurementFile(
+  file: File,
+  contents: string,
+): LoadedMeasurement {
+  const filePath = getImportedFilePath(file);
+  const baseName = stripFileExtension(file.name);
+  const trimmed = contents.trim();
+  let parsedPoints: MeasurementPoint[];
+  let displayName = baseName;
+  let summary: MeasurementSummary = {
+    latencyMs: null,
+    peakDbfs: null,
+    rmsDbfs: null,
+    savedPath: filePath,
+  };
+
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    const parsed = JSON.parse(trimmed) as
+      | {
+          microphoneLabel?: unknown;
+          latencyMs?: unknown;
+          peakDbfs?: unknown;
+          responsePoints?: unknown;
+          rmsDbfs?: unknown;
+        }
+      | MeasurementPoint[];
+
+    const rawPoints = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed.responsePoints)
+        ? parsed.responsePoints
+        : null;
+
+    if (!rawPoints) {
+      throw new Error('JSON file does not contain response points.');
+    }
+
+    parsedPoints = normalizeMeasurementPoints(rawPoints);
+
+    if (!Array.isArray(parsed) && typeof parsed.microphoneLabel === 'string') {
+      displayName = parsed.microphoneLabel;
+    }
+
+    if (!Array.isArray(parsed)) {
+      summary = {
+        latencyMs: toOptionalNumber(parsed.latencyMs),
+        peakDbfs: toOptionalNumber(parsed.peakDbfs),
+        rmsDbfs: toOptionalNumber(parsed.rmsDbfs),
+        savedPath: filePath,
+      };
+    }
+  } else if (looksLikeCsvMeasurement(contents)) {
+    parsedPoints = parseCsvMeasurementPoints(contents);
+  } else {
+    parsedPoints = parseRewMeasurementPoints(contents);
+  }
+
+  return createLoadedMeasurement({
+    name: displayName,
+    exportName: baseName,
+    sourcePath: filePath,
+    points: parsedPoints,
+    summary,
+  });
+}
+
+function looksLikeCsvMeasurement(contents: string): boolean {
+  const firstLine = contents
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+  return firstLine?.toLowerCase().includes('frequency_hz') ?? false;
+}
+
+function parseCsvMeasurementPoints(contents: string): MeasurementPoint[] {
+  const points: MeasurementPoint[] = [];
+
+  for (const line of contents.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith('frequency_hz')) {
+      continue;
+    }
+
+    const [frequencyToken, magnitudeToken, smoothedToken] = trimmed.split(',');
+    const frequencyHz = Number(frequencyToken);
+    const magnitudeDbRelative = Number(magnitudeToken);
+    const smoothedMagnitudeDbRelative = Number(smoothedToken);
+
+    if (!Number.isFinite(frequencyHz) || !Number.isFinite(magnitudeDbRelative)) {
+      continue;
+    }
+
+    points.push({
+      frequencyHz,
+      magnitudeDbRelative,
+      smoothedMagnitudeDbRelative: Number.isFinite(smoothedMagnitudeDbRelative)
+        ? smoothedMagnitudeDbRelative
+        : magnitudeDbRelative,
+    });
+  }
+
+  return ensureMeasurementPoints(points);
+}
+
+function parseRewMeasurementPoints(contents: string): MeasurementPoint[] {
+  const points: MeasurementPoint[] = [];
+
+  for (const line of contents.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith('*')) {
+      continue;
+    }
+
+    const [frequencyToken, magnitudeToken] = trimmed.split(/\s+/u);
+    const frequencyHz = Number(frequencyToken);
+    const magnitudeDb = Number(magnitudeToken);
+
+    if (!Number.isFinite(frequencyHz) || !Number.isFinite(magnitudeDb)) {
+      continue;
+    }
+
+    points.push({
+      frequencyHz,
+      magnitudeDbRelative: magnitudeDb,
+      smoothedMagnitudeDbRelative: magnitudeDb,
+    });
+  }
+
+  return ensureMeasurementPoints(points);
+}
+
+function normalizeMeasurementPoints(rawPoints: unknown[]): MeasurementPoint[] {
+  const points: MeasurementPoint[] = [];
+
+  for (const rawPoint of rawPoints) {
+    if (!rawPoint || typeof rawPoint !== 'object') {
+      continue;
+    }
+
+    const record = rawPoint as Record<string, unknown>;
+    const frequencyHz = Number(record.frequencyHz);
+    const magnitudeDbRelative = Number(record.magnitudeDbRelative);
+    const smoothedMagnitudeDbRelative = Number(
+      record.smoothedMagnitudeDbRelative ?? record.magnitudeDbRelative,
+    );
+
+    if (!Number.isFinite(frequencyHz) || !Number.isFinite(magnitudeDbRelative)) {
+      continue;
+    }
+
+    points.push({
+      frequencyHz,
+      magnitudeDbRelative,
+      smoothedMagnitudeDbRelative: Number.isFinite(smoothedMagnitudeDbRelative)
+        ? smoothedMagnitudeDbRelative
+        : magnitudeDbRelative,
+    });
+  }
+
+  return ensureMeasurementPoints(points);
+}
+
+function ensureMeasurementPoints(points: MeasurementPoint[]): MeasurementPoint[] {
+  const normalized = points
+    .filter((point) => Number.isFinite(point.frequencyHz) && point.frequencyHz > 0)
+    .sort((left, right) => left.frequencyHz - right.frequencyHz);
+
+  if (normalized.length < 2) {
+    throw new Error('File does not contain enough usable response points.');
+  }
+
+  return normalized;
+}
+
+function createLoadedMeasurement(input: {
+  name: string;
+  exportName: string;
+  sourcePath: string | null;
+  points: MeasurementPoint[];
+  summary: MeasurementSummary;
+}): LoadedMeasurement {
+  const measurementIndex = state.nextMeasurementIndex;
+  state.nextMeasurementIndex += 1;
+
+  return {
+    id: `measurement-${measurementIndex}`,
+    name: input.name,
+    exportName: sanitizeMeasurementName(input.exportName),
+    color: PLOT_COLORS[(measurementIndex - 1) % PLOT_COLORS.length],
+    visible: true,
+    sourcePath: input.sourcePath,
+    summary: input.summary,
+    points: input.points,
+    plotPoints: buildPlotPoints(input.points),
+  };
+}
+
+function buildPlotPoints(points: MeasurementPoint[]): MeasurementPoint[] {
+  if (points.length <= 512) {
+    return points;
+  }
+
+  return resampleMeasurementPoints(points, 512);
+}
+
+function resampleMeasurementPoints(
+  points: MeasurementPoint[],
+  targetCount: number,
+): MeasurementPoint[] {
+  const minimumFrequency = points[0]?.frequencyHz ?? DEFAULT_START_FREQUENCY;
+  const maximumFrequency = points.at(-1)?.frequencyHz ?? DEFAULT_END_FREQUENCY;
+  const resampled: MeasurementPoint[] = [];
+  let upperIndex = 1;
+
+  for (let index = 0; index < targetCount; index += 1) {
+    const ratio = targetCount === 1 ? 0 : index / (targetCount - 1);
+    const frequencyHz =
+      minimumFrequency * Math.pow(maximumFrequency / minimumFrequency, ratio);
+
+    while (
+      upperIndex < points.length - 1 &&
+      points[upperIndex].frequencyHz < frequencyHz
+    ) {
+      upperIndex += 1;
+    }
+
+    const lowerPoint = points[Math.max(0, upperIndex - 1)] ?? points[0];
+    const upperPoint = points[upperIndex] ?? points.at(-1) ?? points[0];
+    const span = upperPoint.frequencyHz - lowerPoint.frequencyHz;
+    const interpolation = span > 0 ? (frequencyHz - lowerPoint.frequencyHz) / span : 0;
+
+    resampled.push({
+      frequencyHz,
+      magnitudeDbRelative: interpolate(
+        lowerPoint.magnitudeDbRelative,
+        upperPoint.magnitudeDbRelative,
+        interpolation,
+      ),
+      smoothedMagnitudeDbRelative: interpolate(
+        lowerPoint.smoothedMagnitudeDbRelative,
+        upperPoint.smoothedMagnitudeDbRelative,
+        interpolation,
+      ),
+    });
+  }
+
+  return resampled;
+}
+
+function interpolate(start: number, end: number, ratio: number): number {
+  return start + (end - start) * clamp(ratio, 0, 1);
+}
+
+function addMeasurement(measurement: LoadedMeasurement): void {
+  state.measurements = [...state.measurements, measurement];
+  state.focusedMeasurementId = measurement.id;
+  renderMeasurements();
+}
+
+function setMeasurementVisibility(measurementId: string, visible: boolean): void {
+  state.measurements = state.measurements.map((measurement) =>
+    measurement.id === measurementId ? { ...measurement, visible } : measurement,
+  );
+  renderMeasurements();
+}
+
+function removeMeasurement(measurementId: string): void {
+  const removedMeasurement = state.measurements.find(
+    (measurement) => measurement.id === measurementId,
+  );
+
+  state.measurements = state.measurements.filter(
+    (measurement) => measurement.id !== measurementId,
+  );
+
+  if (removedMeasurement) {
+    appendLog(`Removed measurement ${removedMeasurement.name}.`);
+  }
+
+  if (state.focusedMeasurementId === measurementId) {
+    state.focusedMeasurementId = state.measurements.at(-1)?.id ?? null;
+  }
+
+  renderMeasurements();
+}
+
+function renderMeasurements(): void {
+  const visibleMeasurements = state.measurements.filter(
+    (measurement) => measurement.visible,
+  );
+
+  if (
+    state.focusedMeasurementId &&
+    !state.measurements.some(
+      (measurement) => measurement.id === state.focusedMeasurementId,
+    )
+  ) {
+    state.focusedMeasurementId = state.measurements.at(-1)?.id ?? null;
+  }
+
+  plotCard.innerHTML = renderResponsePlot(visibleMeasurements, state.measurements);
+  attachPlotInteractions(visibleMeasurements);
+  updateMeasurementSummary();
+  updateMeasurementActionState();
+}
+
+function updateMeasurementSummary(): void {
+  const focusedMeasurement = getFocusedMeasurement();
+
+  latencyValue.textContent = formatOptionalMeasurementValue(
+    focusedMeasurement?.summary.latencyMs,
+    'ms',
+  );
+  peakValue.textContent = formatOptionalMeasurementValue(
+    focusedMeasurement?.summary.peakDbfs,
+    'dBFS',
+  );
+  rmsValue.textContent = formatOptionalMeasurementValue(
+    focusedMeasurement?.summary.rmsDbfs,
+    'dBFS',
+  );
+  savedPathValue.textContent = focusedMeasurement?.summary.savedPath ?? '--';
+}
+
+function getFocusedMeasurement(): LoadedMeasurement | null {
+  if (state.focusedMeasurementId) {
+    const focusedMeasurement = state.measurements.find(
+      (measurement) => measurement.id === state.focusedMeasurementId,
+    );
+
+    if (focusedMeasurement) {
+      return focusedMeasurement;
+    }
+  }
+
+  return state.measurements.at(-1) ?? null;
+}
+
+function formatOptionalMeasurementValue(
+  value: number | null | undefined,
+  unit: string,
+): string {
+  return Number.isFinite(value) ? `${value.toFixed(1)} ${unit}` : '--';
+}
+
+function getImportedFilePath(file: File): string | null {
+  const fileWithPath = file as File & { path?: string };
+  return fileWithPath.path ?? null;
+}
+
+function stripFileExtension(fileName: string): string {
+  return fileName.replace(/\.[^.]+$/u, '');
+}
+
+function sanitizeMeasurementName(value: string): string {
+  const trimmed = value.trim().replace(/\s+/gu, '-');
+  return trimmed || 'measurement';
+}
+
+function toOptionalNumber(value: unknown): number | null {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
 function encodeWavFile(samples: Float32Array, sampleRate: number): Uint8Array {
   const bytesPerSample = 2;
   const blockAlign = bytesPerSample;
@@ -1078,17 +1675,45 @@ function renderMeasurement(
   analysis: MeasurementAnalysis,
   sessionDirectory: string,
 ): void {
-  latencyValue.textContent = `${analysis.latencyMs.toFixed(1)} ms`;
-  peakValue.textContent = `${analysis.peakDbfs.toFixed(1)} dBFS`;
-  rmsValue.textContent = `${analysis.rmsDbfs.toFixed(1)} dBFS`;
-  savedPathValue.textContent = sessionDirectory;
-
-  plotCard.innerHTML = renderResponsePlot(analysis.points);
-  attachPlotInteractions(analysis.points);
+  addMeasurement(
+    createLoadedMeasurement({
+      name: getPathBaseName(sessionDirectory),
+      exportName: getPathBaseName(sessionDirectory),
+      sourcePath: sessionDirectory,
+      points: analysis.points,
+      summary: {
+        latencyMs: analysis.latencyMs,
+        peakDbfs: analysis.peakDbfs,
+        rmsDbfs: analysis.rmsDbfs,
+        savedPath: sessionDirectory,
+      },
+    }),
+  );
 }
 
-function renderResponsePlot(points: MeasurementPoint[]): string {
-  const geometry = getResponsePlotGeometry(points);
+function renderResponsePlot(
+  visibleMeasurements: LoadedMeasurement[],
+  allMeasurements: LoadedMeasurement[],
+): string {
+  if (allMeasurements.length === 0) {
+    return `
+      <div class="plot-empty-state">
+        <span>Run or import measurements to plot response.</span>
+      </div>
+      ${renderMeasurementList(allMeasurements)}
+    `;
+  }
+
+  if (visibleMeasurements.length === 0) {
+    return `
+      <div class="plot-empty-state">
+        <span>No measurements are currently selected for display.</span>
+      </div>
+      ${renderMeasurementList(allMeasurements)}
+    `;
+  }
+
+  const geometry = getResponsePlotGeometry(visibleMeasurements);
   const xTicks = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].filter(
     (frequency) =>
       frequency >= geometry.minFrequency && frequency <= geometry.maxFrequency,
@@ -1098,20 +1723,12 @@ function renderResponsePlot(points: MeasurementPoint[]): string {
     return geometry.maxDb - (geometry.maxDb - geometry.minDb) * ratio;
   });
 
-  const path = points
-    .map((point) => {
-      const x = getPlotX(point.frequencyHz, geometry);
-      const y = getPlotY(point.smoothedMagnitudeDbRelative, geometry);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ');
-
   const xAxisY = geometry.height - geometry.bottom;
   const yAxisX = geometry.left;
 
   return `
     <div class="plot-hover" id="plotHover">Hover: --</div>
-    <svg id="responsePlot" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response with logarithmic frequency axis">
+    <svg id="responsePlot" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response overlay with logarithmic frequency axis">
       <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
       ${yTicks
         .map((value) => {
@@ -1127,9 +1744,26 @@ function renderResponsePlot(points: MeasurementPoint[]): string {
         .join('')}
       <line x1="${yAxisX}" y1="${xAxisY}" x2="${geometry.width - geometry.right}" y2="${xAxisY}" stroke="rgba(170,190,228,0.28)" />
       <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${xAxisY}" stroke="rgba(170,190,228,0.28)" />
-      <polyline points="${path}" fill="none" stroke="#7ee7ff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"></polyline>
+      ${visibleMeasurements
+        .map((measurement) => {
+          const path = measurement.plotPoints
+            .map((point) => {
+              const x = getPlotX(point.frequencyHz, geometry);
+              const y = getPlotY(point.smoothedMagnitudeDbRelative, geometry);
+              return `${x.toFixed(1)},${y.toFixed(1)}`;
+            })
+            .join(' ');
+
+          return `<polyline points="${path}" fill="none" stroke="${measurement.color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"></polyline>`;
+        })
+        .join('')}
       <line id="plotHoverLine" x1="0" y1="${geometry.top}" x2="0" y2="${xAxisY}" stroke="#7ee7ff" stroke-width="1" opacity="0"></line>
-      <circle id="plotHoverDot" cx="0" cy="0" r="4" fill="#7ee7ff" opacity="0"></circle>
+      ${visibleMeasurements
+        .map(
+          (measurement, index) =>
+            `<circle class="plot-hover-dot" data-hover-index="${index}" cx="0" cy="0" r="4" fill="${measurement.color}" stroke="#0d0d0f" stroke-width="1.5" opacity="0"></circle>`,
+        )
+        .join('')}
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
@@ -1143,50 +1777,90 @@ function renderResponsePlot(points: MeasurementPoint[]): string {
         })
         .join('')}
       <text x="${(geometry.left + (geometry.width - geometry.right)) / 2}" y="${geometry.height - 12}" text-anchor="middle" class="plot-axis-label">Frequency (Hz, log)</text>
-      <text x="22" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 22 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">Relative response (dB)</text>
+      <text x="22" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 22 ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">Response (dB)</text>
     </svg>
+    ${renderMeasurementList(allMeasurements)}
   `;
 }
 
-function attachPlotInteractions(points: MeasurementPoint[]): void {
+function renderMeasurementList(measurements: LoadedMeasurement[]): string {
+  return `
+    <div class="measurement-list">
+      <div class="measurement-list-header">Loaded measurements</div>
+      ${
+        measurements.length === 0
+          ? '<div class="measurement-empty">No measurements loaded.</div>'
+          : measurements
+              .map(
+                (measurement) => `
+                  <div class="measurement-row${measurement.visible ? '' : ' is-hidden'}">
+                    <label class="measurement-toggle" title="${escapeHtml(measurement.sourcePath ?? measurement.name)}">
+                      <input type="checkbox" data-measurement-toggle="${measurement.id}" ${measurement.visible ? 'checked' : ''} />
+                      <span class="measurement-swatch" style="background:${measurement.color}"></span>
+                      <span class="measurement-name">${escapeHtml(measurement.name)}</span>
+                    </label>
+                    <div class="measurement-actions">
+                      <button class="btn btn-secondary measurement-export-button" type="button" data-measurement-export="${measurement.id}" ${state.busy || !state.outputFolder ? 'disabled' : ''}>
+                        Export
+                      </button>
+                      <button class="btn btn-secondary measurement-remove-button" type="button" data-measurement-remove="${measurement.id}" ${state.busy ? 'disabled' : ''}>
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                `,
+              )
+              .join('')
+      }
+    </div>
+  `;
+}
+
+function attachPlotInteractions(measurements: LoadedMeasurement[]): void {
   const svg = plotCard.querySelector<SVGSVGElement>('#responsePlot');
   const hoverLine = plotCard.querySelector<SVGLineElement>('#plotHoverLine');
-  const hoverDot = plotCard.querySelector<SVGCircleElement>('#plotHoverDot');
+  const hoverDots = Array.from(
+    plotCard.querySelectorAll<SVGCircleElement>('.plot-hover-dot'),
+  );
   const hoverLabel = plotCard.querySelector<HTMLDivElement>('#plotHover');
 
-  if (!svg || !hoverLine || !hoverDot || !hoverLabel || points.length === 0) {
+  if (
+    !svg ||
+    !hoverLine ||
+    !hoverLabel ||
+    measurements.length === 0 ||
+    hoverDots.length !== measurements.length
+  ) {
     return;
   }
 
-  const geometry = getResponsePlotGeometry(points);
+  const geometry = getResponsePlotGeometry(measurements);
 
   const updateHover = (clientX: number) => {
     const bounds = svg.getBoundingClientRect();
     const plotX =
       ((clientX - bounds.left) / bounds.width) * geometry.width;
-    let closestPoint = points[0];
-    let closestDistance = Number.POSITIVE_INFINITY;
+    const hoveredFrequency = getFrequencyForPlotX(plotX, geometry);
+    const hoverDetails: string[] = [];
+    const hoverLineX = getPlotX(hoveredFrequency, geometry);
 
-    for (const point of points) {
-      const pointX = getPlotX(point.frequencyHz, geometry);
-      const distance = Math.abs(pointX - plotX);
+    measurements.forEach((measurement, index) => {
+      const closestPoint = findClosestPoint(measurement.plotPoints, hoveredFrequency);
+      const x = getPlotX(closestPoint.frequencyHz, geometry);
+      const y = getPlotY(closestPoint.smoothedMagnitudeDbRelative, geometry);
 
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestPoint = point;
-      }
-    }
+      hoverDots[index]?.setAttribute('cx', x.toFixed(1));
+      hoverDots[index]?.setAttribute('cy', y.toFixed(1));
+      hoverDots[index]?.setAttribute('opacity', '1');
+      hoverDetails.push(
+        `${measurement.name}: ${closestPoint.smoothedMagnitudeDbRelative.toFixed(1)} dB`,
+      );
+    });
 
-    const x = getPlotX(closestPoint.frequencyHz, geometry);
-    const y = getPlotY(closestPoint.smoothedMagnitudeDbRelative, geometry);
-
-    hoverLine.setAttribute('x1', x.toFixed(1));
-    hoverLine.setAttribute('x2', x.toFixed(1));
+    hoverLine.setAttribute('x1', hoverLineX.toFixed(1));
+    hoverLine.setAttribute('x2', hoverLineX.toFixed(1));
     hoverLine.setAttribute('opacity', '1');
-    hoverDot.setAttribute('cx', x.toFixed(1));
-    hoverDot.setAttribute('cy', y.toFixed(1));
-    hoverDot.setAttribute('opacity', '1');
-    hoverLabel.textContent = `Hover: ${formatFrequencyDetailed(closestPoint.frequencyHz)}, ${closestPoint.smoothedMagnitudeDbRelative.toFixed(1)} dB`;
+    hoverLabel.textContent = `Hover: ${formatFrequencyDetailed(hoveredFrequency)} | ${hoverDetails.join(' | ')}`;
   };
 
   svg.addEventListener('pointermove', (event) => {
@@ -1195,12 +1869,19 @@ function attachPlotInteractions(points: MeasurementPoint[]): void {
 
   svg.addEventListener('pointerleave', () => {
     hoverLine.setAttribute('opacity', '0');
-    hoverDot.setAttribute('opacity', '0');
+    for (const hoverDot of hoverDots) {
+      hoverDot.setAttribute('opacity', '0');
+    }
+
     hoverLabel.textContent = 'Hover: --';
   });
 }
 
-function getResponsePlotGeometry(points: MeasurementPoint[]): ResponsePlotGeometry {
+function getResponsePlotGeometry(
+  measurements: LoadedMeasurement[],
+): ResponsePlotGeometry {
+  const points = measurements.flatMap((measurement) => measurement.plotPoints);
+  const frequencies = points.map((point) => point.frequencyHz);
   const smoothedValues = points.map((point) => point.smoothedMagnitudeDbRelative);
   const measuredTop = Math.max(...smoothedValues) + 3;
   const measuredBottom = Math.min(...smoothedValues) - 3;
@@ -1214,11 +1895,68 @@ function getResponsePlotGeometry(points: MeasurementPoint[]): ResponsePlotGeomet
     right: 24,
     top: 18,
     bottom: 56,
-    minFrequency: points[0]?.frequencyHz ?? DEFAULT_START_FREQUENCY,
-    maxFrequency: points.at(-1)?.frequencyHz ?? DEFAULT_END_FREQUENCY,
+    minFrequency: frequencies.length > 0 ? Math.min(...frequencies) : DEFAULT_START_FREQUENCY,
+    maxFrequency: frequencies.length > 0 ? Math.max(...frequencies) : DEFAULT_END_FREQUENCY,
     minDb,
     maxDb,
   };
+}
+
+function getFrequencyForPlotX(
+  x: number,
+  geometry: ResponsePlotGeometry,
+): number {
+  const clampedX = clamp(x, geometry.left, geometry.width - geometry.right);
+  const ratio =
+    (clampedX - geometry.left) /
+    (geometry.width - geometry.left - geometry.right);
+
+  return Math.pow(
+    10,
+    Math.log10(geometry.minFrequency) +
+      (Math.log10(geometry.maxFrequency) - Math.log10(geometry.minFrequency)) *
+        ratio,
+  );
+}
+
+function findClosestPoint(
+  points: MeasurementPoint[],
+  frequencyHz: number,
+): MeasurementPoint {
+  let low = 0;
+  let high = points.length - 1;
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+
+    if (points[middle].frequencyHz < frequencyHz) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+
+  const current = points[low] ?? points[0];
+  const previous = points[Math.max(0, low - 1)] ?? current;
+
+  return Math.abs(previous.frequencyHz - frequencyHz) <
+    Math.abs(current.frequencyHz - frequencyHz)
+    ? previous
+    : current;
+}
+
+function getPathBaseName(filePath: string): string {
+  const normalizedPath = filePath.replace(/\\/gu, '/');
+  const baseName = normalizedPath.split('/').at(-1) ?? filePath;
+  return baseName || 'measurement';
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/gu, '&amp;')
+    .replace(/</gu, '&lt;')
+    .replace(/>/gu, '&gt;')
+    .replace(/"/gu, '&quot;');
 }
 
 function getPlotX(frequencyHz: number, geometry: ResponsePlotGeometry): number {
