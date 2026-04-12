@@ -50,6 +50,7 @@ input {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  position: relative;
 }
 
 .header {
@@ -461,6 +462,44 @@ input {
   color: var(--error);
 }
 
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border: 1px solid rgba(79, 193, 255, 0.35);
+  border-radius: 8px;
+  background: rgba(20, 20, 22, 0.96);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  text-align: left;
+  z-index: 20;
+}
+
+.toast[hidden] {
+  display: none !important;
+  pointer-events: none;
+}
+
+.toast:hover {
+  border-color: var(--accent);
+}
+
+.toast-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.toast-action {
+  font-size: 11px;
+  color: var(--accent);
+}
+
 @media (max-width: 720px) {
   .grid {
     grid-template-columns: 1fr;
@@ -487,5 +526,12 @@ input {
   .measurement-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .toast {
+    right: 12px;
+    bottom: 12px;
+    min-width: 0;
+    width: calc(100vw - 24px);
   }
 }

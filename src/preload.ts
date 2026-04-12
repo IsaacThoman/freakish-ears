@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('freakishEars', {
   selectOutputFolder: () => ipcRenderer.invoke('dialog:selectOutputFolder'),
   saveMeasurementSession: (payload: SaveMeasurementPayload) =>
     ipcRenderer.invoke('files:saveMeasurementSession', payload),
+  showItemInFolder: (filePath: string) =>
+    ipcRenderer.invoke('files:showItemInFolder', filePath),
 });

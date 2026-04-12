@@ -28,9 +28,16 @@ declare global {
       saveMeasurementSession: (
         payload: SaveMeasurementPayload,
       ) => Promise<SaveMeasurementResult>;
+      showItemInFolder: (filePath: string) => Promise<void>;
     };
   }
 }
+
+type ToastState = {
+  message: string;
+  actionLabel: string;
+  actionPath: string;
+};
 
 type MeasurementPoint = {
   frequencyHz: number;
@@ -231,6 +238,7 @@ app.innerHTML = `
         <ul id="logList" class="log-list"></ul>
       </section>
     </section>
+    <button id="toastButton" class="toast" type="button" hidden></button>
   </main>
 `;
 
@@ -258,6 +266,7 @@ const normalizePlotToggle = getElement<HTMLInputElement>('normalizePlotToggle');
 const measurementFileInput = getElement<HTMLInputElement>('measurementFileInput');
 const plotCard = getElement<HTMLDivElement>('plotCard');
 const logList = getElement<HTMLUListElement>('logList');
+const toastButton = getElement<HTMLButtonElement>('toastButton');
 
 const state = {
   busy: false,
@@ -267,6 +276,8 @@ const state = {
   measurements: [] as LoadedMeasurement[],
   focusedMeasurementId: null as string | null,
   nextMeasurementIndex: 1,
+  toast: null as ToastState | null,
+  toastTimeoutId: 0,
 };
 
 chooseFolderButton.addEventListener('click', () => {
@@ -361,6 +372,15 @@ normalizePlotToggle.addEventListener('change', () => {
   renderMeasurements();
 });
 
+toastButton.addEventListener('click', () => {
+  const toast = state.toast;
+  if (!toast) {
+    return;
+  }
+
+  void openToastPath(toast.actionPath);
+});
+
 navigator.mediaDevices?.addEventListener?.('devicechange', () => {
   void refreshMicrophones(false);
 });
@@ -369,6 +389,7 @@ updateSelectedFolder();
 syncVolumeControls('slider');
 syncSplOffsetControl(true);
 normalizePlotToggle.checked = state.normalizePlot;
+hideToast();
 updateMeasurementActionState();
 appendLog('Click Refresh to access microphones and outputs.');
 void refreshMicrophones(false);
@@ -428,6 +449,40 @@ function updateSelectedFolder(): void {
 
 function updateMeasurementActionState(): void {
   importMeasurementsButton.disabled = state.busy;
+}
+
+function showToast(toast: ToastState): void {
+  state.toast = toast;
+  toastButton.hidden = false;
+  toastButton.innerHTML = `<span class="toast-title">${escapeHtml(toast.message)}</span><span class="toast-action">${escapeHtml(toast.actionLabel)}</span>`;
+
+  if (state.toastTimeoutId) {
+    window.clearTimeout(state.toastTimeoutId);
+  }
+
+  state.toastTimeoutId = window.setTimeout(() => {
+    hideToast();
+  }, 5000);
+}
+
+function hideToast(): void {
+  state.toast = null;
+  toastButton.hidden = true;
+  toastButton.textContent = '';
+
+  if (state.toastTimeoutId) {
+    window.clearTimeout(state.toastTimeoutId);
+    state.toastTimeoutId = 0;
+  }
+}
+
+async function openToastPath(filePath: string): Promise<void> {
+  try {
+    await window.freakishEars.showItemInFolder(filePath);
+    hideToast();
+  } catch (error) {
+    appendLog(`Unable to open exported item: ${getErrorMessage(error)}`, 'error');
+  }
 }
 
 function syncVolumeControls(
@@ -595,6 +650,11 @@ async function exportMeasurement(measurementId: string): Promise<void> {
       `Exported ${measurement.name} to ${saveResult.sessionDirectory}.`,
       'success',
     );
+    showToast({
+      message: `Exported ${measurement.name}`,
+      actionLabel: 'View in Finder',
+      actionPath: saveResult.filePaths[0] ?? saveResult.sessionDirectory,
+    });
   } catch (error) {
     const message = getErrorMessage(error);
     setStatus(`Measurement export failed: ${message}`, 'error');

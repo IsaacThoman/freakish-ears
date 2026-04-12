@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
@@ -111,6 +111,10 @@ ipcMain.handle(
     };
   },
 );
+
+ipcMain.handle('files:showItemInFolder', async (_event, filePath: string) => {
+  shell.showItemInFolder(filePath);
+});
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
