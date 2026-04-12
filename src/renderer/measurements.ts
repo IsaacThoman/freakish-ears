@@ -8,6 +8,7 @@ import type {
   LoadedMeasurement,
   MeasurementAnalysis,
   MeasurementBackend,
+  MeasurementChannelSelection,
   MeasurementImport,
   MeasurementMagnitudeMode,
   MeasurementPoint,
@@ -27,13 +28,16 @@ export function buildMeasurementJson(input: {
   capture: { recording: Float32Array };
   microphoneLabel: string;
   outputDeviceLabel: string;
-  settings: {
-    backend: MeasurementBackend;
-    startFrequency: number;
-    endFrequency: number;
-    durationSeconds: number;
-    sweepLevelDb: number;
-  };
+    settings: {
+      backend: MeasurementBackend;
+      startFrequency: number;
+      endFrequency: number;
+      durationSeconds: number;
+      sweepLevelDb: number;
+      sampleRate: number;
+      inputChannel: MeasurementChannelSelection;
+      outputChannel: MeasurementChannelSelection;
+    };
   preRollSeconds: number;
   postRollSeconds: number;
   splOffsetDb: number;

@@ -2,10 +2,29 @@ export function encodeWavFile(
   samples: Float32Array,
   sampleRate: number,
 ): Uint8Array {
+  return encodeMultichannelWavFile([samples], sampleRate);
+}
+
+export function encodeMultichannelWavFile(
+  channels: Float32Array[],
+  sampleRate: number,
+): Uint8Array {
+  const sanitizedChannels = channels.filter((channel) => channel.length > 0);
+
+  if (sanitizedChannels.length === 0) {
+    throw new Error('WAV encoding requires at least one channel.');
+  }
+
+  const sampleCount = sanitizedChannels[0].length;
+  if (!sanitizedChannels.every((channel) => channel.length === sampleCount)) {
+    throw new Error('All WAV channels must have the same sample count.');
+  }
+
+  const channelCount = sanitizedChannels.length;
   const bytesPerSample = 2;
-  const blockAlign = bytesPerSample;
+  const blockAlign = channelCount * bytesPerSample;
   const byteRate = sampleRate * blockAlign;
-  const dataLength = samples.length * bytesPerSample;
+  const dataLength = sampleCount * blockAlign;
   const buffer = new ArrayBuffer(44 + dataLength);
   const view = new DataView(buffer);
 
@@ -15,7 +34,7 @@ export function encodeWavFile(
   writeAscii(view, 12, 'fmt ');
   view.setUint32(16, 16, true);
   view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
+  view.setUint16(22, channelCount, true);
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, byteRate, true);
   view.setUint16(32, blockAlign, true);
@@ -24,11 +43,14 @@ export function encodeWavFile(
   view.setUint32(40, dataLength, true);
 
   let offset = 44;
-  for (const sample of samples) {
-    const clamped = Math.max(-1, Math.min(1, sample));
-    const int16 = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-    view.setInt16(offset, int16, true);
-    offset += 2;
+  for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
+    for (const channel of sanitizedChannels) {
+      const sample = channel[sampleIndex] ?? 0;
+      const clamped = Math.max(-1, Math.min(1, sample));
+      const int16 = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+      view.setInt16(offset, int16, true);
+      offset += 2;
+    }
   }
 
   return new Uint8Array(buffer);

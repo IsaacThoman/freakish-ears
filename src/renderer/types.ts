@@ -15,6 +15,7 @@ export type MeasurementPoint = {
 export type MeasurementMagnitudeMode = 'relative' | 'spl';
 
 export type MeasurementBackend = 'web-audio' | 'sox';
+export type MeasurementChannelSelection = 'left' | 'right' | 'both';
 
 export type MeasurementAnalysis = {
   sampleRate: number;

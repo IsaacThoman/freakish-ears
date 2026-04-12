@@ -4,6 +4,7 @@ import {
   DEFAULT_MEASUREMENT_BACKEND,
   DEFAULT_DURATION_SECONDS,
   DEFAULT_END_FREQUENCY,
+  DEFAULT_SAMPLE_RATE,
   DEFAULT_SPL_OFFSET_DB,
   DEFAULT_START_FREQUENCY,
   DEFAULT_SWEEP_LEVEL_DB,
@@ -13,6 +14,7 @@ import {
   NORMALIZE_PLOT_STORAGE_KEY,
   POST_ROLL_SECONDS,
   PRE_ROLL_SECONDS,
+  SAMPLE_RATE_OPTIONS,
   SPL_OFFSET_STORAGE_KEY,
   STORAGE_KEY,
 } from './renderer/constants';
@@ -31,6 +33,7 @@ import type {
   LoadedMeasurement,
   LogTone,
   MeasurementBackend,
+  MeasurementChannelSelection,
   StatusTone,
   ToastState,
 } from './renderer/types';
@@ -64,7 +67,23 @@ app.innerHTML = `
             <option value="web-audio">Built-in</option>
             <option value="sox">SoX</option>
           </select>
-          <span style="color:var(--text-muted);font-size:11px">SoX uses the system default input/output devices.</span>
+          <span style="color:var(--text-muted);font-size:11px">SoX uses the system default input/output devices, but still applies the selected sample rate and channel routing.</span>
+        </div>
+
+        <div class="field">
+          <label for="sampleRateSelect">Sample Rate</label>
+          <select id="sampleRateSelect">
+            ${SAMPLE_RATE_OPTIONS.map((value) => `<option value="${value}" ${value === DEFAULT_SAMPLE_RATE ? 'selected' : ''}>${value.toLocaleString()} Hz</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="inputChannelSelect">Input Channel</label>
+          <select id="inputChannelSelect">
+            <option value="both">Both</option>
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+          </select>
         </div>
 
         <div class="field">
@@ -76,6 +95,15 @@ app.innerHTML = `
         </button>
 
         <span class="section-title">Output</span>
+
+        <div class="field">
+          <label for="outputChannelSelect">Output Channel</label>
+          <select id="outputChannelSelect">
+            <option value="both">Both</option>
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+          </select>
+        </div>
 
         <div class="field">
           <select id="outputSelect"></select>
@@ -180,9 +208,12 @@ app.innerHTML = `
 
 const microphoneSelect = getElement<HTMLSelectElement>('microphoneSelect');
 const measurementBackendSelect = getElement<HTMLSelectElement>('measurementBackendSelect');
+const sampleRateSelect = getElement<HTMLSelectElement>('sampleRateSelect');
+const inputChannelSelect = getElement<HTMLSelectElement>('inputChannelSelect');
 const refreshDevicesButton = getElement<HTMLButtonElement>('refreshDevicesButton');
 const chooseFolderButton = getElement<HTMLButtonElement>('chooseFolderButton');
 const selectedFolder = getElement<HTMLDivElement>('selectedFolder');
+const outputChannelSelect = getElement<HTMLSelectElement>('outputChannelSelect');
 const outputSelect = getElement<HTMLSelectElement>('outputSelect');
 const startFrequencyInput = getElement<HTMLInputElement>('startFrequencyInput');
 const endFrequencyInput = getElement<HTMLInputElement>('endFrequencyInput');
@@ -351,9 +382,12 @@ function getElement<TElement extends HTMLElement>(id: string): TElement {
 function setBusy(isBusy: boolean): void {
   state.busy = isBusy;
 
+  sampleRateSelect.disabled = isBusy;
+  inputChannelSelect.disabled = isBusy;
   microphoneSelect.disabled = isBusy;
   refreshDevicesButton.disabled = isBusy;
   chooseFolderButton.disabled = isBusy;
+  outputChannelSelect.disabled = isBusy;
   outputSelect.disabled = isBusy;
   startFrequencyInput.disabled = isBusy;
   endFrequencyInput.disabled = isBusy;
@@ -700,6 +734,9 @@ async function runMeasurement(): Promise<void> {
 
   const outputFolder = state.outputFolder;
   const measurementBackend = getSelectedMeasurementBackend();
+  const sampleRate = getSelectedSampleRate();
+  const inputChannel = getSelectedChannel(inputChannelSelect);
+  const outputChannel = getSelectedChannel(outputChannelSelect);
   const deviceId = microphoneSelect.value;
   const outputDeviceId = outputSelect.value;
   const startFrequency = Number(startFrequencyInput.value);
@@ -723,12 +760,14 @@ async function runMeasurement(): Promise<void> {
     !Number.isFinite(startFrequency) ||
     !Number.isFinite(endFrequency) ||
     !Number.isFinite(durationSeconds) ||
+    !Number.isFinite(sampleRate) ||
     !Number.isFinite(sweepLevelDb) ||
     startFrequency < 10 ||
     endFrequency <= startFrequency ||
     endFrequency > 22000 ||
     durationSeconds < 2 ||
     durationSeconds > 30 ||
+    sampleRate < 8000 ||
     sweepLevelDb < MIN_SWEEP_LEVEL_DB ||
     sweepLevelDb > MAX_SWEEP_LEVEL_DB
   ) {
@@ -748,13 +787,18 @@ async function runMeasurement(): Promise<void> {
 
     if (measurementBackend === 'sox') {
       setStatus('Capturing sweep measurement via SoX...', 'working');
-      appendLog('Running SoX with the system default input and output devices.');
+      appendLog(
+        `Running SoX at ${sampleRate} Hz with input ${inputChannel} and output ${outputChannel} on the system default devices.`,
+      );
 
       const soxCapture = await window.freakishEars.runSoxMeasurement({
         startFrequency,
         endFrequency,
         durationSeconds,
         sweepLevelDb,
+        sampleRate,
+        inputChannel,
+        outputChannel,
         preRollSeconds: PRE_ROLL_SECONDS,
         postRollSeconds: POST_ROLL_SECONDS,
       });
@@ -765,16 +809,21 @@ async function runMeasurement(): Promise<void> {
         sampleRate: soxCapture.sampleRate,
         preRollSamples: soxCapture.preRollSamples,
       };
-      captureWav = soxCapture.recordingWav;
+      captureWav = encodeWavFile(capture.recording, capture.sampleRate);
       microphoneLabel = 'System default (SoX)';
       outputDeviceLabel = 'System default (SoX)';
     } else {
       setStatus('Capturing sweep measurement...', 'working');
-      appendLog('Opening the selected microphone and preparing the sweep.');
+      appendLog(
+        `Opening the selected microphone at ${sampleRate} Hz with input ${inputChannel} and output ${outputChannel}.`,
+      );
 
       capture = await recordSweepMeasurement({
         deviceId,
         outputDeviceId,
+        sampleRate,
+        inputChannel,
+        outputChannel,
         startFrequency,
         endFrequency,
         durationSeconds,
@@ -807,6 +856,9 @@ async function runMeasurement(): Promise<void> {
         endFrequency,
         durationSeconds,
         sweepLevelDb,
+        sampleRate,
+        inputChannel,
+        outputChannel,
       },
       preRollSeconds: PRE_ROLL_SECONDS,
       postRollSeconds: POST_ROLL_SECONDS,
@@ -978,4 +1030,15 @@ function readStoredMeasurementBackend(): MeasurementBackend {
 
 function getSelectedMeasurementBackend(): MeasurementBackend {
   return measurementBackendSelect.value === 'sox' ? 'sox' : 'web-audio';
+}
+
+function getSelectedSampleRate(): number {
+  const sampleRate = Number(sampleRateSelect.value);
+  return Number.isFinite(sampleRate) ? sampleRate : DEFAULT_SAMPLE_RATE;
+}
+
+function getSelectedChannel(
+  select: HTMLSelectElement,
+): MeasurementChannelSelection {
+  return select.value === 'left' || select.value === 'right' ? select.value : 'both';
 }
