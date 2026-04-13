@@ -347,29 +347,66 @@ input {
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
+  grid-template-areas:
+    'measurement-toolbar'
+    'measurement-plot'
+    'apo-toolbar'
+    'apo-plot';
 }
 
 .plots-container.is-split {
   grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    'measurement-toolbar apo-toolbar'
+    'measurement-plot apo-plot';
+}
+
+.plot-toolbar-measurements {
+  grid-area: measurement-toolbar;
+}
+
+#measurementsPlotCard {
+  grid-area: measurement-plot;
+}
+
+.apo-controls-bar {
+  grid-area: apo-toolbar;
 }
 
 .apo-plot-stack {
+  grid-area: apo-plot;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  width: 100%;
+  padding: 12px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.apo-plot-stack > .plot-card {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
 }
 
 .apo-controls-bar {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 12px;
   flex-wrap: wrap;
+  min-width: 0;
+  width: 100%;
 }
 
 .apo-controls-bar .segmented-toggle {
   flex: 0 0 auto;
-  align-self: flex-end;
+  align-self: flex-start;
   margin-bottom: 0;
 }
 
@@ -404,6 +441,38 @@ input {
 .apo-control-group input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.apo-control-group-inline {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.apo-control-group-inline span {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.apo-control-group-inline input {
+  width: 80px;
+  height: 28px;
+  padding: 0 24px 0 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--panel);
 }
 
 .plot-card {
@@ -490,9 +559,10 @@ input {
 
 .plot-toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .plot-toolbar-actions {
@@ -500,6 +570,7 @@ input {
   gap: 8px;
   flex-wrap: wrap;
   align-items: stretch;
+  min-width: 0;
 }
 
 .plot-toolbar-actions .btn,
@@ -787,10 +858,12 @@ input {
   white-space: nowrap;
 }
 
+.apo-apply-warning[hidden] {
+  display: none !important;
+}
+
 .apo-apply-anchor:hover .apo-apply-warning,
-.apo-apply-anchor:focus-within .apo-apply-warning,
-.apo-apply-warning:hover,
-.apo-apply-warning:focus-within {
+.apo-apply-anchor:focus-within .apo-apply-warning {
   display: inline-flex;
 }
 
@@ -1034,17 +1107,7 @@ input {
     align-items: stretch;
   }
 
-  .apo-control-group {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .apo-control-group label {
-    min-width: 80px;
-  }
-
-  .apo-control-group input {
+  .apo-control-group-inline input {
     flex: 1;
     width: auto;
   }

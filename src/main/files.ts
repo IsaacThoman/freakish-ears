@@ -206,7 +206,8 @@ function ensureFreakishEarsInclude(contents: string): string {
 async function isProcessRunning(imageName: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync('tasklist', ['/FI', `IMAGENAME eq ${imageName}`]);
-    return stdout.toLowerCase().includes(imageName.toLowerCase());
+    const escapedImageName = escapeRegExp(imageName);
+    return new RegExp(`^${escapedImageName}\\s+`, 'imu').test(stdout);
   } catch {
     return false;
   }

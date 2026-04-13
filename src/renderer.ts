@@ -47,6 +47,7 @@ import {
   POST_ROLL_SECONDS,
   PRE_ROLL_SECONDS,
   PROPORTIONAL_P_STORAGE_KEY,
+  PLOT_COLORS,
   PLOT_NORMALIZATION_FREQUENCY_HZ,
   SAMPLE_RATE_OPTIONS,
   SAMPLE_RATE_STORAGE_KEY,
@@ -54,6 +55,7 @@ import {
   SMOOTHING_MODE_STORAGE_KEY,
   SPL_OFFSET_STORAGE_KEY,
   START_FREQUENCY_STORAGE_KEY,
+  STARRED_PLOT_COLORS,
   STORAGE_KEY,
   SWEEP_LEVEL_STORAGE_KEY,
 } from './renderer/constants';
@@ -361,55 +363,47 @@ app.innerHTML = `
           </div>
         </div>
 
-        <div class="plot-toolbar">
-          <div class="plot-toolbar-actions">
-            <label class="plot-toggle">
-              <input id="normalizePlotToggle" type="checkbox" />
-              <span>Normalize @ 1 kHz</span>
-            </label>
-            <label class="plot-smoothing" for="smoothingModeSelect">
-              <span>Smoothing</span>
-              <select id="smoothingModeSelect">
-                ${SMOOTHING_MODE_OPTIONS.map((value) => `<option value="${value}">${formatSmoothingModeLabel(value)}</option>`).join('')}
-              </select>
-            </label>
-            <button id="importMeasurementsButton" class="btn btn-secondary" type="button">
-              Import
-            </button>
-            <button id="importReferenceButton" class="btn btn-secondary" type="button">
-              Import Ref
-            </button>
-          </div>
-        </div>
-
-        <input id="measurementFileInput" type="file" accept=".txt,.csv,.json,.targetcurve,text/plain,application/json" multiple hidden />
-        <input id="referenceFileInput" type="file" accept=".txt,.csv,.targetcurve,text/plain" multiple hidden />
-        <input id="configFileInput" type="file" accept=".json,application/json,text/plain" hidden />
-
         <div id="plotsContainer" class="plots-container">
+          <div class="plot-toolbar plot-toolbar-measurements">
+            <div class="plot-toolbar-actions">
+              <label class="plot-toggle">
+                <input id="normalizePlotToggle" type="checkbox" />
+                <span>Normalize @ 1 kHz</span>
+              </label>
+              <label class="plot-smoothing" for="smoothingModeSelect">
+                <span>Smoothing</span>
+                <select id="smoothingModeSelect">
+                  ${SMOOTHING_MODE_OPTIONS.map((value) => `<option value="${value}">${formatSmoothingModeLabel(value)}</option>`).join('')}
+                </select>
+              </label>
+              <button id="importMeasurementsButton" class="btn btn-secondary" type="button">
+                Import
+              </button>
+              <button id="importReferenceButton" class="btn btn-secondary" type="button">
+                Import Ref
+              </button>
+            </div>
+          </div>
+          <div class="apo-controls-bar">
+            <div id="apoEqModeToggle" class="segmented-toggle" role="tablist" aria-label="EQ mode selector">
+              <button id="apoEqModeParametricButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="parametric" role="tab" aria-selected="true">Parametric</button>
+              <button id="apoEqModeGraphicButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="graphic" role="tab" aria-selected="false">Graphic</button>
+              <span id="apoEqModeThumb" class="segmented-toggle-thumb" aria-hidden="true"></span>
+            </div>
+            <label class="apo-control-group apo-control-group-inline" for="apoMaxFiltersInput">
+              <span>Filters</span>
+              <input id="apoMaxFiltersInput" type="number" min="1" max="250" step="1" value="${DEFAULT_APO_MAX_FILTERS}" />
+            </label>
+          </div>
+
+          <input id="measurementFileInput" type="file" accept=".txt,.csv,.json,.targetcurve,text/plain,application/json" multiple hidden />
+          <input id="referenceFileInput" type="file" accept=".txt,.csv,.targetcurve,text/plain" multiple hidden />
+          <input id="configFileInput" type="file" accept=".json,application/json,text/plain" hidden />
+
           <div id="measurementsPlotCard" class="plot-card">
             <span style="color:var(--text-muted);font-size:11px">Run or import measurements to plot response</span>
           </div>
           <div class="apo-plot-stack">
-            <div class="apo-controls-bar">
-              <div id="apoEqModeToggle" class="segmented-toggle" role="tablist" aria-label="EQ mode selector">
-                <button id="apoEqModeParametricButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="parametric" role="tab" aria-selected="true">Parametric</button>
-                <button id="apoEqModeGraphicButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="graphic" role="tab" aria-selected="false">Graphic</button>
-                <span id="apoEqModeThumb" class="segmented-toggle-thumb" aria-hidden="true"></span>
-              </div>
-              <div class="apo-control-group">
-                <label for="apoMaxFiltersInput">Filters</label>
-                <input id="apoMaxFiltersInput" type="number" min="1" max="250" step="1" value="${DEFAULT_APO_MAX_FILTERS}" />
-              </div>
-              <div class="apo-control-group">
-                <label for="apoMaxBoostInput">Max Boost</label>
-                <input id="apoMaxBoostInput" type="number" min="0" max="24" step="0.5" value="${DEFAULT_APO_MAX_BOOST_DB}" />
-              </div>
-              <div class="apo-control-group">
-                <label for="apoMaxCutInput">Max Cut</label>
-                <input id="apoMaxCutInput" type="number" min="0" max="24" step="0.5" value="${DEFAULT_APO_MAX_CUT_DB}" />
-              </div>
-            </div>
             <div id="apoPlotCard" class="plot-card">
               <span style="color:var(--text-muted);font-size:11px">Enable filters to see EQ graph</span>
             </div>
@@ -549,8 +543,6 @@ const apoApplyWarning = getElement<HTMLDivElement>('apoApplyWarning');
 const apoMeasurementSelect = getElement<HTMLSelectElement>('apoMeasurementSelect');
 const apoReferenceSelect = getElement<HTMLSelectElement>('apoReferenceSelect');
 const apoMaxFiltersInput = getElement<HTMLInputElement>('apoMaxFiltersInput');
-const apoMaxBoostInput = getElement<HTMLInputElement>('apoMaxBoostInput');
-const apoMaxCutInput = getElement<HTMLInputElement>('apoMaxCutInput');
 const apoFilterList = getElement<HTMLDivElement>('apoFilterList');
 const apoConfigPreview = getElement<HTMLTextAreaElement>('apoConfigPreview');
 const apoApplyStatus = getElement<HTMLSpanElement>('apoApplyStatus');
@@ -989,22 +981,6 @@ apoMaxFiltersInput.addEventListener('blur', () => {
   syncApoGenerationSettings(true);
 });
 
-apoMaxBoostInput.addEventListener('input', () => {
-  syncApoGenerationSettings(false);
-});
-
-apoMaxBoostInput.addEventListener('blur', () => {
-  syncApoGenerationSettings(true);
-});
-
-apoMaxCutInput.addEventListener('input', () => {
-  syncApoGenerationSettings(false);
-});
-
-apoMaxCutInput.addEventListener('blur', () => {
-  syncApoGenerationSettings(true);
-});
-
 apoFilterList.addEventListener('change', (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
@@ -1076,8 +1052,6 @@ syncSplOffsetControl(true);
 normalizePlotToggle.checked = state.normalizePlot;
 smoothingModeSelect.value = state.smoothingMode;
 apoMaxFiltersInput.value = String(state.apoMaxFilters);
-apoMaxBoostInput.value = String(state.apoMaxBoostDb);
-apoMaxCutInput.value = String(state.apoMaxCutDb);
 automationAlgorithmSelect.value = state.automationAlgorithm;
 proportionalPInput.value = state.proportionalP.toFixed(2);
 automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
@@ -1142,8 +1116,6 @@ function setBusy(isBusy: boolean): void {
   apoMeasurementSelect.disabled = isBusy;
   apoReferenceSelect.disabled = isBusy;
   apoMaxFiltersInput.disabled = isBusy;
-  apoMaxBoostInput.disabled = isBusy;
-  apoMaxCutInput.disabled = isBusy;
   updateMeasurementBackendUi();
 
   updateMeasurementActionState();
@@ -1747,6 +1719,34 @@ function addMeasurement(measurement: LoadedMeasurement): void {
   renderApoSection();
 }
 
+function getMeasurementDefaultColor(measurement: LoadedMeasurement): string {
+  const numericId = Number(measurement.id.replace('measurement-', ''));
+  if (Number.isFinite(numericId) && numericId > 0) {
+    return PLOT_COLORS[(numericId - 1) % PLOT_COLORS.length];
+  }
+
+  return measurement.color;
+}
+
+function getNextStarredMeasurementColor(currentMeasurementId: string): string {
+  const usedStarredColors = new Set(
+    state.measurements
+      .filter((measurement) => measurement.starred && measurement.id !== currentMeasurementId)
+      .map((measurement) => measurement.color),
+  );
+
+  return (
+    STARRED_PLOT_COLORS.find((color) => !usedStarredColors.has(color)) ?? STARRED_PLOT_COLORS[0]
+  );
+}
+
+function getPlotMeasurementOrder(measurements: LoadedMeasurement[]): LoadedMeasurement[] {
+  return [
+    ...measurements.filter((measurement) => !measurement.starred),
+    ...measurements.filter((measurement) => measurement.starred),
+  ];
+}
+
 function toggleMeasurementStar(measurementId: string): void {
   let updatedMeasurementName: string | null = null;
   let starred = false;
@@ -1758,7 +1758,13 @@ function toggleMeasurementStar(measurementId: string): void {
 
     updatedMeasurementName = measurement.name;
     starred = !measurement.starred;
-    return { ...measurement, starred };
+    return {
+      ...measurement,
+      starred,
+      color: starred
+        ? getNextStarredMeasurementColor(measurement.id)
+        : getMeasurementDefaultColor(measurement),
+    };
   });
 
   if (updatedMeasurementName) {
@@ -1854,8 +1860,8 @@ function removeReferenceCurve(referenceId: string): void {
 }
 
 function renderMeasurements(): void {
-  const visibleMeasurements = state.measurements.filter(
-    (measurement) => measurement.visible,
+  const visibleMeasurements = getPlotMeasurementOrder(
+    state.measurements.filter((measurement) => measurement.visible),
   );
   const visibleReferenceCurves = state.referenceCurves.filter(
     (referenceCurve) => referenceCurve.visible,
@@ -1880,6 +1886,7 @@ function renderPlotCard(
   visibleMeasurements: LoadedMeasurement[],
   visibleReferenceCurves: ReferenceCurve[],
 ): void {
+  const orderedMeasurements = getPlotMeasurementOrder(visibleMeasurements);
   const measurementsCompact = measurementsPlotCard.clientWidth < 560;
   const apoCompact = apoPlotCard.clientWidth < 560;
   const measurementsContainerWidth = measurementsPlotCard.clientWidth;
@@ -1887,7 +1894,7 @@ function renderPlotCard(
 
   // Render measurements plot
   measurementsPlotCard.innerHTML = renderResponsePlot({
-    visibleMeasurements,
+    visibleMeasurements: orderedMeasurements,
     allMeasurements: state.measurements,
     visibleReferenceCurves,
     allReferenceCurves: state.referenceCurves,
@@ -1915,7 +1922,7 @@ function renderPlotCard(
   });
   attachPlotInteractions({
     plotCard: measurementsPlotCard,
-    measurements: visibleMeasurements,
+    measurements: orderedMeasurements,
     referenceCurves: visibleReferenceCurves,
     normalizePlot: state.normalizePlot,
     smoothingMode: state.smoothingMode,
@@ -2415,8 +2422,6 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
     persistActiveConfiguration();
   }
   apoMaxFiltersInput.value = String(state.apoMaxFilters);
-  apoMaxBoostInput.value = String(state.apoMaxBoostDb);
-  apoMaxCutInput.value = String(state.apoMaxCutDb);
   automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
   automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
   automationRegressionLimitInput.value = String(state.automationRegressionLimit);
@@ -2734,25 +2739,13 @@ function handleApoFilterDragEnd(): void {
 
 function syncApoGenerationSettings(normalize: boolean): void {
   const parsedMaxFilters = Number(apoMaxFiltersInput.value);
-  const parsedMaxBoostDb = Number(apoMaxBoostInput.value);
-  const parsedMaxCutDb = Number(apoMaxCutInput.value);
 
   if (Number.isFinite(parsedMaxFilters)) {
     state.apoMaxFilters = clamp(Math.round(parsedMaxFilters), 1, 250);
   }
 
-  if (Number.isFinite(parsedMaxBoostDb)) {
-    state.apoMaxBoostDb = clamp(parsedMaxBoostDb, 0, 24);
-  }
-
-  if (Number.isFinite(parsedMaxCutDb)) {
-    state.apoMaxCutDb = clamp(parsedMaxCutDb, 0, 24);
-  }
-
   if (normalize) {
     apoMaxFiltersInput.value = String(state.apoMaxFilters);
-    apoMaxBoostInput.value = state.apoMaxBoostDb.toFixed(1);
-    apoMaxCutInput.value = state.apoMaxCutDb.toFixed(1);
   }
 
   if (state.apoEqMode === 'graphic') {

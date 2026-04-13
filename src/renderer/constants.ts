@@ -71,10 +71,22 @@ export const SMOOTHING_MODE_OPTIONS = [
   '1/1',
 ] as const;
 export const PLOT_COLORS = [
-  '#f8a145',
-  '#f07900',
-  '#d35100',
-  '#f3c38b',
-  '#f5b36a',
-  '#ff8b2f',
+  '#ffcfa5',
+  '#ff5c00',
+  '#9f4300',
+  '#ff8431',
+  '#a82d00',
+  '#e1942e',
+  '#ff7050',
+  '#ad5d44',
+  '#790d0a',
+  '#86562a',
+  '#b86a21',
+  '#5d2c0c',
+];
+export const STARRED_PLOT_COLORS = [
+  '#6feaef',
+  '#5170ff',
+  '#008199',
+  '#1800ad',
 ];
