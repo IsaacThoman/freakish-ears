@@ -86,6 +86,8 @@ export type MeasurementImport = {
 
 export type ApoFilterKind = 'PK';
 
+export type ApoEqMode = 'parametric' | 'graphic';
+
 export type ApoFilter = {
   id: string;
   enabled: boolean;
@@ -110,6 +112,7 @@ export type AppState = {
   nextMeasurementIndex: number;
   nextReferenceIndex: number;
   apoFilters: ApoFilter[];
+  apoEqMode: ApoEqMode;
   apoSelectedMeasurementId: string | null;
   apoSelectedReferenceId: string | null;
   apoMaxFilters: number;

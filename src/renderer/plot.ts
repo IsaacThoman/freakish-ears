@@ -4,6 +4,7 @@ import {
 } from './constants';
 import { getMeasurementPointsForDisplay } from './measurements';
 import type {
+  ApoEqMode,
   ApoFilter,
   LoadedMeasurement,
   MeasurementPoint,
@@ -318,6 +319,7 @@ export type ApoPlotDragHandler = (
 
 export function renderApoEqPlot(input: {
   filters: ApoFilter[];
+  eqMode: ApoEqMode;
   measurementName: string | null;
   targetName: string | null;
   compact: boolean;
@@ -379,7 +381,7 @@ export function renderApoEqPlot(input: {
             .map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`)
             .join(' ');
 
-          return `<polyline points="${path}" fill="none" stroke="rgba(125,125,125,0.65)" stroke-width="1.5" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"><title>${escapeHtml(`PK ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}`)}</title></polyline>`;
+          return `<polyline points="${path}" fill="none" stroke="rgba(125,125,125,0.65)" stroke-width="1.5" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"><title>${escapeHtml(`${input.eqMode === 'graphic' ? 'GEQ' : 'PK'} ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}`)}</title></polyline>`;
         })
         .join('')}
       <polyline points="${combinedPath}" fill="none" stroke="#f8a145" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
@@ -605,6 +607,7 @@ function getPlotY(valueDb: number, geometry: ResponsePlotGeometry): number {
 export function attachApoPlotInteractions(input: {
   plotCard: HTMLElement;
   filters: ApoFilter[];
+  lockFrequency: boolean;
   onFilterDrag: ApoPlotDragHandler;
   onDragEnd: () => void;
 }): void {
@@ -612,6 +615,7 @@ export function attachApoPlotInteractions(input: {
   const plotCardWithController = plotCard as HTMLElement & {
     __apoPlotController?: {
       filters: ApoFilter[];
+      lockFrequency: boolean;
       onFilterDrag: ApoPlotDragHandler;
       onDragEnd: () => void;
       draggingFilterId: string | null;
@@ -621,6 +625,7 @@ export function attachApoPlotInteractions(input: {
 
   if (plotCardWithController.__apoPlotController) {
     plotCardWithController.__apoPlotController.filters = input.filters;
+    plotCardWithController.__apoPlotController.lockFrequency = input.lockFrequency;
     plotCardWithController.__apoPlotController.onFilterDrag = input.onFilterDrag;
     plotCardWithController.__apoPlotController.onDragEnd = input.onDragEnd;
     return;
@@ -737,13 +742,23 @@ export function attachApoPlotInteractions(input: {
     }
 
     const transformedPoint = svgPoint.matrixTransform(screenMatrix.inverse());
-    const axis: ApoDragAxis = event.shiftKey ? 'horizontal' : event.altKey ? 'vertical' : 'both';
-
-    const frequencyHz = clamp(
-      getFrequencyForPlotX(transformedPoint.x, geometry),
-      20,
-      20000,
+    const axis: ApoDragAxis = controller.lockFrequency
+      ? 'vertical'
+      : event.shiftKey
+        ? 'horizontal'
+        : event.altKey
+          ? 'vertical'
+          : 'both';
+    const activeFilter = controller.filters.find(
+      (filter) => filter.id === controller.draggingFilterId,
     );
+    const frequencyHz = controller.lockFrequency
+      ? (activeFilter?.frequencyHz ?? 1000)
+      : clamp(
+          getFrequencyForPlotX(transformedPoint.x, geometry),
+          20,
+          20000,
+        );
     const gainDb = clamp(
       getDbForPlotY(transformedPoint.y, geometry),
       -24,
@@ -812,6 +827,7 @@ export function attachApoPlotInteractions(input: {
 
   plotCardWithController.__apoPlotController = {
     filters: input.filters,
+    lockFrequency: input.lockFrequency,
     onFilterDrag: input.onFilterDrag,
     onDragEnd: input.onDragEnd,
     draggingFilterId: null,

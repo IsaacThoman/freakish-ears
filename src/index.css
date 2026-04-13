@@ -319,6 +319,59 @@ input {
   grid-template-columns: 1fr 1fr;
 }
 
+.apo-plot-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.apo-controls-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.apo-controls-bar .segmented-toggle {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  margin-bottom: 0;
+}
+
+.apo-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.apo-control-group label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1;
+}
+
+.apo-control-group input {
+  width: 90px;
+  height: 36px;
+  padding: 0 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.apo-control-group input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .plot-card {
   position: relative;
   padding: 12px;
@@ -339,6 +392,66 @@ input {
   width: 100%;
   height: auto;
   max-width: 100%;
+}
+
+.segmented-toggle {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-self: flex-end;
+  min-width: 220px;
+  height: 36px;
+  padding: 3px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  isolation: isolate;
+  box-sizing: border-box;
+}
+
+.segmented-toggle-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border-radius: 4px;
+  background: var(--accent);
+  transition: transform 0.18s ease;
+  z-index: 0;
+}
+
+.segmented-toggle[data-mode='graphic'] .segmented-toggle-thumb {
+  transform: translateX(100%);
+}
+
+.segmented-toggle-option {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.segmented-toggle-option[data-active='true'] {
+  color: #140b02;
+}
+
+.segmented-toggle-option[data-active='false']:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.segmented-toggle-option:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(240, 121, 0, 0.45);
 }
 
 .plot-toolbar {
@@ -590,10 +703,6 @@ input {
   gap: 8px;
 }
 
-.apo-settings-row {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .apo-hint {
   color: var(--text-muted);
   font-size: 11px;
@@ -628,6 +737,16 @@ input {
   grid-template-columns: auto 70px minmax(90px, 1fr) minmax(90px, 1fr) minmax(80px, 1fr) auto;
   gap: 8px;
   align-items: center;
+}
+
+.apo-card.is-graphic .apo-filter-header,
+.apo-card.is-graphic .apo-filter-row {
+  grid-template-columns: auto 70px minmax(90px, 1fr) minmax(90px, 1fr) auto;
+}
+
+.apo-card.is-graphic .apo-filter-header-q,
+.apo-card.is-graphic .apo-filter-q {
+  display: none;
 }
 
 .apo-filter-row.is-hidden {
@@ -808,6 +927,31 @@ input {
     flex-direction: column;
   }
 
+  .segmented-toggle {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .apo-controls-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .apo-control-group {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .apo-control-group label {
+    min-width: 80px;
+  }
+
+  .apo-control-group input {
+    flex: 1;
+    width: auto;
+  }
+
   .measurement-row {
     align-items: flex-start;
     flex-direction: column;
@@ -819,7 +963,6 @@ input {
   }
 
   .apo-grid,
-  .apo-settings-row,
   .apo-filter-row {
     grid-template-columns: 1fr;
   }
