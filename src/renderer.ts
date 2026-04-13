@@ -10,6 +10,7 @@ import {
   APO_MAX_FILTERS_STORAGE_KEY,
   APO_SELECTED_MEASUREMENT_STORAGE_KEY,
   APO_SELECTED_REFERENCE_STORAGE_KEY,
+  AUTOMATION_DELAY_SECONDS_STORAGE_KEY,
   AUTOMATION_ALGORITHM_STORAGE_KEY,
   DEFAULT_APO_EQ_MODE,
   DEFAULT_MEASUREMENT_BACKEND,
@@ -17,6 +18,7 @@ import {
   DEFAULT_APO_MAX_CUT_DB,
   DEFAULT_APO_MAX_FILTERS,
   DEFAULT_AUTOMATION_ALGORITHM,
+  DEFAULT_AUTOMATION_DELAY_SECONDS,
   DEFAULT_DURATION_SECONDS,
   DEFAULT_END_FREQUENCY,
   DEFAULT_PROPORTIONAL_P,
@@ -87,6 +89,7 @@ import {
   formatTimestampForPath,
   getErrorMessage,
   readStoredNumber,
+  wait,
 } from './renderer/utils';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -224,6 +227,13 @@ app.innerHTML = `
           </div>
 
           <div id="proportionalAutomationFields" class="automation-fields">
+            <div class="field">
+              <label for="automationDelayInput">Delay Between Runs</label>
+              <div class="number-input-row">
+                <input id="automationDelayInput" class="level-number-input" type="number" min="0" max="3600" step="0.1" value="${DEFAULT_AUTOMATION_DELAY_SECONDS.toFixed(1)}" />
+                <span>s</span>
+              </div>
+            </div>
             <div class="field">
               <label for="proportionalPInput">P Value</label>
               <div class="number-input-row">
@@ -402,6 +412,7 @@ const runMeasurementButton = getElement<HTMLButtonElement>('runMeasurementButton
 const runAutomationButton = getElement<HTMLButtonElement>('runAutomationButton');
 const automationAlgorithmSelect = getElement<HTMLSelectElement>('automationAlgorithmSelect');
 const proportionalAutomationFields = getElement<HTMLDivElement>('proportionalAutomationFields');
+const automationDelayInput = getElement<HTMLInputElement>('automationDelayInput');
 const proportionalPInput = getElement<HTMLInputElement>('proportionalPInput');
 const statusPill = getElement<HTMLDivElement>('statusPill');
 const latencyValue = getElement<HTMLSpanElement>('latencyValue');
@@ -459,6 +470,14 @@ const state: AppState = {
   apoFilters: readStoredApoFilters(),
   apoEqMode: readStoredApoEqMode(),
   automationAlgorithm: readStoredAutomationAlgorithm(),
+  automationDelaySeconds: clamp(
+    readStoredNumber(
+      AUTOMATION_DELAY_SECONDS_STORAGE_KEY,
+      DEFAULT_AUTOMATION_DELAY_SECONDS,
+    ),
+    0,
+    3600,
+  ),
   proportionalP: clamp(
     readStoredNumber(PROPORTIONAL_P_STORAGE_KEY, DEFAULT_PROPORTIONAL_P),
     0,
@@ -727,6 +746,14 @@ proportionalPInput.addEventListener('blur', () => {
   syncAutomationSettings(true);
 });
 
+automationDelayInput.addEventListener('input', () => {
+  syncAutomationSettings(false);
+});
+
+automationDelayInput.addEventListener('blur', () => {
+  syncAutomationSettings(true);
+});
+
 generateApoFiltersButton.addEventListener('click', () => {
   void generateApoFilters();
 });
@@ -883,6 +910,7 @@ apoMaxBoostInput.value = String(state.apoMaxBoostDb);
 apoMaxCutInput.value = String(state.apoMaxCutDb);
 automationAlgorithmSelect.value = state.automationAlgorithm;
 proportionalPInput.value = state.proportionalP.toFixed(2);
+automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
 initializeMeasurementConfigFromStorage();
 hideToast();
 updateMeasurementActionState();
@@ -926,6 +954,7 @@ function setBusy(isBusy: boolean): void {
   configFileInput.disabled = isBusy;
   measurementBackendSelect.disabled = isBusy;
   automationAlgorithmSelect.disabled = isBusy;
+  automationDelayInput.disabled = isBusy;
   proportionalPInput.disabled = isBusy;
   smoothingModeSelect.disabled = isBusy;
   generateApoFiltersButton.disabled = isBusy;
@@ -1002,6 +1031,7 @@ function updateMeasurementBackendUi(): void {
 function updateAutomationUi(): void {
   const isProportional = state.automationAlgorithm === 'proportional';
   automationAlgorithmSelect.value = state.automationAlgorithm;
+  automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
   proportionalAutomationFields.hidden = !isProportional;
   proportionalPInput.value = state.proportionalP.toFixed(2);
   updateMeasurementActionState();
@@ -1823,6 +1853,7 @@ function persistActiveConfiguration(): void {
     normalizePlot: normalizePlotToggle.checked,
     apoEqMode: state.apoEqMode,
     automationAlgorithm: state.automationAlgorithm,
+    automationDelaySeconds: state.automationDelaySeconds,
     proportionalP: state.proportionalP,
     apoSelectedMeasurementId: state.apoSelectedMeasurementId,
     apoSelectedReferenceId: state.apoSelectedReferenceId,
@@ -1943,6 +1974,7 @@ async function saveConfiguration(): Promise<void> {
       normalizePlot: normalizePlotToggle.checked,
       apoEqMode: state.apoEqMode,
       automationAlgorithm: state.automationAlgorithm,
+      automationDelaySeconds: state.automationDelaySeconds,
       proportionalP: state.proportionalP,
       apoSelectedMeasurementId: state.apoSelectedMeasurementId,
       apoSelectedReferenceId: state.apoSelectedReferenceId,
@@ -2059,6 +2091,13 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   state.automationAlgorithm = isAutomationAlgorithm(config.automationAlgorithm)
     ? config.automationAlgorithm
     : DEFAULT_AUTOMATION_ALGORITHM;
+  state.automationDelaySeconds = clamp(
+    Number.isFinite(Number(config.automationDelaySeconds))
+      ? Number(config.automationDelaySeconds)
+      : DEFAULT_AUTOMATION_DELAY_SECONDS,
+    0,
+    3600,
+  );
   const importedProportionalP = Number(config.proportionalP);
   state.proportionalP = clamp(
     Number.isFinite(importedProportionalP) ? importedProportionalP : DEFAULT_PROPORTIONAL_P,
@@ -2098,6 +2137,7 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   apoMaxFiltersInput.value = String(state.apoMaxFilters);
   apoMaxBoostInput.value = String(state.apoMaxBoostDb);
   apoMaxCutInput.value = String(state.apoMaxCutDb);
+  automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
   persistAutomationSettings();
   updateAutomationUi();
 
@@ -2254,6 +2294,10 @@ function persistApoState(): void {
 
 function persistAutomationSettings(): void {
   localStorage.setItem(AUTOMATION_ALGORITHM_STORAGE_KEY, state.automationAlgorithm);
+  localStorage.setItem(
+    AUTOMATION_DELAY_SECONDS_STORAGE_KEY,
+    String(state.automationDelaySeconds),
+  );
   localStorage.setItem(PROPORTIONAL_P_STORAGE_KEY, String(state.proportionalP));
 }
 
@@ -2329,13 +2373,19 @@ function syncApoGenerationSettings(normalize: boolean): void {
 }
 
 function syncAutomationSettings(normalize: boolean): void {
+  const parsedDelaySeconds = Number(automationDelayInput.value);
   const parsedProportionalP = Number(proportionalPInput.value);
+
+  if (Number.isFinite(parsedDelaySeconds)) {
+    state.automationDelaySeconds = clamp(parsedDelaySeconds, 0, 3600);
+  }
 
   if (Number.isFinite(parsedProportionalP)) {
     state.proportionalP = clamp(parsedProportionalP, 0, 1);
   }
 
   if (normalize) {
+    automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
     proportionalPInput.value = state.proportionalP.toFixed(2);
   }
 
@@ -3142,6 +3192,14 @@ async function toggleAutomationLoop(): Promise<void> {
       if (!applied || state.automationStopRequested) {
         break;
       }
+
+      if (state.automationDelaySeconds > 0) {
+        appendLog(`Waiting ${state.automationDelaySeconds.toFixed(1)}s before the next automation run.`);
+        const completedDelay = await waitForAutomationDelay();
+        if (!completedDelay || state.automationStopRequested) {
+          break;
+        }
+      }
     }
   } finally {
     const stopRequested = state.automationStopRequested;
@@ -3154,6 +3212,22 @@ async function toggleAutomationLoop(): Promise<void> {
       appendLog('Automation stopped.');
     }
   }
+}
+
+async function waitForAutomationDelay(): Promise<boolean> {
+  let remainingMs = Math.round(state.automationDelaySeconds * 1000);
+
+  while (remainingMs > 0) {
+    if (state.automationStopRequested) {
+      return false;
+    }
+
+    const nextSliceMs = Math.min(remainingMs, 100);
+    await wait(nextSliceMs);
+    remainingMs -= nextSliceMs;
+  }
+
+  return !state.automationStopRequested;
 }
 
 function roundTo(value: number, step: number): number {

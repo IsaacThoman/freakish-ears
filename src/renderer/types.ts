@@ -115,6 +115,7 @@ export type AppState = {
   apoFilters: ApoFilter[];
   apoEqMode: ApoEqMode;
   automationAlgorithm: AutomationAlgorithm;
+  automationDelaySeconds: number;
   proportionalP: number;
   automationRunning: boolean;
   automationStopRequested: boolean;
