@@ -90,3 +90,6 @@ typings/
 
 # Electron-Forge
 out/
+
+# Local dev API run artifacts
+dev-api-runs/

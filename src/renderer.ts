@@ -42,6 +42,7 @@ import {
   POST_ROLL_SECONDS,
   PRE_ROLL_SECONDS,
   PROPORTIONAL_P_STORAGE_KEY,
+  PLOT_NORMALIZATION_FREQUENCY_HZ,
   SAMPLE_RATE_OPTIONS,
   SAMPLE_RATE_STORAGE_KEY,
   SMOOTHING_MODE_OPTIONS,
@@ -1014,6 +1015,11 @@ function appendLog(message: string, tone: LogTone = 'neutral'): void {
   item.dataset.tone = tone;
   item.textContent = `${new Date().toLocaleTimeString()}  ${message}`;
   logList.prepend(item);
+}
+
+function isBusyFileError(error: unknown): boolean {
+  const message = getErrorMessage(error);
+  return /\bEBUSY\b/u.test(message) || /resource busy or locked/iu.test(message);
 }
 
 function updateSelectedFolder(): void {
@@ -2813,7 +2819,7 @@ function buildProportionalApoFilters(
     }));
   }
 
-  const measurementPoints = getDisplayedMeasurementPoints(measurement, referenceCurve);
+  const measurementPoints = getAutomationMeasurementPoints(measurement, referenceCurve);
   const referencePoints = getDisplayedReferencePoints(referenceCurve);
 
   return state.apoFilters.map((filter) => {
@@ -2837,7 +2843,7 @@ function buildProportionalGraphicEqFilters(
   measurement: LoadedMeasurement,
   referenceCurve: ReferenceCurve,
 ): ApoFilter[] {
-  const measurementPoints = getDisplayedMeasurementPoints(measurement, referenceCurve);
+  const measurementPoints = getAutomationMeasurementPoints(measurement, referenceCurve);
   const referencePoints = getDisplayedReferencePoints(referenceCurve);
   const filterCount = clamp(state.apoMaxFilters, 1, 250);
   const baseFilters = buildGraphicEqFilters(filterCount, state.apoFilters);
@@ -3045,6 +3051,25 @@ function getDisplayedMeasurementPoints(
   );
 }
 
+function getAutomationMeasurementPoints(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve,
+) {
+  const referenceNormalizationDb = findClosestPoint(
+    getDisplayedReferencePoints(referenceCurve),
+    PLOT_NORMALIZATION_FREQUENCY_HZ,
+  ).smoothedMagnitudeDbRelative;
+
+  return getMeasurementPointsForDisplay(
+    measurement.plotPoints,
+    measurement,
+    true,
+    state.splOffsetDb,
+    state.smoothingMode,
+    referenceNormalizationDb,
+  );
+}
+
 function getDisplayedReferencePoints(referenceCurve: ReferenceCurve) {
   return getMeasurementPointsForDisplay(
     referenceCurve.plotPoints,
@@ -3235,7 +3260,7 @@ async function refreshEqualizerApoStatus(): Promise<void> {
   renderApoSection();
 }
 
-async function applyApoConfig(): Promise<boolean> {
+async function applyApoConfig(options?: { continueOnBusyFileError?: boolean }): Promise<boolean> {
   const status = state.equalizerApoStatus;
 
   if (state.busy) {
@@ -3268,6 +3293,12 @@ async function applyApoConfig(): Promise<boolean> {
   } catch (error) {
     const message = getErrorMessage(error);
     await refreshEqualizerApoStatus();
+
+    if (options?.continueOnBusyFileError && isBusyFileError(error)) {
+      appendLog(`Apply APO skipped because Equalizer APO config is locked: ${message}`);
+      return true;
+    }
+
     setStatus(`Apply APO failed: ${message}`, 'error');
     appendLog(`Apply APO failed: ${message}`, 'error');
     return false;
@@ -3310,7 +3341,7 @@ async function toggleAutomationLoop(): Promise<void> {
         break;
       }
 
-      const applied = await applyApoConfig();
+      const applied = await applyApoConfig({ continueOnBusyFileError: true });
       if (!applied || state.automationStopRequested) {
         break;
       }
