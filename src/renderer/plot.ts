@@ -327,27 +327,16 @@ export function renderApoEqPlot(input: {
   containerWidth: number;
 }): string {
   const enabledFilters = input.filters.filter((filter) => filter.enabled);
-  const sampledPoints = Array.from({ length: 256 }, (_unused, index) => {
-    const ratio = index / 255;
-    const frequencyHz =
-      DEFAULT_START_FREQUENCY *
-      Math.pow(DEFAULT_END_FREQUENCY / DEFAULT_START_FREQUENCY, ratio);
-
-    return {
-      frequencyHz,
-      totalDb: enabledFilters.reduce(
-        (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz),
-        0,
-      ),
-    };
-  });
-  const individualPointSets = enabledFilters.map((filter) => ({
-    filter,
-    points: sampledPoints.map((point) => ({
-      frequencyHz: point.frequencyHz,
-      totalDb: getApoFilterResponseDb(filter, point.frequencyHz),
-    })),
-  }));
+  const sampledPoints = buildApoPreviewSampledPoints(enabledFilters, input.eqMode);
+  const individualPointSets = input.eqMode === 'graphic'
+    ? []
+    : enabledFilters.map((filter) => ({
+        filter,
+        points: sampledPoints.map((point) => ({
+          frequencyHz: point.frequencyHz,
+          totalDb: getApoFilterResponseDb(filter, point.frequencyHz),
+        })),
+      }));
   const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets, input.containerWidth);
   const labelSizing = getPlotLabelSizing(input.compact);
   const yTicks = Array.from({ length: labelSizing.yTickCount }, (_unused, index) => {
@@ -473,6 +462,68 @@ function getApoFilterResponseDb(filter: ApoFilter, frequencyHz: number): number 
   const distanceOctaves = Math.log2(frequencyHz / filter.frequencyHz);
   const sigma = 0.6 / Math.sqrt(filter.q);
   return filter.gainDb * Math.exp(-(distanceOctaves * distanceOctaves) / (2 * sigma * sigma));
+}
+
+function buildApoPreviewSampledPoints(
+  enabledFilters: ApoFilter[],
+  eqMode: ApoEqMode,
+): Array<{ frequencyHz: number; totalDb: number }> {
+  return Array.from({ length: 256 }, (_unused, index) => {
+    const ratio = index / 255;
+    const frequencyHz =
+      DEFAULT_START_FREQUENCY *
+      Math.pow(DEFAULT_END_FREQUENCY / DEFAULT_START_FREQUENCY, ratio);
+
+    return {
+      frequencyHz,
+      totalDb: eqMode === 'graphic'
+        ? getGraphicEqResponseDb(enabledFilters, frequencyHz)
+        : enabledFilters.reduce(
+            (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz),
+            0,
+          ),
+    };
+  });
+}
+
+function getGraphicEqResponseDb(filters: ApoFilter[], frequencyHz: number): number {
+  if (filters.length === 0) {
+    return 0;
+  }
+
+  const sortedFilters = [...filters].sort(
+    (left, right) => left.frequencyHz - right.frequencyHz,
+  );
+
+  if (frequencyHz <= sortedFilters[0].frequencyHz) {
+    return sortedFilters[0].gainDb;
+  }
+
+  if (frequencyHz >= sortedFilters[sortedFilters.length - 1].frequencyHz) {
+    return sortedFilters[sortedFilters.length - 1].gainDb;
+  }
+
+  for (let index = 1; index < sortedFilters.length; index += 1) {
+    const leftFilter = sortedFilters[index - 1];
+    const rightFilter = sortedFilters[index];
+
+    if (frequencyHz > rightFilter.frequencyHz) {
+      continue;
+    }
+
+    const leftLogFrequency = Math.log(leftFilter.frequencyHz);
+    const rightLogFrequency = Math.log(rightFilter.frequencyHz);
+    const targetLogFrequency = Math.log(frequencyHz);
+    const ratio =
+      rightLogFrequency === leftLogFrequency
+        ? 0
+        : (targetLogFrequency - leftLogFrequency) /
+          (rightLogFrequency - leftLogFrequency);
+
+    return leftFilter.gainDb + (rightFilter.gainDb - leftFilter.gainDb) * ratio;
+  }
+
+  return sortedFilters[sortedFilters.length - 1].gainDb;
 }
 
 function renderMeasurementList(
@@ -620,6 +671,7 @@ function getPlotY(valueDb: number, geometry: ResponsePlotGeometry): number {
 export function attachApoPlotInteractions(input: {
   plotCard: HTMLElement;
   filters: ApoFilter[];
+  eqMode: ApoEqMode;
   lockFrequency: boolean;
   onFilterDrag: ApoPlotDragHandler;
   onDragEnd: () => void;
@@ -628,6 +680,7 @@ export function attachApoPlotInteractions(input: {
   const plotCardWithController = plotCard as HTMLElement & {
     __apoPlotController?: {
       filters: ApoFilter[];
+      eqMode: ApoEqMode;
       lockFrequency: boolean;
       onFilterDrag: ApoPlotDragHandler;
       onDragEnd: () => void;
@@ -638,6 +691,7 @@ export function attachApoPlotInteractions(input: {
 
   if (plotCardWithController.__apoPlotController) {
     plotCardWithController.__apoPlotController.filters = input.filters;
+    plotCardWithController.__apoPlotController.eqMode = input.eqMode;
     plotCardWithController.__apoPlotController.lockFrequency = input.lockFrequency;
     plotCardWithController.__apoPlotController.onFilterDrag = input.onFilterDrag;
     plotCardWithController.__apoPlotController.onDragEnd = input.onDragEnd;
@@ -656,27 +710,19 @@ export function attachApoPlotInteractions(input: {
     if (!width || !height) return null;
 
     const enabledFilters = filters.filter((filter) => filter.enabled);
-    const sampledPoints = Array.from({ length: 256 }, (_unused, index) => {
-      const ratio = index / 255;
-      const frequencyHz =
-        DEFAULT_START_FREQUENCY *
-        Math.pow(DEFAULT_END_FREQUENCY / DEFAULT_START_FREQUENCY, ratio);
-
-      return {
-        frequencyHz,
-        totalDb: enabledFilters.reduce(
-          (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz),
-          0,
-        ),
-      };
-    });
-    const individualPointSets = enabledFilters.map((filter) => ({
-      filter,
-      points: sampledPoints.map((point) => ({
-        frequencyHz: point.frequencyHz,
-        totalDb: getApoFilterResponseDb(filter, point.frequencyHz),
-      })),
-    }));
+    const sampledPoints = buildApoPreviewSampledPoints(
+      enabledFilters,
+      plotCardWithController.__apoPlotController?.eqMode ?? 'parametric',
+    );
+    const individualPointSets = (plotCardWithController.__apoPlotController?.eqMode ?? 'parametric') === 'graphic'
+      ? []
+      : enabledFilters.map((filter) => ({
+          filter,
+          points: sampledPoints.map((point) => ({
+            frequencyHz: point.frequencyHz,
+            totalDb: getApoFilterResponseDb(filter, point.frequencyHz),
+          })),
+        }));
 
     const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets, width);
     return { ...geometry, width, height };
@@ -840,6 +886,7 @@ export function attachApoPlotInteractions(input: {
 
   plotCardWithController.__apoPlotController = {
     filters: input.filters,
+    eqMode: input.eqMode,
     lockFrequency: input.lockFrequency,
     onFilterDrag: input.onFilterDrag,
     onDragEnd: input.onDragEnd,
