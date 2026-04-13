@@ -281,9 +281,22 @@ input {
   font-size: 11px;
 }
 
+.automation-tolerance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .automation-tolerance-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .status-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 12px;
   background: var(--input-bg);

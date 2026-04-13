@@ -31,6 +31,17 @@ type PlotLabelSizing = {
   xTicks: number[];
 };
 
+type ResponseToleranceOverlay = {
+  measurementId: string;
+  referenceCurve: ReferenceCurve;
+  bands: Array<{
+    label: string;
+    minimumFrequencyHz: number;
+    maximumFrequencyHz: number;
+    toleranceDb: number;
+  }>;
+};
+
 export const DEFAULT_PLOT_WIDTH = 960;
 const DEFAULT_PLOT_HEIGHT = 356;
 const DEFAULT_PLOT_LEFT = 84;
@@ -71,6 +82,7 @@ export function renderResponsePlot(input: {
   outputFolder: string | null;
   compact: boolean;
   containerWidth: number;
+  toleranceOverlay: ResponseToleranceOverlay | null;
 }): string {
   if (input.allMeasurements.length === 0 && input.allReferenceCurves.length === 0) {
     return `
@@ -135,6 +147,13 @@ export function renderResponsePlot(input: {
 
   const xAxisY = geometry.height - geometry.bottom;
   const yAxisX = geometry.left;
+  const toleranceFailPaths = buildToleranceFailPaths(
+    input.toleranceOverlay,
+    plottedMeasurements,
+    plottedReferenceCurves,
+    geometry,
+    xAxisY,
+  );
 
   return `
     <div class="plot-hover" id="plotHover">Hover: --</div>
@@ -151,6 +170,11 @@ export function renderResponsePlot(input: {
           const x = getPlotX(frequency, geometry);
           return `<line x1="${x.toFixed(1)}" y1="${geometry.top}" x2="${x.toFixed(1)}" y2="${xAxisY}" stroke="rgba(255,255,255,0.06)" vector-effect="non-scaling-stroke" />`;
         })
+        .join('')}
+      ${toleranceFailPaths
+        .map(
+          (path) => `<path d="${path}" fill="rgba(255,70,70,0.22)" stroke="none"></path>`,
+        )
         .join('')}
       <line x1="${yAxisX}" y1="${xAxisY}" x2="${geometry.width - geometry.right}" y2="${xAxisY}" stroke="rgba(248,161,69,0.24)" vector-effect="non-scaling-stroke" />
       <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${xAxisY}" stroke="rgba(248,161,69,0.24)" vector-effect="non-scaling-stroke" />
@@ -666,6 +690,88 @@ function getPlotY(valueDb: number, geometry: ResponsePlotGeometry): number {
     ((geometry.maxDb - valueDb) / (geometry.maxDb - geometry.minDb)) *
       (geometry.height - geometry.top - geometry.bottom)
   );
+}
+
+function buildToleranceFailPaths(
+  overlay: ResponseToleranceOverlay | null,
+  plottedMeasurements: Array<{ measurement: LoadedMeasurement; points: MeasurementPoint[] }>,
+  plottedReferenceCurves: Array<{ referenceCurve: ReferenceCurve; points: MeasurementPoint[] }>,
+  geometry: ResponsePlotGeometry,
+  xAxisY: number,
+): string[] {
+  if (!overlay) {
+    return [];
+  }
+
+  const plottedMeasurement = plottedMeasurements.find(
+    (entry) => entry.measurement.id === overlay.measurementId,
+  );
+  if (!plottedMeasurement) {
+    return [];
+  }
+
+  const plottedReferenceCurve = plottedReferenceCurves.find(
+    (entry) => entry.referenceCurve.id === overlay.referenceCurve.id,
+  );
+  const referencePoints = plottedReferenceCurve?.points;
+  if (!referencePoints) {
+    return [];
+  }
+  const failPaths: string[] = [];
+  let activeSegment: MeasurementPoint[] = [];
+
+  const flushSegment = () => {
+    if (activeSegment.length < 2) {
+      activeSegment = [];
+      return;
+    }
+
+    const curvePath = activeSegment
+      .map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.smoothedMagnitudeDbRelative, geometry).toFixed(1)}`)
+      .join(' L ');
+    const firstPoint = activeSegment[0];
+    const lastPoint = activeSegment[activeSegment.length - 1];
+    const firstX = getPlotX(firstPoint.frequencyHz, geometry).toFixed(1);
+    const lastX = getPlotX(lastPoint.frequencyHz, geometry).toFixed(1);
+
+    failPaths.push(
+      `M ${firstX},${xAxisY.toFixed(1)} L ${curvePath} L ${lastX},${xAxisY.toFixed(1)} Z`,
+    );
+    activeSegment = [];
+  };
+
+  for (let index = 0; index < plottedMeasurement.points.length; index += 1) {
+    const displayPoint = plottedMeasurement.points[index];
+    if (!displayPoint) {
+      flushSegment();
+      continue;
+    }
+
+    const matchingBand = overlay.bands.find(
+      (band) =>
+        displayPoint.frequencyHz >= band.minimumFrequencyHz &&
+        displayPoint.frequencyHz <= band.maximumFrequencyHz,
+    );
+    if (!matchingBand) {
+      flushSegment();
+      continue;
+    }
+
+    const referencePoint = findClosestPoint(referencePoints, displayPoint.frequencyHz);
+    const errorDb = Math.abs(
+      referencePoint.smoothedMagnitudeDbRelative -
+        displayPoint.smoothedMagnitudeDbRelative,
+    );
+
+    if (errorDb > matchingBand.toleranceDb) {
+      activeSegment.push(displayPoint);
+    } else {
+      flushSegment();
+    }
+  }
+
+  flushSegment();
+  return failPaths;
 }
 
 export function attachApoPlotInteractions(input: {

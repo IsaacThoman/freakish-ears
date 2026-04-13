@@ -89,6 +89,15 @@ export type ApoFilterKind = 'PK';
 
 export type ApoEqMode = 'parametric' | 'graphic';
 export type AutomationAlgorithm = 'proportional';
+export type AutomationToleranceBand =
+  | 'subBass'
+  | 'bass'
+  | 'lowMid'
+  | 'mid'
+  | 'upMid'
+  | 'presence'
+  | 'brilliance';
+export type AutomationBandTolerances = Record<AutomationToleranceBand, number>;
 
 export type ApoFilter = {
   id: string;
@@ -119,6 +128,10 @@ export type AppState = {
   automationAlgorithm: AutomationAlgorithm;
   automationDelaySeconds: number;
   proportionalP: number;
+  automationStopOnTolerance: boolean;
+  automationBandTolerances: AutomationBandTolerances;
+  automationRegressionLimit: number;
+  latestAutomationToleranceStatus: string | null;
   automationRunning: boolean;
   automationStopRequested: boolean;
   apoSelectedMeasurementId: string | null;
@@ -127,6 +140,8 @@ export type AppState = {
   apoMaxBoostDb: number;
   apoMaxCutDb: number;
   nextApoFilterIndex: number;
+  latestStatusMessage: string;
+  latestStatusTone: StatusTone;
   equalizerApoStatus: EqualizerApoStatus | null;
   toast: ToastState | null;
   toastTimeoutId: number;

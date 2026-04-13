@@ -10,8 +10,11 @@ import {
   APO_MAX_FILTERS_STORAGE_KEY,
   APO_SELECTED_MEASUREMENT_STORAGE_KEY,
   APO_SELECTED_REFERENCE_STORAGE_KEY,
+  AUTOMATION_BAND_TOLERANCES_STORAGE_KEY,
   AUTOMATION_DELAY_SECONDS_STORAGE_KEY,
   AUTOMATION_ALGORITHM_STORAGE_KEY,
+  AUTOMATION_REGRESSION_LIMIT_STORAGE_KEY,
+  AUTOMATION_STOP_ON_TOLERANCE_STORAGE_KEY,
   DEFAULT_APO_EQ_MODE,
   DEFAULT_MEASUREMENT_BACKEND,
   DEFAULT_MEASUREMENT_KEEP_COUNT,
@@ -20,6 +23,8 @@ import {
   DEFAULT_APO_MAX_FILTERS,
   DEFAULT_AUTOMATION_ALGORITHM,
   DEFAULT_AUTOMATION_DELAY_SECONDS,
+  DEFAULT_AUTOMATION_REGRESSION_LIMIT,
+  DEFAULT_AUTOMATION_STOP_ON_TOLERANCE,
   DEFAULT_DURATION_SECONDS,
   DEFAULT_END_FREQUENCY,
   DEFAULT_PROPORTIONAL_P,
@@ -76,6 +81,8 @@ import type {
   ApoFilter,
   AppState,
   AutomationAlgorithm,
+  AutomationBandTolerances,
+  AutomationToleranceBand,
   LoadedMeasurement,
   LogTone,
   MeasurementBackend,
@@ -96,6 +103,64 @@ import {
 } from './renderer/utils';
 
 const app = document.querySelector<HTMLDivElement>('#app');
+
+const AUTOMATION_TOLERANCE_BANDS: Array<{
+  key: AutomationToleranceBand;
+  label: string;
+  minimumFrequencyHz: number;
+  maximumFrequencyHz: number;
+  defaultToleranceDb: number;
+}> = [
+  {
+    key: 'subBass',
+    label: 'Sub-bass',
+    minimumFrequencyHz: 20,
+    maximumFrequencyHz: 60,
+    defaultToleranceDb: 3,
+  },
+  {
+    key: 'bass',
+    label: 'Bass',
+    minimumFrequencyHz: 60,
+    maximumFrequencyHz: 250,
+    defaultToleranceDb: 3,
+  },
+  {
+    key: 'lowMid',
+    label: 'Low mid',
+    minimumFrequencyHz: 250,
+    maximumFrequencyHz: 500,
+    defaultToleranceDb: 3,
+  },
+  {
+    key: 'mid',
+    label: 'Mid',
+    minimumFrequencyHz: 500,
+    maximumFrequencyHz: 2000,
+    defaultToleranceDb: 3,
+  },
+  {
+    key: 'upMid',
+    label: 'Up mid',
+    minimumFrequencyHz: 2000,
+    maximumFrequencyHz: 4000,
+    defaultToleranceDb: 3,
+  },
+  {
+    key: 'presence',
+    label: 'Presence',
+    minimumFrequencyHz: 4000,
+    maximumFrequencyHz: 6000,
+    defaultToleranceDb: 3,
+  },
+  {
+    key: 'brilliance',
+    label: 'Brilliance',
+    minimumFrequencyHz: 6000,
+    maximumFrequencyHz: 20000,
+    defaultToleranceDb: 3,
+  },
+];
 
 if (!app) {
   throw new Error('Unable to find the app root.');
@@ -241,6 +306,32 @@ app.innerHTML = `
               <label for="proportionalPInput">P Value</label>
               <div class="number-input-row">
                 <input id="proportionalPInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PROPORTIONAL_P.toFixed(2)}" />
+              </div>
+            </div>
+            <label class="plot-toggle">
+              <input id="automationStopOnToleranceToggle" type="checkbox" />
+              <span>Stop when within tolerance</span>
+            </label>
+            <div class="field">
+              <label for="automationRegressionLimitInput">Revert After Regressions</label>
+              <div class="number-input-row">
+                <input id="automationRegressionLimitInput" class="level-number-input" type="number" min="0" max="20" step="1" value="${DEFAULT_AUTOMATION_REGRESSION_LIMIT}" />
+                <span>runs</span>
+              </div>
+            </div>
+            <div id="automationToleranceFields" class="automation-fields">
+              <div class="automation-tolerance-grid">
+                ${AUTOMATION_TOLERANCE_BANDS.map(
+                  (band) => `
+                    <div class="field">
+                      <label for="automationTolerance${band.key}Input">${band.label}</label>
+                      <div class="number-input-row">
+                        <input id="automationTolerance${band.key}Input" class="level-number-input" type="number" min="0" max="24" step="0.1" value="${band.defaultToleranceDb.toFixed(1)}" />
+                        <span>dB</span>
+                      </div>
+                    </div>
+                  `,
+                ).join('')}
               </div>
             </div>
             <span class="automation-hint">Each pass measures the current response, adds (target - measured) * P to the current APO correction, then applies the updated APO config.</span>
@@ -417,6 +508,18 @@ const automationAlgorithmSelect = getElement<HTMLSelectElement>('automationAlgor
 const proportionalAutomationFields = getElement<HTMLDivElement>('proportionalAutomationFields');
 const automationDelayInput = getElement<HTMLInputElement>('automationDelayInput');
 const proportionalPInput = getElement<HTMLInputElement>('proportionalPInput');
+const automationStopOnToleranceToggle = getElement<HTMLInputElement>('automationStopOnToleranceToggle');
+const automationRegressionLimitInput = getElement<HTMLInputElement>('automationRegressionLimitInput');
+const automationToleranceFields = getElement<HTMLDivElement>('automationToleranceFields');
+const automationToleranceInputs: Record<AutomationToleranceBand, HTMLInputElement> = {
+  subBass: getElement<HTMLInputElement>('automationTolerancesubBassInput'),
+  bass: getElement<HTMLInputElement>('automationTolerancebassInput'),
+  lowMid: getElement<HTMLInputElement>('automationTolerancelowMidInput'),
+  mid: getElement<HTMLInputElement>('automationTolerancemidInput'),
+  upMid: getElement<HTMLInputElement>('automationToleranceupMidInput'),
+  presence: getElement<HTMLInputElement>('automationTolerancepresenceInput'),
+  brilliance: getElement<HTMLInputElement>('automationTolerancebrillianceInput'),
+};
 const statusPill = getElement<HTMLDivElement>('statusPill');
 const latencyValue = getElement<HTMLSpanElement>('latencyValue');
 const peakValue = getElement<HTMLSpanElement>('peakValue');
@@ -487,6 +590,20 @@ const state: AppState = {
     0,
     1,
   ),
+  automationStopOnTolerance:
+    localStorage.getItem(AUTOMATION_STOP_ON_TOLERANCE_STORAGE_KEY) === 'true'
+      ? true
+      : DEFAULT_AUTOMATION_STOP_ON_TOLERANCE,
+  automationBandTolerances: readStoredAutomationBandTolerances(),
+  automationRegressionLimit: clamp(
+    readStoredNumber(
+      AUTOMATION_REGRESSION_LIMIT_STORAGE_KEY,
+      DEFAULT_AUTOMATION_REGRESSION_LIMIT,
+    ),
+    0,
+    20,
+  ),
+  latestAutomationToleranceStatus: null,
   automationRunning: false,
   automationStopRequested: false,
   apoSelectedMeasurementId: localStorage.getItem(APO_SELECTED_MEASUREMENT_STORAGE_KEY),
@@ -507,6 +624,8 @@ const state: AppState = {
     24,
   ),
   nextApoFilterIndex: 1,
+  latestStatusMessage: 'Ready',
+  latestStatusTone: 'idle',
   equalizerApoStatus: null,
   toast: null,
   toastTimeoutId: 0,
@@ -765,6 +884,12 @@ automationAlgorithmSelect.addEventListener('change', () => {
   updateAutomationUi();
 });
 
+automationStopOnToleranceToggle.addEventListener('change', () => {
+  syncAutomationSettings(true);
+  setStatus(state.latestStatusMessage, state.latestStatusTone);
+  updateAutomationUi();
+});
+
 proportionalPInput.addEventListener('input', () => {
   syncAutomationSettings(false);
 });
@@ -780,6 +905,24 @@ automationDelayInput.addEventListener('input', () => {
 automationDelayInput.addEventListener('blur', () => {
   syncAutomationSettings(true);
 });
+
+automationRegressionLimitInput.addEventListener('input', () => {
+  syncAutomationSettings(false);
+});
+
+automationRegressionLimitInput.addEventListener('blur', () => {
+  syncAutomationSettings(true);
+});
+
+for (const input of Object.values(automationToleranceInputs)) {
+  input.addEventListener('input', () => {
+    syncAutomationSettings(false);
+  });
+
+  input.addEventListener('blur', () => {
+    syncAutomationSettings(true);
+  });
+}
 
 generateApoFiltersButton.addEventListener('click', () => {
   void generateApoFilters();
@@ -983,6 +1126,11 @@ function setBusy(isBusy: boolean): void {
   automationAlgorithmSelect.disabled = isBusy;
   automationDelayInput.disabled = isBusy;
   proportionalPInput.disabled = isBusy;
+  automationStopOnToleranceToggle.disabled = isBusy;
+  automationRegressionLimitInput.disabled = isBusy;
+  for (const input of Object.values(automationToleranceInputs)) {
+    input.disabled = isBusy;
+  }
   smoothingModeSelect.disabled = isBusy;
   generateApoFiltersButton.disabled = isBusy;
   addApoFilterButton.disabled = isBusy;
@@ -1006,7 +1154,12 @@ function setBusy(isBusy: boolean): void {
 }
 
 function setStatus(message: string, tone: StatusTone): void {
-  statusPill.textContent = message;
+  state.latestStatusMessage = message;
+  state.latestStatusTone = tone;
+  statusPill.textContent =
+    state.automationStopOnTolerance && state.latestAutomationToleranceStatus
+      ? `${message} ${state.latestAutomationToleranceStatus}`
+      : message;
   statusPill.dataset.tone = tone;
 }
 
@@ -1066,6 +1219,12 @@ function updateAutomationUi(): void {
   automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
   proportionalAutomationFields.hidden = !isProportional;
   proportionalPInput.value = state.proportionalP.toFixed(2);
+  automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
+  automationRegressionLimitInput.value = String(state.automationRegressionLimit);
+  automationToleranceFields.hidden = !state.automationStopOnTolerance;
+  for (const band of AUTOMATION_TOLERANCE_BANDS) {
+    automationToleranceInputs[band.key].value = state.automationBandTolerances[band.key].toFixed(1);
+  }
   updateMeasurementActionState();
 }
 
@@ -1530,6 +1689,7 @@ async function runMeasurement(): Promise<LoadedMeasurement | null> {
 
     const measurement = takeMeasurementFromAnalysis(analysis, saveResult.sessionDirectory);
     addMeasurement(measurement);
+    updateLatestAutomationToleranceStatus(measurement, getSelectedApoReference());
     setStatus('Measurement complete.', 'success');
     appendLog(`Measurement saved to ${saveResult.sessionDirectory}.`, 'success');
     return measurement;
@@ -1739,6 +1899,19 @@ function renderPlotCard(
     outputFolder: state.outputFolder,
     compact: measurementsCompact,
     containerWidth: measurementsContainerWidth > 0 ? measurementsContainerWidth : DEFAULT_PLOT_WIDTH,
+    toleranceOverlay:
+      state.automationStopOnTolerance && state.measurements.at(-1) && getSelectedApoReference()
+        ? {
+            measurementId: state.measurements.at(-1)?.id ?? '',
+            referenceCurve: getSelectedApoReference() as ReferenceCurve,
+            bands: AUTOMATION_TOLERANCE_BANDS.map((band) => ({
+              label: band.label,
+              minimumFrequencyHz: band.minimumFrequencyHz,
+              maximumFrequencyHz: band.maximumFrequencyHz,
+              toleranceDb: state.automationBandTolerances[band.key],
+            })),
+          }
+        : null,
   });
   attachPlotInteractions({
     plotCard: measurementsPlotCard,
@@ -1938,6 +2111,9 @@ function persistActiveConfiguration(): void {
     automationAlgorithm: state.automationAlgorithm,
     automationDelaySeconds: state.automationDelaySeconds,
     proportionalP: state.proportionalP,
+    automationStopOnTolerance: state.automationStopOnTolerance,
+    automationBandTolerances: state.automationBandTolerances,
+    automationRegressionLimit: state.automationRegressionLimit,
     apoSelectedMeasurementId: state.apoSelectedMeasurementId,
     apoSelectedReferenceId: state.apoSelectedReferenceId,
     apoMaxFilters: state.apoMaxFilters,
@@ -2060,6 +2236,9 @@ async function saveConfiguration(): Promise<void> {
       automationAlgorithm: state.automationAlgorithm,
       automationDelaySeconds: state.automationDelaySeconds,
       proportionalP: state.proportionalP,
+      automationStopOnTolerance: state.automationStopOnTolerance,
+      automationBandTolerances: state.automationBandTolerances,
+      automationRegressionLimit: state.automationRegressionLimit,
       apoSelectedMeasurementId: state.apoSelectedMeasurementId,
       apoSelectedReferenceId: state.apoSelectedReferenceId,
       apoMaxFilters: state.apoMaxFilters,
@@ -2191,6 +2370,20 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
     0,
     1,
   );
+  state.automationStopOnTolerance =
+    typeof config.automationStopOnTolerance === 'boolean'
+      ? config.automationStopOnTolerance
+      : DEFAULT_AUTOMATION_STOP_ON_TOLERANCE;
+  state.automationBandTolerances = normalizeAutomationBandTolerances(
+    config.automationBandTolerances,
+  );
+  state.automationRegressionLimit = clamp(
+    Number.isFinite(Number(config.automationRegressionLimit))
+      ? Number(config.automationRegressionLimit)
+      : DEFAULT_AUTOMATION_REGRESSION_LIMIT,
+    0,
+    20,
+  );
   state.apoFilters = normalizeApoFilters(config.apoFilters);
   state.apoSelectedMeasurementId = toOptionalString(config.apoSelectedMeasurementId);
   state.apoSelectedReferenceId = toOptionalString(config.apoSelectedReferenceId);
@@ -2225,6 +2418,8 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   apoMaxBoostInput.value = String(state.apoMaxBoostDb);
   apoMaxCutInput.value = String(state.apoMaxCutDb);
   automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
+  automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
+  automationRegressionLimitInput.value = String(state.automationRegressionLimit);
   persistAutomationSettings();
   updateAutomationUi();
 
@@ -2298,6 +2493,65 @@ function getSelectedAutomationAlgorithm(): AutomationAlgorithm {
   return automationAlgorithmSelect.value === 'proportional'
     ? automationAlgorithmSelect.value
     : DEFAULT_AUTOMATION_ALGORITHM;
+}
+
+function createDefaultAutomationBandTolerances(): AutomationBandTolerances {
+  return AUTOMATION_TOLERANCE_BANDS.reduce(
+    (tolerances, band) => ({
+      ...tolerances,
+      [band.key]: band.defaultToleranceDb,
+    }),
+    {} as AutomationBandTolerances,
+  );
+}
+
+function normalizeAutomationToleranceInputValue(
+  value: string,
+  fallback: number,
+): number {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return fallback;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? clamp(parsed, 0, 24) : fallback;
+}
+
+function normalizeAutomationBandTolerances(value: unknown): AutomationBandTolerances {
+  const defaults = createDefaultAutomationBandTolerances();
+
+  if (!value || typeof value !== 'object') {
+    return defaults;
+  }
+
+  return AUTOMATION_TOLERANCE_BANDS.reduce(
+    (tolerances, band) => {
+      const rawValue = (value as Record<string, unknown>)[band.key];
+      const parsed = Number(rawValue);
+
+      return {
+        ...tolerances,
+        [band.key]: Number.isFinite(parsed)
+          ? clamp(parsed, 0, 24)
+          : defaults[band.key],
+      };
+    },
+    defaults,
+  );
+}
+
+function readStoredAutomationBandTolerances(): AutomationBandTolerances {
+  const stored = localStorage.getItem(AUTOMATION_BAND_TOLERANCES_STORAGE_KEY);
+  if (!stored) {
+    return createDefaultAutomationBandTolerances();
+  }
+
+  try {
+    return normalizeAutomationBandTolerances(JSON.parse(stored));
+  } catch {
+    return createDefaultAutomationBandTolerances();
+  }
 }
 
 function getSelectedChannel(
@@ -2428,6 +2682,18 @@ function persistAutomationSettings(): void {
     String(state.automationDelaySeconds),
   );
   localStorage.setItem(PROPORTIONAL_P_STORAGE_KEY, String(state.proportionalP));
+  localStorage.setItem(
+    AUTOMATION_STOP_ON_TOLERANCE_STORAGE_KEY,
+    String(state.automationStopOnTolerance),
+  );
+  localStorage.setItem(
+    AUTOMATION_BAND_TOLERANCES_STORAGE_KEY,
+    JSON.stringify(state.automationBandTolerances),
+  );
+  localStorage.setItem(
+    AUTOMATION_REGRESSION_LIMIT_STORAGE_KEY,
+    String(state.automationRegressionLimit),
+  );
 }
 
 function handleApoFilterDrag(
@@ -2502,8 +2768,10 @@ function syncApoGenerationSettings(normalize: boolean): void {
 }
 
 function syncAutomationSettings(normalize: boolean): void {
+  const previousStopOnTolerance = state.automationStopOnTolerance;
   const parsedDelaySeconds = Number(automationDelayInput.value);
   const parsedProportionalP = Number(proportionalPInput.value);
+  const parsedRegressionLimit = Number(automationRegressionLimitInput.value);
 
   if (Number.isFinite(parsedDelaySeconds)) {
     state.automationDelaySeconds = clamp(parsedDelaySeconds, 0, 3600);
@@ -2513,13 +2781,48 @@ function syncAutomationSettings(normalize: boolean): void {
     state.proportionalP = clamp(parsedProportionalP, 0, 1);
   }
 
+  if (Number.isFinite(parsedRegressionLimit)) {
+    state.automationRegressionLimit = clamp(Math.round(parsedRegressionLimit), 0, 20);
+  }
+
+  state.automationStopOnTolerance = automationStopOnToleranceToggle.checked;
+
+  state.automationBandTolerances = AUTOMATION_TOLERANCE_BANDS.reduce(
+    (tolerances, band) => ({
+      ...tolerances,
+      [band.key]: normalizeAutomationToleranceInputValue(
+        automationToleranceInputs[band.key].value,
+        band.defaultToleranceDb,
+      ),
+    }),
+    createDefaultAutomationBandTolerances(),
+  );
+
+  if (state.automationStopOnTolerance) {
+    updateLatestAutomationToleranceStatus(
+      getSelectedApoMeasurement(),
+      getSelectedApoReference(),
+    );
+  } else if (previousStopOnTolerance) {
+    state.latestAutomationToleranceStatus = null;
+  }
+
   if (normalize) {
     automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
     proportionalPInput.value = state.proportionalP.toFixed(2);
+    automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
+    automationRegressionLimitInput.value = String(state.automationRegressionLimit);
+    for (const band of AUTOMATION_TOLERANCE_BANDS) {
+      automationToleranceInputs[band.key].value = state.automationBandTolerances[band.key].toFixed(1);
+    }
   }
 
   persistAutomationSettings();
   persistActiveConfiguration();
+
+  if (state.measurements.length > 0 || state.referenceCurves.length > 0) {
+    renderMeasurements();
+  }
 }
 
 function renderApoSection(): void {
@@ -3078,6 +3381,87 @@ function getAutomationMeasurementPoints(
   );
 }
 
+function evaluateAutomationTolerance(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve,
+): {
+  satisfied: boolean;
+  bandSummaries: string[];
+  scoreDb: number;
+} {
+  const measurementPoints = getDisplayedMeasurementPoints(measurement, referenceCurve);
+  const referencePoints = getDisplayedReferencePoints(referenceCurve);
+  const overlapMinimumHz = Math.max(
+    measurementPoints[0]?.frequencyHz ?? DEFAULT_START_FREQUENCY,
+    referencePoints[0]?.frequencyHz ?? DEFAULT_START_FREQUENCY,
+  );
+  const overlapMaximumHz = Math.min(
+    measurementPoints.at(-1)?.frequencyHz ?? DEFAULT_END_FREQUENCY,
+    referencePoints.at(-1)?.frequencyHz ?? DEFAULT_END_FREQUENCY,
+  );
+  const bandSummaries: string[] = [];
+  let satisfied = true;
+  let totalAbsoluteErrorDb = 0;
+  let scoredPointCount = 0;
+
+  for (const band of AUTOMATION_TOLERANCE_BANDS) {
+    const minimumHz = Math.max(band.minimumFrequencyHz, overlapMinimumHz);
+    const maximumHz = Math.min(band.maximumFrequencyHz, overlapMaximumHz);
+
+    if (maximumHz <= minimumHz) {
+      continue;
+    }
+
+    const bandMeasurementPoints = measurementPoints.filter(
+      (point) => point.frequencyHz >= minimumHz && point.frequencyHz <= maximumHz,
+    );
+    let maximumErrorDb = 0;
+
+    for (const measurementPoint of bandMeasurementPoints) {
+      const referencePoint = findClosestPoint(referencePoints, measurementPoint.frequencyHz);
+      const errorDb =
+        referencePoint.smoothedMagnitudeDbRelative -
+        measurementPoint.smoothedMagnitudeDbRelative;
+      const absoluteErrorDb = Math.abs(errorDb);
+
+      maximumErrorDb = Math.max(maximumErrorDb, absoluteErrorDb);
+      totalAbsoluteErrorDb += absoluteErrorDb;
+      scoredPointCount += 1;
+    }
+
+    const toleranceDb = state.automationBandTolerances[band.key];
+    const withinTolerance = maximumErrorDb <= toleranceDb;
+    satisfied &&= withinTolerance;
+    bandSummaries.push(
+      `${band.label} ${maximumErrorDb.toFixed(1)}/${toleranceDb.toFixed(1)} dB`,
+    );
+  }
+
+  return {
+    satisfied,
+    bandSummaries,
+    scoreDb: scoredPointCount > 0 ? totalAbsoluteErrorDb / scoredPointCount : 0,
+  };
+}
+
+function updateLatestAutomationToleranceStatus(
+  measurement: LoadedMeasurement | null,
+  referenceCurve: ReferenceCurve | null,
+): ReturnType<typeof evaluateAutomationTolerance> | null {
+  if (!state.automationStopOnTolerance || !measurement || !referenceCurve) {
+    state.latestAutomationToleranceStatus = null;
+    return null;
+  }
+
+  const toleranceResult = evaluateAutomationTolerance(measurement, referenceCurve);
+  state.latestAutomationToleranceStatus = `Tolerance: ${toleranceResult.bandSummaries.join(', ')}`;
+  return toleranceResult;
+}
+
+function cloneApoFilters(filters: ApoFilter[]): ApoFilter[] {
+  return filters.map((filter) => ({ ...filter }));
+}
+
 function getDisplayedReferencePoints(referenceCurve: ReferenceCurve) {
   return getMeasurementPointsForDisplay(
     referenceCurve.plotPoints,
@@ -3325,6 +3709,11 @@ async function toggleAutomationLoop(): Promise<void> {
   state.automationStopRequested = false;
   updateAutomationUi();
   appendLog(`Started ${formatAutomationAlgorithmLabel(state.automationAlgorithm)} automation.`, 'success');
+  let completedWithinTolerance = false;
+  let toleranceSummary = '';
+  let bestScoreDb = Number.POSITIVE_INFINITY;
+  let bestFilters = cloneApoFilters(state.apoFilters);
+  let consecutiveRegressionCount = 0;
 
   try {
     while (state.automationRunning) {
@@ -3336,6 +3725,67 @@ async function toggleAutomationLoop(): Promise<void> {
       state.apoSelectedMeasurementId = measurement.id;
       persistApoSelections();
       renderApoSection();
+
+      const referenceCurve = getSelectedApoReference();
+      if (referenceCurve) {
+        const toleranceResult = state.automationStopOnTolerance
+          ? updateLatestAutomationToleranceStatus(measurement, referenceCurve)
+          : evaluateAutomationTolerance(measurement, referenceCurve);
+
+        if (toleranceResult && toleranceResult.scoreDb < bestScoreDb - 0.01) {
+          bestScoreDb = toleranceResult.scoreDb;
+          bestFilters = cloneApoFilters(state.apoFilters);
+          consecutiveRegressionCount = 0;
+        } else if (
+          toleranceResult &&
+          state.automationRegressionLimit > 0 &&
+          toleranceResult.scoreDb > bestScoreDb + 0.01
+        ) {
+          consecutiveRegressionCount += 1;
+          appendLog(
+            `Automation regression ${consecutiveRegressionCount}/${state.automationRegressionLimit}: score ${toleranceResult.scoreDb.toFixed(2)} dB vs best ${bestScoreDb.toFixed(2)} dB.`,
+          );
+
+          if (consecutiveRegressionCount >= state.automationRegressionLimit) {
+            state.apoFilters = cloneApoFilters(bestFilters);
+            state.nextApoFilterIndex = state.apoFilters.length + 1;
+            persistApoState();
+            persistActiveConfiguration();
+            renderApoSection();
+
+            appendLog(
+              `Reverted to the best automation result after ${consecutiveRegressionCount} consecutive regressions and reapplied it.`,
+              'success',
+            );
+            setStatus('Automation reverted to previous best result.', 'working');
+
+            const reverted = await applyApoConfig({ continueOnBusyFileError: true });
+            if (!reverted || state.automationStopRequested) {
+              break;
+            }
+
+            consecutiveRegressionCount = 0;
+
+            if (state.automationDelaySeconds > 0) {
+              appendLog(`Waiting ${state.automationDelaySeconds.toFixed(1)}s before the next automation run.`);
+              const completedDelay = await waitForAutomationDelay();
+              if (!completedDelay || state.automationStopRequested) {
+                break;
+              }
+            }
+
+            continue;
+          }
+        } else if (toleranceResult) {
+          consecutiveRegressionCount = 0;
+        }
+
+        if (state.automationStopOnTolerance && toleranceResult?.satisfied) {
+          completedWithinTolerance = true;
+          toleranceSummary = toleranceResult.bandSummaries.join(', ');
+          break;
+        }
+      }
 
       const generated = await generateApoFilters(measurement, true);
       if (!generated || state.automationStopRequested) {
@@ -3364,6 +3814,12 @@ async function toggleAutomationLoop(): Promise<void> {
     if (stopRequested) {
       setStatus('Automation stopped.', 'idle');
       appendLog('Automation stopped.');
+    } else if (completedWithinTolerance) {
+      setStatus('Automation completed within tolerance.', 'success');
+      appendLog(
+        `Automation stopped because the measured response is within tolerance${toleranceSummary ? `: ${toleranceSummary}.` : '.'}`,
+        'success',
+      );
     }
   }
 }
