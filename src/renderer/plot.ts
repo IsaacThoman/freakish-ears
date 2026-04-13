@@ -362,6 +362,12 @@ export function attachPlotInteractions(input: {
     return;
   }
 
+  const viewBox = svg.getAttribute('viewBox');
+  const viewBoxWidth = viewBox ? Number(viewBox.split(' ')[2]) : NaN;
+  if (!Number.isFinite(viewBoxWidth) || viewBoxWidth <= 0) {
+    return;
+  }
+
   const plottedMeasurements = input.measurements.map((measurement) => ({
     measurement,
     points: getMeasurementPointsForDisplay(
@@ -399,6 +405,7 @@ export function attachPlotInteractions(input: {
         ),
       ),
     ],
+    viewBoxWidth,
   );
 
   const updateHover = (clientX: number) => {
@@ -1065,6 +1072,18 @@ export function attachApoPlotInteractions(input: {
     return { ...geometry, width, height };
   };
 
+  const getTooltipScreenPosition = (svg: SVGSVGElement, nodeX: number, nodeY: number) => {
+    const screenMatrix = svg.getScreenCTM();
+    if (!screenMatrix) {
+      return null;
+    }
+
+    const svgPoint = svg.createSVGPoint();
+    svgPoint.x = nodeX;
+    svgPoint.y = nodeY;
+    return svgPoint.matrixTransform(screenMatrix);
+  };
+
   const handleMouseDown = (event: MouseEvent) => {
     const target = event.target;
     if (!(target instanceof SVGCircleElement) || !target.classList.contains('apo-filter-node')) {
@@ -1095,20 +1114,15 @@ export function attachApoPlotInteractions(input: {
     tooltip.textContent = `${initialFreq} Hz, ${initialGain} dB`;
 
     // Position using the node's screen coordinates
-    const svgRect = target.ownerSVGElement?.getBoundingClientRect();
-    if (svgRect) {
+    const svg = target.ownerSVGElement;
+    if (svg) {
       const nodeCx = parseFloat(target.getAttribute('cx') || '0');
       const nodeCy = parseFloat(target.getAttribute('cy') || '0');
-      const scaleX = svgRect.width / 960;
-      const scaleY = svgRect.height / 356;
-
-      // Calculate screen position
-      const screenX = svgRect.left + nodeCx * scaleX;
-      const screenY = svgRect.top + nodeCy * scaleY;
-
-      // Position above the node (fixed offset of 32px above center)
-      tooltip.style.left = `${screenX}px`;
-      tooltip.style.top = `${screenY - 32}px`;
+      const screenPosition = getTooltipScreenPosition(svg, nodeCx, nodeCy);
+      if (screenPosition) {
+        tooltip.style.left = `${screenPosition.x}px`;
+        tooltip.style.top = `${screenPosition.y}px`;
+      }
     }
 
     document.body.appendChild(tooltip);
@@ -1182,17 +1196,13 @@ export function attachApoPlotInteractions(input: {
           );
       tooltip.textContent = `${frequencyHz.toFixed(0)} Hz, ${gainDb.toFixed(1)} dB`;
 
-      const svgRect = svg.getBoundingClientRect();
       const nodeX = getPlotX(frequencyHz, geometry);
       const nodeY = getPlotY(displayedGainDb, geometry);
-      const scaleX = svgRect.width / 960;
-      const scaleY = svgRect.height / 356;
-
-      // Position above the node using screen coordinates
-      const screenX = svgRect.left + nodeX * scaleX;
-      const screenY = svgRect.top + nodeY * scaleY;
-      tooltip.style.left = `${screenX}px`;
-      tooltip.style.top = `${screenY - 32}px`;
+      const screenPosition = getTooltipScreenPosition(svg, nodeX, nodeY);
+      if (screenPosition) {
+        tooltip.style.left = `${screenPosition.x}px`;
+        tooltip.style.top = `${screenPosition.y}px`;
+      }
     }
 
     controller.onFilterDrag(controller.draggingFilterId, frequencyHz, gainDb, axis);

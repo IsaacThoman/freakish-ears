@@ -15,6 +15,7 @@ import {
   AUTOMATION_ALGORITHM_STORAGE_KEY,
   AUTOMATION_REGRESSION_LIMIT_STORAGE_KEY,
   AUTOMATION_STOP_ON_TOLERANCE_STORAGE_KEY,
+  DEFAULT_DYNAMIC_PROPORTIONAL_P,
   DEFAULT_APO_EQ_MODE,
   DEFAULT_MEASUREMENT_BACKEND,
   DEFAULT_MEASUREMENT_KEEP_COUNT,
@@ -33,6 +34,7 @@ import {
   DEFAULT_START_FREQUENCY,
   DEFAULT_SWEEP_LEVEL_DB,
   DURATION_STORAGE_KEY,
+  DYNAMIC_PROPORTIONAL_P_STORAGE_KEY,
   END_FREQUENCY_STORAGE_KEY,
   INPUT_DEVICE_STORAGE_KEY,
   INPUT_CHANNEL_STORAGE_KEY,
@@ -163,6 +165,10 @@ const AUTOMATION_TOLERANCE_BANDS: Array<{
     defaultToleranceDb: 3,
   },
 ];
+
+const DYNAMIC_PROPORTIONAL_P_MIN_SCALE = 0.35;
+const DYNAMIC_PROPORTIONAL_P_MAX_SCALE = 2.5;
+const DYNAMIC_PROPORTIONAL_P_FULL_SCALE_ERROR_DB = 12;
 
 const PARAMETRIC_APO_FILTER_KIND_OPTIONS: Array<{
   value: ApoFilterKind;
@@ -308,15 +314,15 @@ app.innerHTML = `
                 <span>s</span>
               </div>
             </div>
-            <div class="field">
+            <div id="proportionalPField" class="field">
               <label for="proportionalPInput">P Value</label>
               <div class="number-input-row">
                 <input id="proportionalPInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PROPORTIONAL_P.toFixed(2)}" />
               </div>
             </div>
             <label class="plot-toggle">
-              <input id="automationStopOnToleranceToggle" type="checkbox" />
-              <span>Stop when within tolerance</span>
+              <input id="dynamicProportionalPToggle" type="checkbox" />
+              <span>Dynamic P Value</span>
             </label>
             <div class="field">
               <label for="automationRegressionLimitInput">Revert After Regressions</label>
@@ -325,6 +331,10 @@ app.innerHTML = `
                 <span>runs</span>
               </div>
             </div>
+            <label class="plot-toggle">
+              <input id="automationStopOnToleranceToggle" type="checkbox" />
+              <span>Stop when within tolerance</span>
+            </label>
             <div id="automationToleranceFields" class="automation-fields">
               <div class="automation-tolerance-grid">
                 ${AUTOMATION_TOLERANCE_BANDS.map(
@@ -507,7 +517,9 @@ const runAutomationButton = getElement<HTMLButtonElement>('runAutomationButton')
 const automationAlgorithmSelect = getElement<HTMLSelectElement>('automationAlgorithmSelect');
 const proportionalAutomationFields = getElement<HTMLDivElement>('proportionalAutomationFields');
 const automationDelayInput = getElement<HTMLInputElement>('automationDelayInput');
+const proportionalPField = getElement<HTMLDivElement>('proportionalPField');
 const proportionalPInput = getElement<HTMLInputElement>('proportionalPInput');
+const dynamicProportionalPToggle = getElement<HTMLInputElement>('dynamicProportionalPToggle');
 const automationStopOnToleranceToggle = getElement<HTMLInputElement>('automationStopOnToleranceToggle');
 const automationRegressionLimitInput = getElement<HTMLInputElement>('automationRegressionLimitInput');
 const automationToleranceFields = getElement<HTMLDivElement>('automationToleranceFields');
@@ -591,6 +603,10 @@ const state: AppState = {
     0,
     1,
   ),
+  dynamicProportionalP:
+    localStorage.getItem(DYNAMIC_PROPORTIONAL_P_STORAGE_KEY) === 'true'
+      ? true
+      : DEFAULT_DYNAMIC_PROPORTIONAL_P,
   automationStopOnTolerance:
     localStorage.getItem(AUTOMATION_STOP_ON_TOLERANCE_STORAGE_KEY) === 'true'
       ? true
@@ -962,6 +978,11 @@ proportionalPInput.addEventListener('blur', () => {
   syncAutomationSettings(true);
 });
 
+dynamicProportionalPToggle.addEventListener('change', () => {
+  syncAutomationSettings(true);
+  updateAutomationUi();
+});
+
 automationDelayInput.addEventListener('input', () => {
   syncAutomationSettings(false);
 });
@@ -1034,12 +1055,14 @@ apoMeasurementSelect.addEventListener('change', () => {
   state.apoSelectedMeasurementId = apoMeasurementSelect.value || null;
   persistApoSelections();
   renderApoSection();
+  updateAutomationUi();
 });
 
 apoReferenceSelect.addEventListener('change', () => {
   state.apoSelectedReferenceId = apoReferenceSelect.value || null;
   persistApoSelections();
   renderApoSection();
+  updateAutomationUi();
 });
 
 apoMaxFiltersInput.addEventListener('input', () => {
@@ -1167,12 +1190,11 @@ function setBusy(isBusy: boolean): void {
   measurementBackendSelect.disabled = isBusy;
   automationAlgorithmSelect.disabled = isBusy;
   automationDelayInput.disabled = isBusy;
-  proportionalPInput.disabled = isBusy;
+  dynamicProportionalPToggle.disabled = isBusy;
   automationStopOnToleranceToggle.disabled = isBusy;
   automationRegressionLimitInput.disabled = isBusy;
-  for (const input of Object.values(automationToleranceInputs)) {
-    input.disabled = isBusy;
-  }
+  updateProportionalPControlState();
+  updateAutomationToleranceFieldState();
   smoothingModeSelect.disabled = isBusy;
   generateApoFiltersButton.disabled = isBusy;
   addApoFilterButton.disabled = isBusy;
@@ -1259,15 +1281,48 @@ function updateMeasurementBackendUi(): void {
   outputSelect.disabled = state.busy || usesSox;
 }
 
+function updateProportionalPControlState(): void {
+  const proportionalPDisabled = state.busy || state.dynamicProportionalP;
+  proportionalPField.dataset.disabled = proportionalPDisabled ? 'true' : 'false';
+  proportionalPField.setAttribute('aria-disabled', String(proportionalPDisabled));
+  proportionalPInput.disabled = proportionalPDisabled;
+  proportionalPInput.readOnly = proportionalPDisabled;
+
+  if (proportionalPInput.disabled && document.activeElement === proportionalPInput) {
+    proportionalPInput.blur();
+  }
+
+  if (!state.dynamicProportionalP) {
+    proportionalPInput.value = state.proportionalP.toFixed(2);
+    return;
+  }
+
+  const currentProportionalP = getCurrentAutomationProportionalP(
+    getSelectedApoMeasurement(),
+    getSelectedApoReference(),
+  );
+  proportionalPInput.value = currentProportionalP?.toFixed(2) ?? '';
+}
+
+function updateAutomationToleranceFieldState(): void {
+  const toleranceFieldsDisabled = state.busy || !state.automationStopOnTolerance;
+  automationToleranceFields.dataset.disabled = toleranceFieldsDisabled ? 'true' : 'false';
+
+  for (const input of Object.values(automationToleranceInputs)) {
+    input.disabled = toleranceFieldsDisabled;
+  }
+}
+
 function updateAutomationUi(): void {
   const isProportional = state.automationAlgorithm === 'proportional';
   automationAlgorithmSelect.value = state.automationAlgorithm;
   automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
   proportionalAutomationFields.hidden = !isProportional;
-  proportionalPInput.value = state.proportionalP.toFixed(2);
+  dynamicProportionalPToggle.checked = state.dynamicProportionalP;
+  updateProportionalPControlState();
   automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
   automationRegressionLimitInput.value = String(state.automationRegressionLimit);
-  automationToleranceFields.hidden = !state.automationStopOnTolerance;
+  updateAutomationToleranceFieldState();
   for (const band of AUTOMATION_TOLERANCE_BANDS) {
     automationToleranceInputs[band.key].value = state.automationBandTolerances[band.key].toFixed(1);
   }
@@ -1401,6 +1456,7 @@ function resetUserInputsToDefaults(): void {
   automationAlgorithmSelect.value = state.automationAlgorithm;
   state.automationDelaySeconds = DEFAULT_AUTOMATION_DELAY_SECONDS;
   state.proportionalP = DEFAULT_PROPORTIONAL_P;
+  state.dynamicProportionalP = DEFAULT_DYNAMIC_PROPORTIONAL_P;
   state.automationStopOnTolerance = DEFAULT_AUTOMATION_STOP_ON_TOLERANCE;
   state.automationBandTolerances = createDefaultAutomationBandTolerances();
   state.automationRegressionLimit = DEFAULT_AUTOMATION_REGRESSION_LIMIT;
@@ -2258,6 +2314,7 @@ function persistActiveConfiguration(): void {
     automationAlgorithm: state.automationAlgorithm,
     automationDelaySeconds: state.automationDelaySeconds,
     proportionalP: state.proportionalP,
+    dynamicProportionalP: state.dynamicProportionalP,
     automationStopOnTolerance: state.automationStopOnTolerance,
     automationBandTolerances: state.automationBandTolerances,
     automationRegressionLimit: state.automationRegressionLimit,
@@ -2378,6 +2435,7 @@ async function saveConfiguration(): Promise<void> {
       automationAlgorithm: state.automationAlgorithm,
       automationDelaySeconds: state.automationDelaySeconds,
       proportionalP: state.proportionalP,
+      dynamicProportionalP: state.dynamicProportionalP,
       automationStopOnTolerance: state.automationStopOnTolerance,
       automationBandTolerances: state.automationBandTolerances,
       automationRegressionLimit: state.automationRegressionLimit,
@@ -2515,6 +2573,10 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
     0,
     1,
   );
+  state.dynamicProportionalP =
+    typeof config.dynamicProportionalP === 'boolean'
+      ? config.dynamicProportionalP
+      : DEFAULT_DYNAMIC_PROPORTIONAL_P;
   state.automationStopOnTolerance =
     typeof config.automationStopOnTolerance === 'boolean'
       ? config.automationStopOnTolerance
@@ -2559,8 +2621,9 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   if (persist) {
     persistActiveConfiguration();
   }
-apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
+  apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
   automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
+  dynamicProportionalPToggle.checked = state.dynamicProportionalP;
   automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
   automationRegressionLimitInput.value = String(state.automationRegressionLimit);
   persistAutomationSettings();
@@ -2916,6 +2979,10 @@ function persistAutomationSettings(): void {
   );
   localStorage.setItem(PROPORTIONAL_P_STORAGE_KEY, String(state.proportionalP));
   localStorage.setItem(
+    DYNAMIC_PROPORTIONAL_P_STORAGE_KEY,
+    String(state.dynamicProportionalP),
+  );
+  localStorage.setItem(
     AUTOMATION_STOP_ON_TOLERANCE_STORAGE_KEY,
     String(state.automationStopOnTolerance),
   );
@@ -2994,15 +3061,17 @@ function syncApoGenerationSettings(normalize: boolean): void {
 
 function syncAutomationSettings(normalize: boolean): void {
   const previousStopOnTolerance = state.automationStopOnTolerance;
+  const previousDynamicProportionalP = state.dynamicProportionalP;
   const parsedDelaySeconds = Number(automationDelayInput.value);
   const parsedProportionalP = Number(proportionalPInput.value);
   const parsedRegressionLimit = Number(automationRegressionLimitInput.value);
+  const nextDynamicProportionalP = dynamicProportionalPToggle.checked;
 
   if (Number.isFinite(parsedDelaySeconds)) {
     state.automationDelaySeconds = clamp(parsedDelaySeconds, 0, 3600);
   }
 
-  if (Number.isFinite(parsedProportionalP)) {
+  if (!previousDynamicProportionalP && !nextDynamicProportionalP && Number.isFinite(parsedProportionalP)) {
     state.proportionalP = clamp(parsedProportionalP, 0, 1);
   }
 
@@ -3010,6 +3079,7 @@ function syncAutomationSettings(normalize: boolean): void {
     state.automationRegressionLimit = clamp(Math.round(parsedRegressionLimit), 0, 20);
   }
 
+  state.dynamicProportionalP = nextDynamicProportionalP;
   state.automationStopOnTolerance = automationStopOnToleranceToggle.checked;
 
   state.automationBandTolerances = AUTOMATION_TOLERANCE_BANDS.reduce(
@@ -3035,6 +3105,7 @@ function syncAutomationSettings(normalize: boolean): void {
   if (normalize) {
     automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
     proportionalPInput.value = state.proportionalP.toFixed(2);
+    dynamicProportionalPToggle.checked = state.dynamicProportionalP;
     automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
     automationRegressionLimitInput.value = String(state.automationRegressionLimit);
     for (const band of AUTOMATION_TOLERANCE_BANDS) {
@@ -3063,6 +3134,7 @@ function renderApoSection(): void {
     state.measurements.filter((measurement) => measurement.visible),
     state.referenceCurves.filter((referenceCurve) => referenceCurve.visible),
   );
+  updateAutomationUi();
   updateMeasurementActionState();
 }
 
@@ -3392,8 +3464,10 @@ function buildProportionalApoFilters(
   measurement: LoadedMeasurement,
   referenceCurve: ReferenceCurve,
 ): ApoFilter[] {
+  const proportionalP = getCurrentAutomationProportionalP(measurement, referenceCurve) ?? state.proportionalP;
+
   if (state.apoEqMode === 'graphic') {
-    return buildProportionalGraphicEqFilters(measurement, referenceCurve);
+    return buildProportionalGraphicEqFilters(measurement, referenceCurve, proportionalP);
   }
 
   const activeApoFilters = getActiveApoFilters();
@@ -3402,7 +3476,7 @@ function buildProportionalApoFilters(
     return buildApoFiltersFromCurves(measurement, referenceCurve).map((filter) => ({
       ...filter,
       gainDb: roundTo(
-        clamp(filter.gainDb * state.proportionalP, -state.apoMaxCutDb, state.apoMaxBoostDb),
+        clamp(getProportionalAdjustmentDb(filter.gainDb, proportionalP), -state.apoMaxCutDb, state.apoMaxBoostDb),
         0.1,
       ),
     }));
@@ -3414,9 +3488,10 @@ function buildProportionalApoFilters(
   return activeApoFilters.map((filter) => {
     const measurementPoint = findClosestPoint(measurementPoints, filter.frequencyHz);
     const referencePoint = findClosestPoint(referencePoints, filter.frequencyHz);
-    const adjustmentDb =
-      (referencePoint.smoothedMagnitudeDbRelative - measurementPoint.smoothedMagnitudeDbRelative)
-      * state.proportionalP;
+    const adjustmentDb = getProportionalAdjustmentDb(
+      referencePoint.smoothedMagnitudeDbRelative - measurementPoint.smoothedMagnitudeDbRelative,
+      proportionalP,
+    );
 
     return {
       ...filter,
@@ -3431,6 +3506,7 @@ function buildProportionalApoFilters(
 function buildProportionalGraphicEqFilters(
   measurement: LoadedMeasurement,
   referenceCurve: ReferenceCurve,
+  proportionalP: number,
 ): ApoFilter[] {
   const measurementPoints = getAutomationMeasurementPoints(measurement, referenceCurve);
   const referencePoints = getDisplayedReferencePoints(referenceCurve);
@@ -3447,9 +3523,10 @@ function buildProportionalGraphicEqFilters(
   return baseFilters.map((filter) => {
     const measurementPoint = findClosestPoint(measurementPoints, filter.frequencyHz);
     const referencePoint = findClosestPoint(referencePoints, filter.frequencyHz);
-    const adjustmentDb =
-      (referencePoint.smoothedMagnitudeDbRelative - measurementPoint.smoothedMagnitudeDbRelative)
-      * state.proportionalP;
+    const adjustmentDb = getProportionalAdjustmentDb(
+      referencePoint.smoothedMagnitudeDbRelative - measurementPoint.smoothedMagnitudeDbRelative,
+      proportionalP,
+    );
 
     return {
       ...filter,
@@ -3459,6 +3536,57 @@ function buildProportionalGraphicEqFilters(
       ),
     };
   });
+}
+
+function getProportionalAdjustmentDb(errorDb: number, proportionalP: number): number {
+  return errorDb * proportionalP;
+}
+
+function getCurrentAutomationProportionalP(
+  measurement: LoadedMeasurement | null,
+  referenceCurve: ReferenceCurve | null,
+): number | null {
+  if (!state.dynamicProportionalP) {
+    return state.proportionalP;
+  }
+
+  if (!measurement || !referenceCurve) {
+    return null;
+  }
+
+  return getDynamicProportionalPForErrorScore(
+    getAutomationErrorScoreDb(measurement, referenceCurve),
+  );
+}
+
+function getDynamicProportionalPForErrorScore(errorScoreDb: number): number {
+  const scaledError = clamp(
+    errorScoreDb / DYNAMIC_PROPORTIONAL_P_FULL_SCALE_ERROR_DB,
+    0,
+    1,
+  );
+  const scale =
+    DYNAMIC_PROPORTIONAL_P_MIN_SCALE +
+    (DYNAMIC_PROPORTIONAL_P_MAX_SCALE - DYNAMIC_PROPORTIONAL_P_MIN_SCALE) * scaledError;
+  return clamp(state.proportionalP * scale, 0, 1);
+}
+
+function getAutomationErrorScoreDb(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve,
+): number {
+  const measurementPoints = getAutomationMeasurementPoints(measurement, referenceCurve);
+  const referencePoints = getDisplayedReferencePoints(referenceCurve);
+  let totalAbsoluteErrorDb = 0;
+
+  for (const measurementPoint of measurementPoints) {
+    const referencePoint = findClosestPoint(referencePoints, measurementPoint.frequencyHz);
+    totalAbsoluteErrorDb += Math.abs(
+      referencePoint.smoothedMagnitudeDbRelative - measurementPoint.smoothedMagnitudeDbRelative,
+    );
+  }
+
+  return measurementPoints.length > 0 ? totalAbsoluteErrorDb / measurementPoints.length : 0;
 }
 
 function formatAutomationAlgorithmLabel(algorithm: AutomationAlgorithm): string {

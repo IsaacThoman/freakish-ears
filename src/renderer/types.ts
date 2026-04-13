@@ -129,6 +129,7 @@ export type AppState = {
   automationAlgorithm: AutomationAlgorithm;
   automationDelaySeconds: number;
   proportionalP: number;
+  dynamicProportionalP: boolean;
   automationStopOnTolerance: boolean;
   automationBandTolerances: AutomationBandTolerances;
   automationRegressionLimit: number;
