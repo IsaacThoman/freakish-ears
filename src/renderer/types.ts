@@ -42,6 +42,7 @@ export type LoadedMeasurement = {
   name: string;
   exportName: string;
   color: string;
+  starred: boolean;
   visible: boolean;
   magnitudeMode: MeasurementMagnitudeMode;
   sourcePath: string | null;
@@ -104,6 +105,7 @@ export type AppState = {
   busy: boolean;
   outputFolder: string | null;
   measurementBackend: MeasurementBackend;
+  measurementKeepCount: number;
   splOffsetDb: number;
   normalizePlot: boolean;
   smoothingMode: MeasurementSmoothingMode;

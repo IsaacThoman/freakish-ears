@@ -14,6 +14,7 @@ import {
   AUTOMATION_ALGORITHM_STORAGE_KEY,
   DEFAULT_APO_EQ_MODE,
   DEFAULT_MEASUREMENT_BACKEND,
+  DEFAULT_MEASUREMENT_KEEP_COUNT,
   DEFAULT_APO_MAX_BOOST_DB,
   DEFAULT_APO_MAX_CUT_DB,
   DEFAULT_APO_MAX_FILTERS,
@@ -32,6 +33,7 @@ import {
   INPUT_DEVICE_STORAGE_KEY,
   INPUT_CHANNEL_STORAGE_KEY,
   MEASUREMENT_BACKEND_STORAGE_KEY,
+  MEASUREMENT_KEEP_COUNT_STORAGE_KEY,
   MAX_SWEEP_LEVEL_DB,
   MIN_SWEEP_LEVEL_DB,
   NORMALIZE_PLOT_STORAGE_KEY,
@@ -459,6 +461,7 @@ const state: AppState = {
   busy: false,
   outputFolder: localStorage.getItem(STORAGE_KEY),
   measurementBackend: readStoredMeasurementBackend(),
+  measurementKeepCount: readStoredMeasurementKeepCount(),
   splOffsetDb: readStoredNumber(SPL_OFFSET_STORAGE_KEY, DEFAULT_SPL_OFFSET_DB),
   normalizePlot: localStorage.getItem(NORMALIZE_PLOT_STORAGE_KEY) === 'true',
   smoothingMode: readStoredSmoothingMode(),
@@ -606,6 +609,19 @@ measurementsPlotCard.addEventListener('change', (event) => {
     return;
   }
 
+  if (target.dataset.measurementKeepCount !== undefined) {
+    state.measurementKeepCount = normalizeMeasurementKeepCount(target.value);
+    target.value = String(state.measurementKeepCount);
+    localStorage.setItem(MEASUREMENT_KEEP_COUNT_STORAGE_KEY, String(state.measurementKeepCount));
+    const prunedMeasurements = pruneMeasurementsToKeepCount();
+    if (prunedMeasurements.length > 0) {
+      appendMeasurementPruneLog(prunedMeasurements);
+    }
+    persistActiveConfiguration();
+    renderMeasurements();
+    return;
+  }
+
   const referenceId = target.dataset.referenceToggle;
   if (referenceId) {
     setReferenceVisibility(referenceId, target.checked);
@@ -628,6 +644,11 @@ measurementsPlotCard.addEventListener('click', (event) => {
     exportButton instanceof HTMLButtonElement
       ? exportButton.dataset.measurementExport
       : undefined;
+  const starButton = target.closest('[data-measurement-star]');
+  const starMeasurementId =
+    starButton instanceof HTMLButtonElement
+      ? starButton.dataset.measurementStar
+      : undefined;
   const referenceRemoveButton = target.closest('[data-reference-remove]');
   const referenceId =
     referenceRemoveButton instanceof HTMLButtonElement
@@ -641,6 +662,11 @@ measurementsPlotCard.addEventListener('click', (event) => {
 
   if (exportMeasurementId) {
     void exportMeasurement(exportMeasurementId);
+    return;
+  }
+
+  if (starMeasurementId) {
+    toggleMeasurementStar(starMeasurementId);
     return;
   }
 
@@ -1540,13 +1566,46 @@ function takeMeasurementFromAnalysis(
 
 function addMeasurement(measurement: LoadedMeasurement): void {
   state.measurements = [...state.measurements, measurement];
-  state.focusedMeasurementId = measurement.id;
+  const prunedMeasurements = pruneMeasurementsToKeepCount();
+  state.focusedMeasurementId = state.measurements.some((entry) => entry.id === measurement.id)
+    ? measurement.id
+    : state.measurements.at(-1)?.id ?? null;
   if (!state.apoSelectedMeasurementId) {
     state.apoSelectedMeasurementId = measurement.id;
     persistApoSelections();
   }
+  if (prunedMeasurements.length > 0) {
+    appendMeasurementPruneLog(prunedMeasurements);
+  }
   renderMeasurements();
   renderApoSection();
+}
+
+function toggleMeasurementStar(measurementId: string): void {
+  let updatedMeasurementName: string | null = null;
+  let starred = false;
+
+  state.measurements = state.measurements.map((measurement) => {
+    if (measurement.id !== measurementId) {
+      return measurement;
+    }
+
+    updatedMeasurementName = measurement.name;
+    starred = !measurement.starred;
+    return { ...measurement, starred };
+  });
+
+  if (updatedMeasurementName) {
+    appendLog(`${starred ? 'Starred' : 'Unstarred'} measurement ${updatedMeasurementName}.`);
+    if (!starred) {
+      const prunedMeasurements = pruneMeasurementsToKeepCount();
+      if (prunedMeasurements.length > 0) {
+        appendMeasurementPruneLog(prunedMeasurements);
+      }
+    }
+    renderMeasurements();
+    renderApoSection();
+  }
 }
 
 function addReferenceCurve(referenceCurve: ReferenceCurve): void {
@@ -1666,6 +1725,7 @@ function renderPlotCard(
     allMeasurements: state.measurements,
     visibleReferenceCurves,
     allReferenceCurves: state.referenceCurves,
+    measurementKeepCount: state.measurementKeepCount,
     normalizePlot: state.normalizePlot,
     smoothingMode: state.smoothingMode,
     splOffsetDb: state.splOffsetDb,
@@ -1765,6 +1825,21 @@ function readStoredMeasurementBackend(): MeasurementBackend {
     : DEFAULT_MEASUREMENT_BACKEND;
 }
 
+function readStoredMeasurementKeepCount(): number {
+  return normalizeMeasurementKeepCount(
+    readStoredNumber(MEASUREMENT_KEEP_COUNT_STORAGE_KEY, DEFAULT_MEASUREMENT_KEEP_COUNT),
+  );
+}
+
+function normalizeMeasurementKeepCount(value: unknown): number {
+  const parsed = Number(value);
+  return clamp(
+    Number.isFinite(parsed) ? Math.round(parsed) : DEFAULT_MEASUREMENT_KEEP_COUNT,
+    1,
+    100,
+  );
+}
+
 function initializeMeasurementConfigFromStorage(): void {
   const persistedConfig = readPersistedActiveConfiguration();
 
@@ -1839,6 +1914,7 @@ function readPersistedActiveConfiguration(): Record<string, unknown> | null {
 function persistActiveConfiguration(): void {
   const payload = {
     backend: getSelectedMeasurementBackend(),
+    measurementKeepCount: state.measurementKeepCount,
     sampleRate: getSelectedSampleRate(),
     inputChannel: getSelectedChannel(inputChannelSelect),
     outputChannel: getSelectedChannel(outputChannelSelect),
@@ -1958,6 +2034,7 @@ async function saveConfiguration(): Promise<void> {
     const payload = {
       savedAt: new Date().toISOString(),
       backend: getSelectedMeasurementBackend(),
+      measurementKeepCount: state.measurementKeepCount,
       sampleRate: getSelectedSampleRate(),
       inputChannel: getSelectedChannel(inputChannelSelect),
       outputChannel: getSelectedChannel(outputChannelSelect),
@@ -2045,6 +2122,9 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
     sampleRateSelect.value = String(sampleRate);
     localStorage.setItem(SAMPLE_RATE_STORAGE_KEY, String(sampleRate));
   }
+
+  state.measurementKeepCount = normalizeMeasurementKeepCount(config.measurementKeepCount);
+  localStorage.setItem(MEASUREMENT_KEEP_COUNT_STORAGE_KEY, String(state.measurementKeepCount));
 
   inputChannelSelect.value =
     config.inputChannel === 'left' || config.inputChannel === 'right'
@@ -2144,7 +2224,49 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   syncVolumeControls('slider');
   syncSplOffsetControl(true);
   updateMeasurementBackendUi();
+  const prunedMeasurements = pruneMeasurementsToKeepCount();
+  if (prunedMeasurements.length > 0) {
+    appendMeasurementPruneLog(prunedMeasurements);
+  }
   renderMeasurements();
+}
+
+function pruneMeasurementsToKeepCount(): LoadedMeasurement[] {
+  const unstarredMeasurements = state.measurements.filter((measurement) => !measurement.starred);
+  const overflowCount = unstarredMeasurements.length - state.measurementKeepCount;
+
+  if (overflowCount <= 0) {
+    return [];
+  }
+
+  const removedIds = new Set(
+    unstarredMeasurements.slice(0, overflowCount).map((measurement) => measurement.id),
+  );
+  const removedMeasurements = state.measurements.filter((measurement) => removedIds.has(measurement.id));
+
+  state.measurements = state.measurements.filter((measurement) => !removedIds.has(measurement.id));
+
+  if (state.focusedMeasurementId && removedIds.has(state.focusedMeasurementId)) {
+    state.focusedMeasurementId = state.measurements.at(-1)?.id ?? null;
+  }
+
+  if (state.apoSelectedMeasurementId && removedIds.has(state.apoSelectedMeasurementId)) {
+    state.apoSelectedMeasurementId = state.measurements.at(-1)?.id ?? null;
+    persistApoSelections();
+  }
+
+  return removedMeasurements;
+}
+
+function appendMeasurementPruneLog(removedMeasurements: LoadedMeasurement[]): void {
+  if (removedMeasurements.length === 0) {
+    return;
+  }
+
+  const removedNames = removedMeasurements.map((measurement) => measurement.name).join(', ');
+  appendLog(
+    `Auto-removed ${removedMeasurements.length === 1 ? 'oldest unstarred measurement' : 'oldest unstarred measurements'} ${removedNames} to keep ${state.measurementKeepCount}.`,
+  );
 }
 
 function setNumericInputValue(input: HTMLInputElement, value: unknown): void {

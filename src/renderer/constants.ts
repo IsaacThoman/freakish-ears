@@ -1,5 +1,6 @@
 export const STORAGE_KEY = 'freakish-ears-output-folder';
 export const MEASUREMENT_BACKEND_STORAGE_KEY = 'freakish-ears-measurement-backend';
+export const MEASUREMENT_KEEP_COUNT_STORAGE_KEY = 'freakish-ears-measurement-keep-count';
 export const SPL_OFFSET_STORAGE_KEY = 'freakish-ears-spl-offset-db';
 export const NORMALIZE_PLOT_STORAGE_KEY = 'freakish-ears-normalize-plot';
 export const SMOOTHING_MODE_STORAGE_KEY = 'freakish-ears-smoothing-mode';
@@ -25,6 +26,7 @@ export const INPUT_DEVICE_STORAGE_KEY = 'freakish-ears-input-device';
 export const OUTPUT_DEVICE_STORAGE_KEY = 'freakish-ears-output-device';
 export const ACTIVE_CONFIG_STORAGE_KEY = 'freakish-ears-active-config';
 export const DEFAULT_MEASUREMENT_BACKEND = 'web-audio';
+export const DEFAULT_MEASUREMENT_KEEP_COUNT = 5;
 export const DEFAULT_SAMPLE_RATE = 48000;
 export const DEFAULT_SMOOTHING_MODE = '1/12';
 export const DEFAULT_START_FREQUENCY = 20;

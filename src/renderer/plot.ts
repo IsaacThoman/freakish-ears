@@ -63,6 +63,7 @@ export function renderResponsePlot(input: {
   allMeasurements: LoadedMeasurement[];
   visibleReferenceCurves: ReferenceCurve[];
   allReferenceCurves: ReferenceCurve[];
+  measurementKeepCount: number;
   normalizePlot: boolean;
   smoothingMode: MeasurementSmoothingMode;
   splOffsetDb: number;
@@ -76,7 +77,7 @@ export function renderResponsePlot(input: {
       <div class="plot-empty-state">
         <span>Run or import measurements to plot response.</span>
       </div>
-      ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.busy, input.outputFolder)}
+      ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.measurementKeepCount, input.busy, input.outputFolder)}
     `;
   }
 
@@ -85,7 +86,7 @@ export function renderResponsePlot(input: {
       <div class="plot-empty-state">
         <span>No measurements or reference curves are currently selected for display.</span>
       </div>
-      ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.busy, input.outputFolder)}
+      ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.measurementKeepCount, input.busy, input.outputFolder)}
     `;
   }
 
@@ -201,7 +202,7 @@ export function renderResponsePlot(input: {
       <text x="${(geometry.left + (geometry.width - geometry.right)) / 2}" y="${geometry.height - 12}" text-anchor="middle" class="plot-axis-label">Frequency (Hz, log)</text>
       <text x="${Math.min(28, geometry.left - 12)}" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 ${Math.min(28, geometry.left - 12)} ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">${input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)'}</text>
     </svg>
-    ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.busy, input.outputFolder)}
+    ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.measurementKeepCount, input.busy, input.outputFolder)}
   `;
 }
 
@@ -477,6 +478,7 @@ function getApoFilterResponseDb(filter: ApoFilter, frequencyHz: number): number 
 function renderMeasurementList(
   measurements: LoadedMeasurement[],
   referenceCurves: ReferenceCurve[],
+  measurementKeepCount: number,
   busy: boolean,
   outputFolder: string | null,
 ): string {
@@ -489,13 +491,16 @@ function renderMeasurementList(
           : measurements
               .map(
                 (measurement) => `
-                  <div class="measurement-row${measurement.visible ? '' : ' is-hidden'}">
+                  <div class="measurement-row${measurement.visible ? '' : ' is-hidden'}${measurement.starred ? ' is-starred' : ''}">
                     <label class="measurement-toggle" title="${escapeHtml(measurement.sourcePath ?? measurement.name)}">
                       <input type="checkbox" data-measurement-toggle="${measurement.id}" ${measurement.visible ? 'checked' : ''} />
                       <span class="measurement-swatch" style="background:${measurement.color}"></span>
                       <span class="measurement-name">${escapeHtml(measurement.name)}</span>
                     </label>
                     <div class="measurement-actions">
+                      <button class="btn btn-secondary measurement-star-button" type="button" data-measurement-star="${measurement.id}" aria-pressed="${measurement.starred ? 'true' : 'false'}" ${busy ? 'disabled' : ''}>
+                        ${measurement.starred ? 'Unstar' : 'Star'}
+                      </button>
                       <button class="btn btn-secondary measurement-export-button" type="button" data-measurement-export="${measurement.id}" ${busy || !outputFolder ? 'disabled' : ''}>
                         Export
                       </button>
@@ -508,6 +513,11 @@ function renderMeasurementList(
               )
               .join('')
       }
+      <label class="measurement-keep-control">
+        <span>Number to keep</span>
+        <input type="number" min="1" max="100" step="1" value="${measurementKeepCount}" data-measurement-keep-count ${busy ? 'disabled' : ''} />
+        <span class="measurement-keep-hint">Starred measurements are kept.</span>
+      </label>
       <div class="measurement-list-header">Reference curves</div>
       ${
         referenceCurves.length === 0
