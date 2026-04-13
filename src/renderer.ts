@@ -317,7 +317,7 @@ app.innerHTML = `
             <div id="proportionalPField" class="field">
               <label for="proportionalPInput">P Value</label>
               <div class="number-input-row">
-                <input id="proportionalPInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PROPORTIONAL_P.toFixed(2)}" />
+                <input id="proportionalPInput" class="level-number-input" type="number" min="0" max="1" step="0.01" placeholder="-.--" value="${DEFAULT_PROPORTIONAL_P.toFixed(2)}" />
               </div>
             </div>
             <label class="plot-toggle">
@@ -1287,6 +1287,7 @@ function updateProportionalPControlState(): void {
   proportionalPField.setAttribute('aria-disabled', String(proportionalPDisabled));
   proportionalPInput.disabled = proportionalPDisabled;
   proportionalPInput.readOnly = proportionalPDisabled;
+  proportionalPInput.placeholder = state.dynamicProportionalP ? '-.--' : '';
 
   if (proportionalPInput.disabled && document.activeElement === proportionalPInput) {
     proportionalPInput.blur();
@@ -1297,10 +1298,12 @@ function updateProportionalPControlState(): void {
     return;
   }
 
-  const currentProportionalP = getCurrentAutomationProportionalP(
-    getSelectedApoMeasurement(),
-    getSelectedApoReference(),
-  );
+  const currentProportionalP = state.automationRunning
+    ? getCurrentAutomationProportionalP(
+        getSelectedApoMeasurement(),
+        getSelectedApoReference(),
+      )
+    : null;
   proportionalPInput.value = currentProportionalP?.toFixed(2) ?? '';
 }
 
