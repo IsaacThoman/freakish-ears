@@ -2563,7 +2563,10 @@ function updateApoFilter(filterId: string, field: string, value: string | boolea
   renderApoSection();
 }
 
-async function generateApoFilters(measurementOverride: LoadedMeasurement | null = null): Promise<boolean> {
+async function generateApoFilters(
+  measurementOverride: LoadedMeasurement | null = null,
+  useAutomationAlgorithm = false,
+): Promise<boolean> {
   const measurement = measurementOverride ?? getSelectedApoMeasurement();
   const referenceCurve = getSelectedApoReference();
 
@@ -2575,9 +2578,16 @@ async function generateApoFilters(measurementOverride: LoadedMeasurement | null 
 
   try {
     setBusy(true);
-    setStatus(`Generating Equalizer APO filters with ${formatAutomationAlgorithmLabel(state.automationAlgorithm)}...`, 'working');
+    setStatus(
+      useAutomationAlgorithm
+        ? `Generating Equalizer APO filters with ${formatAutomationAlgorithmLabel(state.automationAlgorithm)}...`
+        : 'Generating Equalizer APO filters...',
+      'working',
+    );
 
-    const generatedFilters = buildFiltersForSelectedAlgorithm(measurement, referenceCurve);
+    const generatedFilters = useAutomationAlgorithm
+      ? buildFiltersForSelectedAlgorithm(measurement, referenceCurve)
+      : buildApoFiltersFromCurves(measurement, referenceCurve);
     state.apoFilters = generatedFilters;
     state.nextApoFilterIndex = generatedFilters.length + 1;
     persistApoState();
@@ -2586,7 +2596,9 @@ async function generateApoFilters(measurementOverride: LoadedMeasurement | null 
 
     setStatus(`Generated ${generatedFilters.length} APO filter${generatedFilters.length === 1 ? '' : 's'}.`, 'success');
     appendLog(
-      `Generated ${generatedFilters.length} ${state.apoEqMode === 'graphic' ? 'graphic EQ band' : 'APO filter'}${generatedFilters.length === 1 ? '' : 's'} from ${measurement.name} to ${referenceCurve.name} with the ${formatAutomationAlgorithmLabel(state.automationAlgorithm)} algorithm.`,
+      useAutomationAlgorithm
+        ? `Generated ${generatedFilters.length} ${state.apoEqMode === 'graphic' ? 'graphic EQ band' : 'APO filter'}${generatedFilters.length === 1 ? '' : 's'} from ${measurement.name} to ${referenceCurve.name} with the ${formatAutomationAlgorithmLabel(state.automationAlgorithm)} algorithm.`
+        : `Generated ${generatedFilters.length} ${state.apoEqMode === 'graphic' ? 'graphic EQ band' : 'APO filter'}${generatedFilters.length === 1 ? '' : 's'} from ${measurement.name} to ${referenceCurve.name}.`,
       'success',
     );
     return true;
@@ -3121,7 +3133,7 @@ async function toggleAutomationLoop(): Promise<void> {
       persistApoSelections();
       renderApoSection();
 
-      const generated = await generateApoFilters(measurement);
+      const generated = await generateApoFilters(measurement, true);
       if (!generated || state.automationStopRequested) {
         break;
       }
