@@ -1,6 +1,7 @@
 export const IPC_CHANNELS = {
   selectOutputFolder: 'dialog:selectOutputFolder',
   saveMeasurementSession: 'files:saveMeasurementSession',
+  deleteMeasurementSession: 'files:deleteMeasurementSession',
   saveFileAs: 'files:saveFileAs',
   showItemInFolder: 'files:showItemInFolder',
   runSoxMeasurement: 'measurement:runSoxMeasurement',
@@ -96,6 +97,7 @@ export type FreakishEarsApi = {
   saveMeasurementSession: (
     payload: SaveMeasurementPayload,
   ) => Promise<SaveMeasurementResult>;
+  deleteMeasurementSession: (sessionDirectory: string) => Promise<void>;
   saveFileAs: (payload: SaveFileAsPayload) => Promise<SaveFileAsResult>;
   showItemInFolder: (filePath: string) => Promise<void>;
   runSoxMeasurement: (

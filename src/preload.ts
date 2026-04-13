@@ -12,6 +12,8 @@ const api: FreakishEarsApi = {
   selectOutputFolder: () => ipcRenderer.invoke(IPC_CHANNELS.selectOutputFolder),
   saveMeasurementSession: (payload: SaveMeasurementPayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.saveMeasurementSession, payload),
+  deleteMeasurementSession: (sessionDirectory: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.deleteMeasurementSession, sessionDirectory),
   saveFileAs: (payload: SaveFileAsPayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.saveFileAs, payload),
   showItemInFolder: (filePath: string) =>

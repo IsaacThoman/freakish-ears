@@ -20,6 +20,7 @@ import {
   formatDbLabel,
   formatFrequencyDetailed,
   formatFrequencyLabel,
+  getToleranceFailureSegments,
 } from './utils';
 
 const EQ_GRAPH_FREQUENCIES = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
@@ -60,6 +61,7 @@ type PlotLabelSizing = {
 type ResponseToleranceOverlay = {
   measurementId: string;
   referenceCurve: ReferenceCurve;
+  maxAcceptableErrorWidthHz: number;
   bands: Array<{
     label: string;
     minimumFrequencyHz: number;
@@ -951,59 +953,43 @@ function buildToleranceFailPaths(
     return [];
   }
   const failPaths: string[] = [];
-  let activeSegment: MeasurementPoint[] = [];
+  const failureSegments = getToleranceFailureSegments(
+    plottedMeasurement.points,
+    referencePoints,
+    overlay.bands,
+  ).filter((segment) => segment.widthHz >= overlay.maxAcceptableErrorWidthHz);
 
-  const flushSegment = () => {
-    if (activeSegment.length < 2) {
-      activeSegment = [];
-      return;
+  for (const segment of failureSegments) {
+    const firstPoint = segment.points[0];
+    const lastPoint = segment.points[segment.points.length - 1];
+    if (!firstPoint || !lastPoint) {
+      continue;
     }
 
-    const curvePath = activeSegment
+    if (segment.points.length === 1) {
+      const pointX = getPlotX(firstPoint.frequencyHz, geometry);
+      const pointY = getPlotY(firstPoint.smoothedMagnitudeDbRelative, geometry);
+      const minimumX = geometry.left;
+      const maximumX = geometry.width - geometry.right;
+      const leftX = clamp(pointX - 2, minimumX, maximumX).toFixed(1);
+      const rightX = clamp(pointX + 2, minimumX, maximumX).toFixed(1);
+
+      failPaths.push(
+        `M ${leftX},${xAxisY.toFixed(1)} L ${pointX.toFixed(1)},${pointY.toFixed(1)} L ${rightX},${xAxisY.toFixed(1)} Z`,
+      );
+      continue;
+    }
+
+    const curvePath = segment.points
       .map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.smoothedMagnitudeDbRelative, geometry).toFixed(1)}`)
       .join(' L ');
-    const firstPoint = activeSegment[0];
-    const lastPoint = activeSegment[activeSegment.length - 1];
     const firstX = getPlotX(firstPoint.frequencyHz, geometry).toFixed(1);
     const lastX = getPlotX(lastPoint.frequencyHz, geometry).toFixed(1);
 
     failPaths.push(
       `M ${firstX},${xAxisY.toFixed(1)} L ${curvePath} L ${lastX},${xAxisY.toFixed(1)} Z`,
     );
-    activeSegment = [];
-  };
-
-  for (let index = 0; index < plottedMeasurement.points.length; index += 1) {
-    const displayPoint = plottedMeasurement.points[index];
-    if (!displayPoint) {
-      flushSegment();
-      continue;
-    }
-
-    const matchingBand = overlay.bands.find(
-      (band) =>
-        displayPoint.frequencyHz >= band.minimumFrequencyHz &&
-        displayPoint.frequencyHz <= band.maximumFrequencyHz,
-    );
-    if (!matchingBand) {
-      flushSegment();
-      continue;
-    }
-
-    const referencePoint = findClosestPoint(referencePoints, displayPoint.frequencyHz);
-    const errorDb = Math.abs(
-      referencePoint.smoothedMagnitudeDbRelative -
-        displayPoint.smoothedMagnitudeDbRelative,
-    );
-
-    if (errorDb > matchingBand.toleranceDb) {
-      activeSegment.push(displayPoint);
-    } else {
-      flushSegment();
-    }
   }
-
-  flushSegment();
   return failPaths;
 }
 

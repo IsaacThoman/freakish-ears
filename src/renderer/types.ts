@@ -132,10 +132,12 @@ export type AppState = {
   dynamicProportionalP: boolean;
   automationStopOnTolerance: boolean;
   automationBandTolerances: AutomationBandTolerances;
+  automationToleranceMaxAcceptableErrorWidthHz: number;
   automationRegressionLimit: number;
   latestAutomationToleranceStatus: string | null;
   automationRunning: boolean;
   automationStopRequested: boolean;
+  automationPassCount: number;
   apoSelectedMeasurementId: string | null;
   apoSelectedReferenceId: string | null;
   parametricApoMaxFilters: number;

@@ -1,7 +1,14 @@
 import { dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 
-import { applyEqualizerApoConfig, disablePeace, getEqualizerApoStatus, saveFileAtPath, saveMeasurementSession } from './files';
+import {
+  applyEqualizerApoConfig,
+  deleteMeasurementSession,
+  disablePeace,
+  getEqualizerApoStatus,
+  saveFileAtPath,
+  saveMeasurementSession,
+} from './files';
 import { runSoxMeasurement } from './sox';
 import { IPC_CHANNELS } from '../shared/ipc';
 import type {
@@ -28,6 +35,11 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.saveMeasurementSession,
     async (_event, payload: SaveMeasurementPayload) =>
       saveMeasurementSession(payload),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.deleteMeasurementSession,
+    async (_event, sessionDirectory: string) => deleteMeasurementSession(sessionDirectory),
   );
 
   ipcMain.handle(IPC_CHANNELS.saveFileAs, async (_event, payload: SaveFileAsPayload) => {

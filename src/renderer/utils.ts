@@ -1,5 +1,18 @@
 import type { MeasurementPoint } from './types';
 
+export type ToleranceBandRange = {
+  minimumFrequencyHz: number;
+  maximumFrequencyHz: number;
+  toleranceDb: number;
+};
+
+export type ToleranceFailureSegment = {
+  bandIndex: number;
+  points: MeasurementPoint[];
+  maximumErrorDb: number;
+  widthHz: number;
+};
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -107,4 +120,75 @@ export function findClosestPoint(
     Math.abs(current.frequencyHz - frequencyHz)
     ? previous
     : current;
+}
+
+export function getToleranceFailureSegments(
+  measurementPoints: MeasurementPoint[],
+  referencePoints: MeasurementPoint[],
+  bands: ToleranceBandRange[],
+): ToleranceFailureSegment[] {
+  if (measurementPoints.length === 0 || referencePoints.length === 0 || bands.length === 0) {
+    return [];
+  }
+
+  const segments: ToleranceFailureSegment[] = [];
+  let activeBandIndex = -1;
+  let activePoints: MeasurementPoint[] = [];
+  let activeMaximumErrorDb = 0;
+
+  const flushSegment = () => {
+    if (activePoints.length === 0 || activeBandIndex < 0) {
+      activePoints = [];
+      activeMaximumErrorDb = 0;
+      activeBandIndex = -1;
+      return;
+    }
+
+    segments.push({
+      bandIndex: activeBandIndex,
+      points: activePoints,
+      maximumErrorDb: activeMaximumErrorDb,
+      widthHz:
+        (activePoints[activePoints.length - 1]?.frequencyHz ?? 0) -
+        (activePoints[0]?.frequencyHz ?? 0),
+    });
+    activePoints = [];
+    activeMaximumErrorDb = 0;
+    activeBandIndex = -1;
+  };
+
+  for (const measurementPoint of measurementPoints) {
+    const bandIndex = bands.findIndex(
+      (band) =>
+        band.maximumFrequencyHz > band.minimumFrequencyHz &&
+        measurementPoint.frequencyHz >= band.minimumFrequencyHz &&
+        measurementPoint.frequencyHz <= band.maximumFrequencyHz,
+    );
+
+    if (bandIndex < 0) {
+      flushSegment();
+      continue;
+    }
+
+    const referencePoint = findClosestPoint(referencePoints, measurementPoint.frequencyHz);
+    const errorDb = Math.abs(
+      referencePoint.smoothedMagnitudeDbRelative - measurementPoint.smoothedMagnitudeDbRelative,
+    );
+
+    if (errorDb <= bands[bandIndex].toleranceDb) {
+      flushSegment();
+      continue;
+    }
+
+    if (activeBandIndex !== bandIndex) {
+      flushSegment();
+      activeBandIndex = bandIndex;
+    }
+
+    activePoints.push(measurementPoint);
+    activeMaximumErrorDb = Math.max(activeMaximumErrorDb, errorDb);
+  }
+
+  flushSegment();
+  return segments;
 }

@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
@@ -65,6 +65,10 @@ export async function saveMeasurementSession(
     sessionDirectory,
     filePaths,
   };
+}
+
+export async function deleteMeasurementSession(sessionDirectory: string): Promise<void> {
+  await rm(sessionDirectory, { recursive: true, force: true });
 }
 
 export async function saveFileAtPath(filePath: string, contents: Uint8Array): Promise<string> {
