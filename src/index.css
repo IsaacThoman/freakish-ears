@@ -692,6 +692,37 @@ input {
   flex: 0 0 auto;
 }
 
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.btn-icon:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-icon[aria-pressed="true"] {
+  color: #f8a145;
+}
+
+.star-icon {
+  width: 20px;
+  height: 20px;
+}
+
 .apo-card {
   display: flex;
   flex-direction: column;

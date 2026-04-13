@@ -498,8 +498,11 @@ function renderMeasurementList(
                       <span class="measurement-name">${escapeHtml(measurement.name)}</span>
                     </label>
                     <div class="measurement-actions">
-                      <button class="btn btn-secondary measurement-star-button" type="button" data-measurement-star="${measurement.id}" aria-pressed="${measurement.starred ? 'true' : 'false'}" ${busy ? 'disabled' : ''}>
-                        ${measurement.starred ? 'Unstar' : 'Star'}
+                      <button class="btn btn-icon measurement-star-button" type="button" data-measurement-star="${measurement.id}" aria-pressed="${measurement.starred ? 'true' : 'false'}" title="${measurement.starred ? 'Unstar' : 'Star'}" ${busy ? 'disabled' : ''}>
+                        ${measurement.starred
+                          ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="star-icon"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'
+                          : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="star-icon"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'
+                        }
                       </button>
                       <button class="btn btn-secondary measurement-export-button" type="button" data-measurement-export="${measurement.id}" ${busy || !outputFolder ? 'disabled' : ''}>
                         Export
