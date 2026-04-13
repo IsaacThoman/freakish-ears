@@ -87,6 +87,7 @@ export type MeasurementImport = {
 export type ApoFilterKind = 'PK';
 
 export type ApoEqMode = 'parametric' | 'graphic';
+export type AutomationAlgorithm = 'proportional';
 
 export type ApoFilter = {
   id: string;
@@ -113,6 +114,10 @@ export type AppState = {
   nextReferenceIndex: number;
   apoFilters: ApoFilter[];
   apoEqMode: ApoEqMode;
+  automationAlgorithm: AutomationAlgorithm;
+  proportionalP: number;
+  automationRunning: boolean;
+  automationStopRequested: boolean;
   apoSelectedMeasurementId: string | null;
   apoSelectedReferenceId: string | null;
   apoMaxFilters: number;

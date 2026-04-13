@@ -260,6 +260,27 @@ input {
   border-color: var(--accent);
 }
 
+.automation-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.automation-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.automation-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .status-bar {
   display: flex;
   align-items: center;

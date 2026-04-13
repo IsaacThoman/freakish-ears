@@ -10,13 +10,16 @@ import {
   APO_MAX_FILTERS_STORAGE_KEY,
   APO_SELECTED_MEASUREMENT_STORAGE_KEY,
   APO_SELECTED_REFERENCE_STORAGE_KEY,
+  AUTOMATION_ALGORITHM_STORAGE_KEY,
   DEFAULT_APO_EQ_MODE,
   DEFAULT_MEASUREMENT_BACKEND,
   DEFAULT_APO_MAX_BOOST_DB,
   DEFAULT_APO_MAX_CUT_DB,
   DEFAULT_APO_MAX_FILTERS,
+  DEFAULT_AUTOMATION_ALGORITHM,
   DEFAULT_DURATION_SECONDS,
   DEFAULT_END_FREQUENCY,
+  DEFAULT_PROPORTIONAL_P,
   DEFAULT_SAMPLE_RATE,
   DEFAULT_SMOOTHING_MODE,
   DEFAULT_SPL_OFFSET_DB,
@@ -34,6 +37,7 @@ import {
   OUTPUT_DEVICE_STORAGE_KEY,
   POST_ROLL_SECONDS,
   PRE_ROLL_SECONDS,
+  PROPORTIONAL_P_STORAGE_KEY,
   SAMPLE_RATE_OPTIONS,
   SAMPLE_RATE_STORAGE_KEY,
   SMOOTHING_MODE_OPTIONS,
@@ -66,6 +70,7 @@ import type {
   ApoEqMode,
   ApoFilter,
   AppState,
+  AutomationAlgorithm,
   LoadedMeasurement,
   LogTone,
   MeasurementBackend,
@@ -203,6 +208,31 @@ app.innerHTML = `
         <button id="runMeasurementButton" class="btn btn-primary" type="button">
           Run
         </button>
+
+        <button id="runAutomationButton" class="btn btn-secondary" type="button">
+          Run Until Stopped
+        </button>
+
+        <div class="automation-card">
+          <span class="section-title">Automation</span>
+
+          <div class="field">
+            <label for="automationAlgorithmSelect">Algorithm</label>
+            <select id="automationAlgorithmSelect">
+              <option value="proportional">Proportional</option>
+            </select>
+          </div>
+
+          <div id="proportionalAutomationFields" class="automation-fields">
+            <div class="field">
+              <label for="proportionalPInput">P Value</label>
+              <div class="number-input-row">
+                <input id="proportionalPInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PROPORTIONAL_P.toFixed(2)}" />
+              </div>
+            </div>
+            <span class="automation-hint">Each pass measures the current response, adds (target - measured) * P to the current APO correction, then applies the updated APO config.</span>
+          </div>
+        </div>
       </section>
 
       <section class="panel section">
@@ -323,7 +353,7 @@ app.innerHTML = `
 
 
 
-          <span class="apo-hint">Generate a basic peaking-EQ set from the difference between the selected measurement and target curve, then fine-tune the filters below.</span>
+          <span class="apo-hint">Generate filters from the selected measurement and target curve, then fine-tune them below or iterate automatically from the left panel.</span>
           <span id="apoApplyStatus" class="apo-hint"></span>
 
           <div class="apo-filter-header">
@@ -369,6 +399,10 @@ const volumeInput = getElement<HTMLInputElement>('volumeInput');
 const volumeNumberInput = getElement<HTMLInputElement>('volumeNumberInput');
 const splOffsetInput = getElement<HTMLInputElement>('splOffsetInput');
 const runMeasurementButton = getElement<HTMLButtonElement>('runMeasurementButton');
+const runAutomationButton = getElement<HTMLButtonElement>('runAutomationButton');
+const automationAlgorithmSelect = getElement<HTMLSelectElement>('automationAlgorithmSelect');
+const proportionalAutomationFields = getElement<HTMLDivElement>('proportionalAutomationFields');
+const proportionalPInput = getElement<HTMLInputElement>('proportionalPInput');
 const statusPill = getElement<HTMLDivElement>('statusPill');
 const latencyValue = getElement<HTMLSpanElement>('latencyValue');
 const peakValue = getElement<HTMLSpanElement>('peakValue');
@@ -424,6 +458,14 @@ const state: AppState = {
   nextReferenceIndex: 1,
   apoFilters: readStoredApoFilters(),
   apoEqMode: readStoredApoEqMode(),
+  automationAlgorithm: readStoredAutomationAlgorithm(),
+  proportionalP: clamp(
+    readStoredNumber(PROPORTIONAL_P_STORAGE_KEY, DEFAULT_PROPORTIONAL_P),
+    0,
+    1,
+  ),
+  automationRunning: false,
+  automationStopRequested: false,
   apoSelectedMeasurementId: localStorage.getItem(APO_SELECTED_MEASUREMENT_STORAGE_KEY),
   apoSelectedReferenceId: localStorage.getItem(APO_SELECTED_REFERENCE_STORAGE_KEY),
   apoMaxFilters: clamp(
@@ -527,6 +569,10 @@ configFileInput.addEventListener('change', () => {
 
 runMeasurementButton.addEventListener('click', () => {
   void runMeasurement();
+});
+
+runAutomationButton.addEventListener('click', () => {
+  void toggleAutomationLoop();
 });
 
 measurementsPlotCard.addEventListener('change', (event) => {
@@ -664,6 +710,21 @@ volumeInput.addEventListener('input', () => {
     localStorage.setItem(SWEEP_LEVEL_STORAGE_KEY, String(value));
     persistActiveConfiguration();
   }
+});
+
+automationAlgorithmSelect.addEventListener('change', () => {
+  state.automationAlgorithm = getSelectedAutomationAlgorithm();
+  persistAutomationSettings();
+  persistActiveConfiguration();
+  updateAutomationUi();
+});
+
+proportionalPInput.addEventListener('input', () => {
+  syncAutomationSettings(false);
+});
+
+proportionalPInput.addEventListener('blur', () => {
+  syncAutomationSettings(true);
 });
 
 generateApoFiltersButton.addEventListener('click', () => {
@@ -820,9 +881,12 @@ smoothingModeSelect.value = state.smoothingMode;
 apoMaxFiltersInput.value = String(state.apoMaxFilters);
 apoMaxBoostInput.value = String(state.apoMaxBoostDb);
 apoMaxCutInput.value = String(state.apoMaxCutDb);
+automationAlgorithmSelect.value = state.automationAlgorithm;
+proportionalPInput.value = state.proportionalP.toFixed(2);
 initializeMeasurementConfigFromStorage();
 hideToast();
 updateMeasurementActionState();
+updateAutomationUi();
 renderApoSection();
 appendLog('Click Refresh to access microphones and outputs.');
 void refreshEqualizerApoStatus();
@@ -855,11 +919,14 @@ function setBusy(isBusy: boolean): void {
   durationInput.disabled = isBusy;
   volumeInput.disabled = isBusy;
   volumeNumberInput.disabled = isBusy;
-  runMeasurementButton.disabled = isBusy;
+  runMeasurementButton.disabled = isBusy || state.automationRunning;
+  runAutomationButton.disabled = isBusy && !state.automationRunning;
   measurementFileInput.disabled = isBusy;
   referenceFileInput.disabled = isBusy;
   configFileInput.disabled = isBusy;
   measurementBackendSelect.disabled = isBusy;
+  automationAlgorithmSelect.disabled = isBusy;
+  proportionalPInput.disabled = isBusy;
   smoothingModeSelect.disabled = isBusy;
   generateApoFiltersButton.disabled = isBusy;
   addApoFilterButton.disabled = isBusy;
@@ -908,6 +975,13 @@ function updateMeasurementActionState(): void {
   importReferenceButton.disabled = state.busy;
   saveConfigButton.disabled = state.busy;
   importConfigButton.disabled = state.busy;
+  runMeasurementButton.disabled = state.busy || state.automationRunning;
+  runAutomationButton.disabled = state.busy && !state.automationRunning;
+  runAutomationButton.textContent = state.automationStopRequested
+    ? 'Stopping...'
+    : state.automationRunning
+      ? 'Stop'
+      : 'Run Until Stopped';
   generateApoFiltersButton.disabled =
     state.busy || !state.apoSelectedMeasurementId || !state.apoSelectedReferenceId;
   addApoFilterButton.disabled = state.busy || state.apoEqMode === 'graphic';
@@ -923,6 +997,14 @@ function updateMeasurementBackendUi(): void {
   microphoneSelect.disabled = state.busy || usesSox;
   refreshDevicesButton.disabled = state.busy || usesSox;
   outputSelect.disabled = state.busy || usesSox;
+}
+
+function updateAutomationUi(): void {
+  const isProportional = state.automationAlgorithm === 'proportional';
+  automationAlgorithmSelect.value = state.automationAlgorithm;
+  proportionalAutomationFields.hidden = !isProportional;
+  proportionalPInput.value = state.proportionalP.toFixed(2);
+  updateMeasurementActionState();
 }
 
 function showToast(toast: ToastState): void {
@@ -1230,9 +1312,9 @@ async function refreshMicrophones(requestPermission: boolean): Promise<void> {
   }
 }
 
-async function runMeasurement(): Promise<void> {
+async function runMeasurement(): Promise<LoadedMeasurement | null> {
   if (state.busy) {
-    return;
+    return null;
   }
 
   const outputFolder = state.outputFolder;
@@ -1250,13 +1332,13 @@ async function runMeasurement(): Promise<void> {
   if (!outputFolder) {
     setStatus('Choose a save folder before measuring.', 'error');
     appendLog('Measurement aborted because no save folder is selected.', 'error');
-    return;
+    return null;
   }
 
   if (measurementBackend === 'web-audio' && !deviceId) {
     setStatus('Select a microphone before measuring.', 'error');
     appendLog('Measurement aborted because no microphone is selected.', 'error');
-    return;
+    return null;
   }
 
   if (
@@ -1276,7 +1358,7 @@ async function runMeasurement(): Promise<void> {
   ) {
     setStatus('Sweep settings are invalid.', 'error');
     appendLog('Sweep settings must be numeric, ordered, and within range.', 'error');
-    return;
+    return null;
   }
 
   try {
@@ -1384,15 +1466,16 @@ async function runMeasurement(): Promise<void> {
       ],
     });
 
-    addMeasurement(
-      takeMeasurementFromAnalysis(analysis, saveResult.sessionDirectory),
-    );
+    const measurement = takeMeasurementFromAnalysis(analysis, saveResult.sessionDirectory);
+    addMeasurement(measurement);
     setStatus('Measurement complete.', 'success');
     appendLog(`Measurement saved to ${saveResult.sessionDirectory}.`, 'success');
+    return measurement;
   } catch (error) {
     const message = getErrorMessage(error);
     setStatus(`Measurement failed: ${message}`, 'error');
     appendLog(`Measurement failed: ${message}`, 'error');
+    return null;
   } finally {
     setBusy(false);
   }
@@ -1739,6 +1822,8 @@ function persistActiveConfiguration(): void {
     smoothingMode: getSelectedSmoothingMode(),
     normalizePlot: normalizePlotToggle.checked,
     apoEqMode: state.apoEqMode,
+    automationAlgorithm: state.automationAlgorithm,
+    proportionalP: state.proportionalP,
     apoSelectedMeasurementId: state.apoSelectedMeasurementId,
     apoSelectedReferenceId: state.apoSelectedReferenceId,
     apoMaxFilters: state.apoMaxFilters,
@@ -1857,6 +1942,8 @@ async function saveConfiguration(): Promise<void> {
       smoothingMode: getSelectedSmoothingMode(),
       normalizePlot: normalizePlotToggle.checked,
       apoEqMode: state.apoEqMode,
+      automationAlgorithm: state.automationAlgorithm,
+      proportionalP: state.proportionalP,
       apoSelectedMeasurementId: state.apoSelectedMeasurementId,
       apoSelectedReferenceId: state.apoSelectedReferenceId,
       apoMaxFilters: state.apoMaxFilters,
@@ -1969,6 +2056,15 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(state.normalizePlot));
 
   state.apoEqMode = isApoEqMode(config.apoEqMode) ? config.apoEqMode : DEFAULT_APO_EQ_MODE;
+  state.automationAlgorithm = isAutomationAlgorithm(config.automationAlgorithm)
+    ? config.automationAlgorithm
+    : DEFAULT_AUTOMATION_ALGORITHM;
+  const importedProportionalP = Number(config.proportionalP);
+  state.proportionalP = clamp(
+    Number.isFinite(importedProportionalP) ? importedProportionalP : DEFAULT_PROPORTIONAL_P,
+    0,
+    1,
+  );
   state.apoFilters = normalizeApoFilters(config.apoFilters);
   state.apoSelectedMeasurementId = toOptionalString(config.apoSelectedMeasurementId);
   state.apoSelectedReferenceId = toOptionalString(config.apoSelectedReferenceId);
@@ -2002,6 +2098,8 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   apoMaxFiltersInput.value = String(state.apoMaxFilters);
   apoMaxBoostInput.value = String(state.apoMaxBoostDb);
   apoMaxCutInput.value = String(state.apoMaxCutDb);
+  persistAutomationSettings();
+  updateAutomationUi();
 
   syncVolumeControls('slider');
   syncSplOffsetControl(true);
@@ -2025,6 +2123,12 @@ function selectOptionIfPresent(select: HTMLSelectElement, value: string): void {
 function getSelectedSampleRate(): number {
   const sampleRate = Number(sampleRateSelect.value);
   return Number.isFinite(sampleRate) ? sampleRate : DEFAULT_SAMPLE_RATE;
+}
+
+function getSelectedAutomationAlgorithm(): AutomationAlgorithm {
+  return automationAlgorithmSelect.value === 'proportional'
+    ? automationAlgorithmSelect.value
+    : DEFAULT_AUTOMATION_ALGORITHM;
 }
 
 function getSelectedChannel(
@@ -2073,6 +2177,11 @@ function readStoredApoEqMode(): ApoEqMode {
   return isApoEqMode(stored) ? stored : DEFAULT_APO_EQ_MODE;
 }
 
+function readStoredAutomationAlgorithm(): AutomationAlgorithm {
+  const stored = localStorage.getItem(AUTOMATION_ALGORITHM_STORAGE_KEY);
+  return isAutomationAlgorithm(stored) ? stored : DEFAULT_AUTOMATION_ALGORITHM;
+}
+
 function normalizeApoFilters(value: unknown): ApoFilter[] {
   if (!Array.isArray(value)) {
     return [];
@@ -2112,6 +2221,10 @@ function isApoEqMode(value: unknown): value is ApoEqMode {
   return value === 'parametric' || value === 'graphic';
 }
 
+function isAutomationAlgorithm(value: unknown): value is AutomationAlgorithm {
+  return value === 'proportional';
+}
+
 function toOptionalString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -2137,6 +2250,11 @@ function persistApoState(): void {
   localStorage.setItem(APO_MAX_BOOST_STORAGE_KEY, String(state.apoMaxBoostDb));
   localStorage.setItem(APO_MAX_CUT_STORAGE_KEY, String(state.apoMaxCutDb));
   persistApoSelections();
+}
+
+function persistAutomationSettings(): void {
+  localStorage.setItem(AUTOMATION_ALGORITHM_STORAGE_KEY, state.automationAlgorithm);
+  localStorage.setItem(PROPORTIONAL_P_STORAGE_KEY, String(state.proportionalP));
 }
 
 function handleApoFilterDrag(
@@ -2208,6 +2326,21 @@ function syncApoGenerationSettings(normalize: boolean): void {
   if (state.apoEqMode === 'graphic') {
     renderApoSection();
   }
+}
+
+function syncAutomationSettings(normalize: boolean): void {
+  const parsedProportionalP = Number(proportionalPInput.value);
+
+  if (Number.isFinite(parsedProportionalP)) {
+    state.proportionalP = clamp(parsedProportionalP, 0, 1);
+  }
+
+  if (normalize) {
+    proportionalPInput.value = state.proportionalP.toFixed(2);
+  }
+
+  persistAutomationSettings();
+  persistActiveConfiguration();
 }
 
 function renderApoSection(): void {
@@ -2430,38 +2563,120 @@ function updateApoFilter(filterId: string, field: string, value: string | boolea
   renderApoSection();
 }
 
-async function generateApoFilters(): Promise<void> {
-  const measurement = getSelectedApoMeasurement();
+async function generateApoFilters(measurementOverride: LoadedMeasurement | null = null): Promise<boolean> {
+  const measurement = measurementOverride ?? getSelectedApoMeasurement();
   const referenceCurve = getSelectedApoReference();
 
   if (!measurement || !referenceCurve) {
     setStatus('Load a measurement and target before generating APO filters.', 'error');
     appendLog('APO generation aborted because a measurement or target curve is missing.', 'error');
-    return;
+    return false;
   }
 
   try {
     setBusy(true);
-    setStatus('Generating Equalizer APO filters...', 'working');
+    setStatus(`Generating Equalizer APO filters with ${formatAutomationAlgorithmLabel(state.automationAlgorithm)}...`, 'working');
 
-    const generatedFilters = buildApoFiltersFromCurves(measurement, referenceCurve);
+    const generatedFilters = buildFiltersForSelectedAlgorithm(measurement, referenceCurve);
     state.apoFilters = generatedFilters;
     state.nextApoFilterIndex = generatedFilters.length + 1;
     persistApoState();
+    persistActiveConfiguration();
     renderApoSection();
 
     setStatus(`Generated ${generatedFilters.length} APO filter${generatedFilters.length === 1 ? '' : 's'}.`, 'success');
     appendLog(
-      `Generated ${generatedFilters.length} ${state.apoEqMode === 'graphic' ? 'graphic EQ band' : 'APO filter'}${generatedFilters.length === 1 ? '' : 's'} from ${measurement.name} to ${referenceCurve.name}.`,
+      `Generated ${generatedFilters.length} ${state.apoEqMode === 'graphic' ? 'graphic EQ band' : 'APO filter'}${generatedFilters.length === 1 ? '' : 's'} from ${measurement.name} to ${referenceCurve.name} with the ${formatAutomationAlgorithmLabel(state.automationAlgorithm)} algorithm.`,
       'success',
     );
+    return true;
   } catch (error) {
     const message = getErrorMessage(error);
     setStatus(`APO generation failed: ${message}`, 'error');
     appendLog(`APO generation failed: ${message}`, 'error');
+    return false;
   } finally {
     setBusy(false);
   }
+}
+
+function buildFiltersForSelectedAlgorithm(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve,
+): ApoFilter[] {
+  if (state.automationAlgorithm === 'proportional') {
+    return buildProportionalApoFilters(measurement, referenceCurve);
+  }
+
+  return buildApoFiltersFromCurves(measurement, referenceCurve);
+}
+
+function buildProportionalApoFilters(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve,
+): ApoFilter[] {
+  if (state.apoEqMode === 'graphic') {
+    return buildProportionalGraphicEqFilters(measurement, referenceCurve);
+  }
+
+  if (state.apoFilters.length === 0) {
+    return buildApoFiltersFromCurves(measurement, referenceCurve).map((filter) => ({
+      ...filter,
+      gainDb: roundTo(
+        clamp(filter.gainDb * state.proportionalP, -state.apoMaxCutDb, state.apoMaxBoostDb),
+        0.1,
+      ),
+    }));
+  }
+
+  const measurementPoints = getDisplayedMeasurementPoints(measurement, referenceCurve);
+  const referencePoints = getDisplayedReferencePoints(referenceCurve);
+
+  return state.apoFilters.map((filter) => {
+    const measurementPoint = findClosestPoint(measurementPoints, filter.frequencyHz);
+    const referencePoint = findClosestPoint(referencePoints, filter.frequencyHz);
+    const adjustmentDb =
+      (referencePoint.smoothedMagnitudeDbRelative - measurementPoint.smoothedMagnitudeDbRelative)
+      * state.proportionalP;
+
+    return {
+      ...filter,
+      gainDb: roundTo(
+        clamp(filter.gainDb + adjustmentDb, -state.apoMaxCutDb, state.apoMaxBoostDb),
+        0.1,
+      ),
+    };
+  });
+}
+
+function buildProportionalGraphicEqFilters(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve,
+): ApoFilter[] {
+  const measurementPoints = getDisplayedMeasurementPoints(measurement, referenceCurve);
+  const referencePoints = getDisplayedReferencePoints(referenceCurve);
+  const filterCount = clamp(state.apoMaxFilters, 1, 250);
+  const baseFilters = buildGraphicEqFilters(filterCount, state.apoFilters);
+
+  return baseFilters.map((filter) => {
+    const measurementPoint = findClosestPoint(measurementPoints, filter.frequencyHz);
+    const referencePoint = findClosestPoint(referencePoints, filter.frequencyHz);
+    const adjustmentDb =
+      (referencePoint.smoothedMagnitudeDbRelative - measurementPoint.smoothedMagnitudeDbRelative)
+      * state.proportionalP;
+
+    return {
+      ...filter,
+      gainDb: roundTo(
+        clamp(filter.gainDb + adjustmentDb, -state.apoMaxCutDb, state.apoMaxBoostDb),
+        0.1,
+      ),
+    };
+  });
+}
+
+function formatAutomationAlgorithmLabel(algorithm: AutomationAlgorithm): string {
+  return algorithm === 'proportional' ? 'proportional' : algorithm;
 }
 
 function buildApoFiltersFromCurves(
@@ -2836,17 +3051,17 @@ async function refreshEqualizerApoStatus(): Promise<void> {
   renderApoSection();
 }
 
-async function applyApoConfig(): Promise<void> {
+async function applyApoConfig(): Promise<boolean> {
   const status = state.equalizerApoStatus;
 
   if (state.busy) {
-    return;
+    return false;
   }
 
   if (!status?.installed) {
     setStatus('Equalizer APO was not detected in the default install path.', 'error');
     appendLog('Apply APO aborted because Equalizer APO is not installed in the default path.', 'error');
-    return;
+    return false;
   }
 
   try {
@@ -2865,13 +3080,67 @@ async function applyApoConfig(): Promise<void> {
       actionLabel: 'View in Finder',
       actionPath: result.profilePath,
     });
+    return true;
   } catch (error) {
     const message = getErrorMessage(error);
     await refreshEqualizerApoStatus();
     setStatus(`Apply APO failed: ${message}`, 'error');
     appendLog(`Apply APO failed: ${message}`, 'error');
+    return false;
   } finally {
     setBusy(false);
+  }
+}
+
+async function toggleAutomationLoop(): Promise<void> {
+  if (state.automationRunning) {
+    state.automationStopRequested = true;
+    updateAutomationUi();
+    setStatus('Stopping automation after the current step...', 'working');
+    appendLog('Automation stop requested. Waiting for the current step to finish.');
+    return;
+  }
+
+  if (state.busy) {
+    return;
+  }
+
+  state.automationRunning = true;
+  state.automationStopRequested = false;
+  updateAutomationUi();
+  appendLog(`Started ${formatAutomationAlgorithmLabel(state.automationAlgorithm)} automation.`, 'success');
+
+  try {
+    while (state.automationRunning) {
+      const measurement = await runMeasurement();
+      if (!measurement || state.automationStopRequested) {
+        break;
+      }
+
+      state.apoSelectedMeasurementId = measurement.id;
+      persistApoSelections();
+      renderApoSection();
+
+      const generated = await generateApoFilters(measurement);
+      if (!generated || state.automationStopRequested) {
+        break;
+      }
+
+      const applied = await applyApoConfig();
+      if (!applied || state.automationStopRequested) {
+        break;
+      }
+    }
+  } finally {
+    const stopRequested = state.automationStopRequested;
+    state.automationRunning = false;
+    state.automationStopRequested = false;
+    updateAutomationUi();
+
+    if (stopRequested) {
+      setStatus('Automation stopped.', 'idle');
+      appendLog('Automation stopped.');
+    }
   }
 }
 
