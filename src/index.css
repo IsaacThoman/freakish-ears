@@ -281,6 +281,10 @@ input {
   font-size: 11px;
 }
 
+.automation-run-button {
+  align-self: stretch;
+}
+
 .automation-tolerance-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -911,9 +915,10 @@ input {
 
 .apo-card.is-graphic .apo-filter-header,
 .apo-card.is-graphic .apo-filter-row {
-  grid-template-columns: auto 70px minmax(90px, 1fr) minmax(90px, 1fr) auto;
+  grid-template-columns: auto minmax(90px, 1fr) minmax(90px, 1fr) auto;
 }
 
+.apo-card.is-graphic .apo-filter-header-type,
 .apo-card.is-graphic .apo-filter-header-q,
 .apo-card.is-graphic .apo-filter-q {
   display: none;

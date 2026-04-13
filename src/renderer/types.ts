@@ -85,7 +85,7 @@ export type MeasurementImport = {
   summary: MeasurementSummary;
 };
 
-export type ApoFilterKind = 'PK';
+export type ApoFilterKind = 'PK' | 'LS' | 'HS' | 'LP' | 'HP' | 'NO' | 'BP' | 'AP';
 
 export type ApoEqMode = 'parametric' | 'graphic';
 export type AutomationAlgorithm = 'proportional';

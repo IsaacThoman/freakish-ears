@@ -6,6 +6,7 @@ import { getMeasurementPointsForDisplay } from './measurements';
 import type {
   ApoEqMode,
   ApoFilter,
+  ApoFilterKind,
   LoadedMeasurement,
   MeasurementPoint,
   MeasurementSmoothingMode,
@@ -23,6 +24,31 @@ import {
 
 const EQ_GRAPH_FREQUENCIES = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
 const COMPACT_GRAPH_FREQUENCIES = [20, 100, 1000, 10000, 20000];
+
+function apoFilterKindUsesGain(kind: ApoFilterKind): boolean {
+  return kind === 'PK' || kind === 'LS' || kind === 'HS';
+}
+
+function formatApoFilterKindLabel(kind: ApoFilterKind): string {
+  switch (kind) {
+    case 'PK':
+      return 'Peak';
+    case 'LS':
+      return 'Low Shelf';
+    case 'HS':
+      return 'High Shelf';
+    case 'LP':
+      return 'Low Pass';
+    case 'HP':
+      return 'High Pass';
+    case 'NO':
+      return 'Notch';
+    case 'BP':
+      return 'Band Pass';
+    case 'AP':
+      return 'All Pass';
+  }
+}
 
 type PlotLabelSizing = {
   axisTextSize: number;
@@ -345,23 +371,30 @@ export type ApoPlotDragHandler = (
 export function renderApoEqPlot(input: {
   filters: ApoFilter[];
   eqMode: ApoEqMode;
+  sampleRate: number;
   measurementName: string | null;
   targetName: string | null;
   compact: boolean;
   containerWidth: number;
 }): string {
   const enabledFilters = input.filters.filter((filter) => filter.enabled);
-  const sampledPoints = buildApoPreviewSampledPoints(enabledFilters, input.eqMode);
+  const sampledPoints = buildApoPreviewSampledPoints(enabledFilters, input.eqMode, input.sampleRate);
   const individualPointSets = input.eqMode === 'graphic'
     ? []
     : enabledFilters.map((filter) => ({
         filter,
         points: sampledPoints.map((point) => ({
           frequencyHz: point.frequencyHz,
-          totalDb: getApoFilterResponseDb(filter, point.frequencyHz),
+          totalDb: getApoFilterResponseDb(filter, point.frequencyHz, input.sampleRate),
         })),
       }));
-  const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets, input.containerWidth);
+  const geometry = getApoEqPlotGeometry(
+    enabledFilters,
+    sampledPoints,
+    individualPointSets,
+    input.containerWidth,
+    input.sampleRate,
+  );
   const labelSizing = getPlotLabelSizing(input.compact);
   const yTicks = Array.from({ length: labelSizing.yTickCount }, (_unused, index) => {
     const ratio = index / (labelSizing.yTickCount - 1);
@@ -395,15 +428,23 @@ export function renderApoEqPlot(input: {
             .map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`)
             .join(' ');
 
-          return `<polyline points="${path}" fill="none" stroke="rgba(125,125,125,0.65)" stroke-width="1.5" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"><title>${escapeHtml(`${input.eqMode === 'graphic' ? 'GEQ' : 'PK'} ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}`)}</title></polyline>`;
+          const filterSummary = apoFilterKindUsesGain(filter.kind)
+            ? `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}`
+            : `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz Q ${filter.q.toFixed(2)}`;
+
+          return `<polyline points="${path}" fill="none" stroke="rgba(125,125,125,0.65)" stroke-width="1.5" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"><title>${escapeHtml(input.eqMode === 'graphic' ? `GEQ ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}` : filterSummary)}</title></polyline>`;
         })
         .join('')}
       <polyline points="${combinedPath}" fill="none" stroke="#f8a145" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
       ${enabledFilters
         .map((filter) => {
           const x = getPlotX(filter.frequencyHz, geometry);
-          const y = getPlotY(filter.gainDb, geometry);
-          return `<circle class="apo-filter-node" data-apo-filter-id="${escapeHtml(filter.id)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="#f8a145" stroke="#4d2b0b" stroke-width="2" cursor="grab" vector-effect="non-scaling-stroke"><title>${escapeHtml(`${filter.frequencyHz.toFixed(0)} Hz, ${filter.gainDb.toFixed(1)} dB`)}</title></circle>`;
+          const nodeGainDb = getApoFilterNodeGainDb(filter, input.sampleRate);
+          const y = getPlotY(nodeGainDb, geometry);
+          const nodeSummary = apoFilterKindUsesGain(filter.kind)
+            ? `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz, ${filter.gainDb.toFixed(1)} dB`
+            : `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz`;
+          return `<circle class="apo-filter-node" data-apo-filter-id="${escapeHtml(filter.id)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="#f8a145" stroke="#4d2b0b" stroke-width="2" cursor="grab" vector-effect="non-scaling-stroke"><title>${escapeHtml(nodeSummary)}</title></circle>`;
         })
         .join('')}
       ${yTicks
@@ -448,11 +489,12 @@ function getApoEqPlotGeometry(
     points: Array<{ frequencyHz: number; totalDb: number }>;
   }>,
   containerWidth: number,
+  sampleRate: number,
 ): ResponsePlotGeometry {
   const allValues = [
     ...sampledPoints.map((point) => point.totalDb),
     ...individualPointSets.flatMap((entry) => entry.points.map((point) => point.totalDb)),
-    ...enabledFilters.map((filter) => filter.gainDb),
+    ...enabledFilters.map((filter) => getApoFilterNodeGainDb(filter, sampleRate)),
     0,
   ];
   const minDb = Math.min(-12, Math.floor((Math.min(...allValues) - 1) / 3) * 3);
@@ -482,15 +524,116 @@ function getApoEqPlotGeometry(
   };
 }
 
-function getApoFilterResponseDb(filter: ApoFilter, frequencyHz: number): number {
-  const distanceOctaves = Math.log2(frequencyHz / filter.frequencyHz);
-  const sigma = 0.6 / Math.sqrt(filter.q);
-  return filter.gainDb * Math.exp(-(distanceOctaves * distanceOctaves) / (2 * sigma * sigma));
+function getApoFilterResponseDb(filter: ApoFilter, frequencyHz: number, sampleRate: number): number {
+  if (filter.kind === 'PK') {
+    const distanceOctaves = Math.log2(frequencyHz / filter.frequencyHz);
+    const sigma = 0.6 / Math.sqrt(filter.q);
+    return filter.gainDb * Math.exp(-(distanceOctaves * distanceOctaves) / (2 * sigma * sigma));
+  }
+
+  const normalizedFrequencyHz = clamp(filter.frequencyHz, 20, sampleRate / 2 - 1);
+  const normalizedQ = clamp(filter.q, 0.1, 10);
+  const omega0 = (2 * Math.PI * normalizedFrequencyHz) / sampleRate;
+  const cosOmega0 = Math.cos(omega0);
+  const sinOmega0 = Math.sin(omega0);
+  const alpha = sinOmega0 / (2 * normalizedQ);
+  const gainAmplitude = Math.pow(10, filter.gainDb / 40);
+  let b0 = 1;
+  let b1 = 0;
+  let b2 = 0;
+  let a0 = 1;
+  let a1 = 0;
+  let a2 = 0;
+
+  switch (filter.kind) {
+    case 'LS': {
+      const sqrtA = Math.sqrt(gainAmplitude);
+      const twoSqrtAAlpha = 2 * sqrtA * alpha;
+      b0 = gainAmplitude * ((gainAmplitude + 1) - (gainAmplitude - 1) * cosOmega0 + twoSqrtAAlpha);
+      b1 = 2 * gainAmplitude * ((gainAmplitude - 1) - (gainAmplitude + 1) * cosOmega0);
+      b2 = gainAmplitude * ((gainAmplitude + 1) - (gainAmplitude - 1) * cosOmega0 - twoSqrtAAlpha);
+      a0 = (gainAmplitude + 1) + (gainAmplitude - 1) * cosOmega0 + twoSqrtAAlpha;
+      a1 = -2 * ((gainAmplitude - 1) + (gainAmplitude + 1) * cosOmega0);
+      a2 = (gainAmplitude + 1) + (gainAmplitude - 1) * cosOmega0 - twoSqrtAAlpha;
+      break;
+    }
+    case 'HS': {
+      const sqrtA = Math.sqrt(gainAmplitude);
+      const twoSqrtAAlpha = 2 * sqrtA * alpha;
+      b0 = gainAmplitude * ((gainAmplitude + 1) + (gainAmplitude - 1) * cosOmega0 + twoSqrtAAlpha);
+      b1 = -2 * gainAmplitude * ((gainAmplitude - 1) + (gainAmplitude + 1) * cosOmega0);
+      b2 = gainAmplitude * ((gainAmplitude + 1) + (gainAmplitude - 1) * cosOmega0 - twoSqrtAAlpha);
+      a0 = (gainAmplitude + 1) - (gainAmplitude - 1) * cosOmega0 + twoSqrtAAlpha;
+      a1 = 2 * ((gainAmplitude - 1) - (gainAmplitude + 1) * cosOmega0);
+      a2 = (gainAmplitude + 1) - (gainAmplitude - 1) * cosOmega0 - twoSqrtAAlpha;
+      break;
+    }
+    case 'LP':
+      b0 = (1 - cosOmega0) / 2;
+      b1 = 1 - cosOmega0;
+      b2 = (1 - cosOmega0) / 2;
+      a0 = 1 + alpha;
+      a1 = -2 * cosOmega0;
+      a2 = 1 - alpha;
+      break;
+    case 'HP':
+      b0 = (1 + cosOmega0) / 2;
+      b1 = -(1 + cosOmega0);
+      b2 = (1 + cosOmega0) / 2;
+      a0 = 1 + alpha;
+      a1 = -2 * cosOmega0;
+      a2 = 1 - alpha;
+      break;
+    case 'NO':
+      b0 = 1;
+      b1 = -2 * cosOmega0;
+      b2 = 1;
+      a0 = 1 + alpha;
+      a1 = -2 * cosOmega0;
+      a2 = 1 - alpha;
+      break;
+    case 'BP':
+      b0 = alpha;
+      b1 = 0;
+      b2 = -alpha;
+      a0 = 1 + alpha;
+      a1 = -2 * cosOmega0;
+      a2 = 1 - alpha;
+      break;
+    case 'AP':
+      b0 = 1 - alpha;
+      b1 = -2 * cosOmega0;
+      b2 = 1 + alpha;
+      a0 = 1 + alpha;
+      a1 = -2 * cosOmega0;
+      a2 = 1 - alpha;
+      break;
+  }
+
+  const omega = (2 * Math.PI * clamp(frequencyHz, 20, sampleRate / 2 - 1)) / sampleRate;
+  const numeratorReal = b0 + b1 * Math.cos(omega) + b2 * Math.cos(2 * omega);
+  const numeratorImag = -b1 * Math.sin(omega) - b2 * Math.sin(2 * omega);
+  const denominatorReal = a0 + a1 * Math.cos(omega) + a2 * Math.cos(2 * omega);
+  const denominatorImag = -a1 * Math.sin(omega) - a2 * Math.sin(2 * omega);
+  const numeratorMagnitude = Math.hypot(numeratorReal, numeratorImag);
+  const denominatorMagnitude = Math.hypot(denominatorReal, denominatorImag);
+  const magnitude = denominatorMagnitude === 0 ? 1 : numeratorMagnitude / denominatorMagnitude;
+
+  return 20 * Math.log10(Math.max(magnitude, 1e-6));
+}
+
+function getApoFilterNodeGainDb(filter: ApoFilter, sampleRate: number): number {
+  if (apoFilterKindUsesGain(filter.kind)) {
+    return filter.gainDb;
+  }
+
+  return getApoFilterResponseDb(filter, filter.frequencyHz, sampleRate);
 }
 
 function buildApoPreviewSampledPoints(
   enabledFilters: ApoFilter[],
   eqMode: ApoEqMode,
+  sampleRate: number,
 ): Array<{ frequencyHz: number; totalDb: number }> {
   return Array.from({ length: 256 }, (_unused, index) => {
     const ratio = index / 255;
@@ -503,7 +646,7 @@ function buildApoPreviewSampledPoints(
       totalDb: eqMode === 'graphic'
         ? getGraphicEqResponseDb(enabledFilters, frequencyHz)
         : enabledFilters.reduce(
-            (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz),
+            (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz, sampleRate),
             0,
           ),
     };
@@ -778,6 +921,7 @@ export function attachApoPlotInteractions(input: {
   plotCard: HTMLElement;
   filters: ApoFilter[];
   eqMode: ApoEqMode;
+  sampleRate: number;
   lockFrequency: boolean;
   onFilterDrag: ApoPlotDragHandler;
   onDragEnd: () => void;
@@ -787,6 +931,7 @@ export function attachApoPlotInteractions(input: {
     __apoPlotController?: {
       filters: ApoFilter[];
       eqMode: ApoEqMode;
+      sampleRate: number;
       lockFrequency: boolean;
       onFilterDrag: ApoPlotDragHandler;
       onDragEnd: () => void;
@@ -798,6 +943,7 @@ export function attachApoPlotInteractions(input: {
   if (plotCardWithController.__apoPlotController) {
     plotCardWithController.__apoPlotController.filters = input.filters;
     plotCardWithController.__apoPlotController.eqMode = input.eqMode;
+    plotCardWithController.__apoPlotController.sampleRate = input.sampleRate;
     plotCardWithController.__apoPlotController.lockFrequency = input.lockFrequency;
     plotCardWithController.__apoPlotController.onFilterDrag = input.onFilterDrag;
     plotCardWithController.__apoPlotController.onDragEnd = input.onDragEnd;
@@ -816,9 +962,11 @@ export function attachApoPlotInteractions(input: {
     if (!width || !height) return null;
 
     const enabledFilters = filters.filter((filter) => filter.enabled);
+    const sampleRate = plotCardWithController.__apoPlotController?.sampleRate ?? 48000;
     const sampledPoints = buildApoPreviewSampledPoints(
       enabledFilters,
       plotCardWithController.__apoPlotController?.eqMode ?? 'parametric',
+      sampleRate,
     );
     const individualPointSets = (plotCardWithController.__apoPlotController?.eqMode ?? 'parametric') === 'graphic'
       ? []
@@ -826,11 +974,11 @@ export function attachApoPlotInteractions(input: {
           filter,
           points: sampledPoints.map((point) => ({
             frequencyHz: point.frequencyHz,
-            totalDb: getApoFilterResponseDb(filter, point.frequencyHz),
+            totalDb: getApoFilterResponseDb(filter, point.frequencyHz, sampleRate),
           })),
         }));
 
-    const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets, width);
+    const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets, width, sampleRate);
     return { ...geometry, width, height };
   };
 
@@ -933,11 +1081,27 @@ export function attachApoPlotInteractions(input: {
     // Update tooltip text and position above the node
     const tooltip = document.getElementById('apo-node-tooltip');
     if (tooltip) {
+      const displayedGainDb = apoFilterKindUsesGain(activeFilter?.kind ?? 'PK')
+        ? gainDb
+        : getApoFilterNodeGainDb(
+            {
+              ...(activeFilter ?? {
+                id: '',
+                enabled: true,
+                kind: 'PK',
+                frequencyHz,
+                gainDb: 0,
+                q: 1.41,
+              }),
+              frequencyHz,
+            },
+            controller.sampleRate,
+          );
       tooltip.textContent = `${frequencyHz.toFixed(0)} Hz, ${gainDb.toFixed(1)} dB`;
 
       const svgRect = svg.getBoundingClientRect();
       const nodeX = getPlotX(frequencyHz, geometry);
-      const nodeY = getPlotY(gainDb, geometry);
+      const nodeY = getPlotY(displayedGainDb, geometry);
       const scaleX = svgRect.width / 960;
       const scaleY = svgRect.height / 356;
 
@@ -991,9 +1155,10 @@ export function attachApoPlotInteractions(input: {
   window.addEventListener('mouseup', handleMouseUp);
 
   plotCardWithController.__apoPlotController = {
-    filters: input.filters,
-    eqMode: input.eqMode,
-    lockFrequency: input.lockFrequency,
+      filters: input.filters,
+      eqMode: input.eqMode,
+      sampleRate: input.sampleRate,
+      lockFrequency: input.lockFrequency,
     onFilterDrag: input.onFilterDrag,
     onDragEnd: input.onDragEnd,
     draggingFilterId: null,
