@@ -67,6 +67,12 @@ export async function saveMeasurementSession(
   };
 }
 
+export async function saveFileAtPath(filePath: string, contents: Uint8Array): Promise<string> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, Buffer.from(contents));
+  return filePath;
+}
+
 export async function getEqualizerApoStatus(): Promise<EqualizerApoStatus> {
   const configFolderPath = DEFAULT_EQUALIZER_APO_CONFIG_FOLDER;
   const configPath = path.join(configFolderPath, APO_CONFIG_FILE_NAME);

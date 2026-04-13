@@ -81,6 +81,14 @@ input {
   min-height: 0;
 }
 
+.options-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--panel-border);
@@ -260,14 +268,8 @@ input {
   border-color: var(--accent);
 }
 
-.automation-card {
-  display: flex;
-  flex-direction: column;
+.automation-panel {
   gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--input-border);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.015);
 }
 
 .automation-fields {

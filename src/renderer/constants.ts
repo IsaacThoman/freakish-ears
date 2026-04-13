@@ -1,7 +1,6 @@
 export const STORAGE_KEY = 'freakish-ears-output-folder';
 export const MEASUREMENT_BACKEND_STORAGE_KEY = 'freakish-ears-measurement-backend';
 export const MEASUREMENT_KEEP_COUNT_STORAGE_KEY = 'freakish-ears-measurement-keep-count';
-export const SPL_OFFSET_STORAGE_KEY = 'freakish-ears-spl-offset-db';
 export const NORMALIZE_PLOT_STORAGE_KEY = 'freakish-ears-normalize-plot';
 export const SMOOTHING_MODE_STORAGE_KEY = 'freakish-ears-smoothing-mode';
 export const APO_FILTERS_STORAGE_KEY = 'freakish-ears-apo-filters';
@@ -38,7 +37,6 @@ export const DEFAULT_DURATION_SECONDS = 2;
 export const MIN_SWEEP_LEVEL_DB = -60;
 export const MAX_SWEEP_LEVEL_DB = 0;
 export const DEFAULT_SWEEP_LEVEL_DB = -6;
-export const DEFAULT_SPL_OFFSET_DB = 0;
 export const DEFAULT_APO_MAX_FILTERS = 8;
 export const DEFAULT_APO_MAX_BOOST_DB = 6;
 export const DEFAULT_APO_MAX_CUT_DB = 12;

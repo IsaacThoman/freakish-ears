@@ -30,7 +30,6 @@ import {
   DEFAULT_PROPORTIONAL_P,
   DEFAULT_SAMPLE_RATE,
   DEFAULT_SMOOTHING_MODE,
-  DEFAULT_SPL_OFFSET_DB,
   DEFAULT_START_FREQUENCY,
   DEFAULT_SWEEP_LEVEL_DB,
   DURATION_STORAGE_KEY,
@@ -53,7 +52,6 @@ import {
   SAMPLE_RATE_STORAGE_KEY,
   SMOOTHING_MODE_OPTIONS,
   SMOOTHING_MODE_STORAGE_KEY,
-  SPL_OFFSET_STORAGE_KEY,
   START_FREQUENCY_STORAGE_KEY,
   STARRED_PLOT_COLORS,
   STORAGE_KEY,
@@ -76,6 +74,7 @@ import {
   attachPlotInteractions,
   renderApoEqPlot,
   renderResponsePlot,
+  DEFAULT_PLOT_HEIGHT,
   DEFAULT_PLOT_WIDTH,
 } from './renderer/plot';
 import type {
@@ -190,8 +189,9 @@ app.innerHTML = `
     </header>
 
     <section class="grid">
-      <section class="panel section">
-        <span class="section-title">Input</span>
+      <div class="options-stack">
+        <section class="panel section">
+          <span class="section-title">Input</span>
 
         <div class="field">
           <label for="measurementBackendSelect">Backend</label>
@@ -285,19 +285,12 @@ app.innerHTML = `
           </div>
         </div>
 
-        <div class="field">
-          <label for="splOffsetInput">SPL Offset</label>
-          <div class="number-input-row">
-            <input id="splOffsetInput" class="level-number-input" type="number" min="-120" max="180" step="0.1" value="${DEFAULT_SPL_OFFSET_DB}" />
-            <span>dB</span>
-          </div>
-        </div>
+          <button id="runMeasurementButton" class="btn btn-primary" type="button">
+            Run
+          </button>
+        </section>
 
-        <button id="runMeasurementButton" class="btn btn-primary" type="button">
-          Run
-        </button>
-
-        <div class="automation-card">
+        <section class="panel section automation-panel">
           <span class="section-title">AUTOCAL</span>
 
           <div class="field">
@@ -352,8 +345,8 @@ app.innerHTML = `
           <button id="runAutomationButton" class="btn btn-primary automation-run-button" type="button">
             Run Until Stopped
           </button>
-        </div>
-      </section>
+        </section>
+      </div>
 
       <section class="panel section">
         <div id="statusPill" class="status-bar" data-tone="idle">Ready</div>
@@ -509,7 +502,6 @@ const endFrequencyInput = getElement<HTMLInputElement>('endFrequencyInput');
 const durationInput = getElement<HTMLInputElement>('durationInput');
 const volumeInput = getElement<HTMLInputElement>('volumeInput');
 const volumeNumberInput = getElement<HTMLInputElement>('volumeNumberInput');
-const splOffsetInput = getElement<HTMLInputElement>('splOffsetInput');
 const runMeasurementButton = getElement<HTMLButtonElement>('runMeasurementButton');
 const runAutomationButton = getElement<HTMLButtonElement>('runAutomationButton');
 const automationAlgorithmSelect = getElement<HTMLSelectElement>('automationAlgorithmSelect');
@@ -563,7 +555,7 @@ const apoApplyStatus = getElement<HTMLSpanElement>('apoApplyStatus');
 const logList = getElement<HTMLUListElement>('logList');
 const toastButton = getElement<HTMLButtonElement>('toastButton');
 
-const PLOT_ASPECT_RATIO = 960 / 356;
+const PLOT_ASPECT_RATIO = DEFAULT_PLOT_WIDTH / DEFAULT_PLOT_HEIGHT;
 const PLOTS_GAP_PX = 12;
 const MIN_SPLIT_PLOT_HEIGHT_PX = 220;
 const storedApoFilters = readStoredApoFilterSets();
@@ -574,8 +566,8 @@ const state: AppState = {
   outputFolder: localStorage.getItem(STORAGE_KEY),
   measurementBackend: readStoredMeasurementBackend(),
   measurementKeepCount: readStoredMeasurementKeepCount(),
-  splOffsetDb: readStoredNumber(SPL_OFFSET_STORAGE_KEY, DEFAULT_SPL_OFFSET_DB),
-  normalizePlot: localStorage.getItem(NORMALIZE_PLOT_STORAGE_KEY) === 'true',
+  splOffsetDb: 0,
+  normalizePlot: localStorage.getItem(NORMALIZE_PLOT_STORAGE_KEY) !== 'false',
   smoothingMode: readStoredSmoothingMode(),
   measurements: [],
   referenceCurves: [],
@@ -887,14 +879,6 @@ volumeNumberInput.addEventListener('blur', () => {
   syncVolumeControls('number');
 });
 
-splOffsetInput.addEventListener('input', () => {
-  syncSplOffsetControl(false);
-});
-
-splOffsetInput.addEventListener('blur', () => {
-  syncSplOffsetControl(true);
-});
-
 normalizePlotToggle.addEventListener('change', () => {
   state.normalizePlot = normalizePlotToggle.checked;
   localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(state.normalizePlot));
@@ -1133,7 +1117,6 @@ updateSelectedFolder();
 measurementBackendSelect.value = state.measurementBackend;
 updateMeasurementBackendUi();
 syncVolumeControls('slider');
-syncSplOffsetControl(true);
 normalizePlotToggle.checked = state.normalizePlot;
 smoothingModeSelect.value = state.smoothingMode;
 apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
@@ -1218,6 +1201,12 @@ function setStatus(message: string, tone: StatusTone): void {
       ? `${message} ${state.latestAutomationToleranceStatus}`
       : message;
   statusPill.dataset.tone = tone;
+}
+
+function getAutomationToleranceStatusSuffix(): string {
+  return state.automationStopOnTolerance && state.latestAutomationToleranceStatus
+    ? ` ${state.latestAutomationToleranceStatus}`
+    : '';
 }
 
 function appendLog(message: string, tone: LogTone = 'neutral'): void {
@@ -1349,32 +1338,6 @@ function syncVolumeControls(source: 'slider' | 'number', normalize = true): void
   }
 }
 
-function syncSplOffsetControl(normalize: boolean): void {
-  const parsed = Number(splOffsetInput.value);
-  if (!Number.isFinite(parsed)) {
-    if (normalize) {
-      splOffsetInput.value = state.splOffsetDb.toFixed(1);
-    }
-
-    return;
-  }
-
-  const nextOffsetDb = clamp(parsed, -120, 180);
-  splOffsetInput.value = normalize ? nextOffsetDb.toFixed(1) : String(nextOffsetDb);
-
-  if (nextOffsetDb === state.splOffsetDb) {
-    return;
-  }
-
-  state.splOffsetDb = nextOffsetDb;
-  localStorage.setItem(SPL_OFFSET_STORAGE_KEY, String(nextOffsetDb));
-  persistActiveConfiguration();
-
-  if (state.measurements.length > 0) {
-    renderMeasurements();
-  }
-}
-
 function resetUserInputsToDefaults(): void {
   if (state.busy || state.automationRunning) {
     return;
@@ -1417,12 +1380,9 @@ function resetUserInputsToDefaults(): void {
   localStorage.setItem(DURATION_STORAGE_KEY, durationInput.value);
   localStorage.setItem(SWEEP_LEVEL_STORAGE_KEY, volumeInput.value);
 
-  splOffsetInput.value = String(DEFAULT_SPL_OFFSET_DB);
-  state.splOffsetDb = DEFAULT_SPL_OFFSET_DB;
-  localStorage.setItem(SPL_OFFSET_STORAGE_KEY, String(state.splOffsetDb));
-  syncSplOffsetControl(true);
+  state.splOffsetDb = 0;
 
-  state.normalizePlot = false;
+  state.normalizePlot = true;
   normalizePlotToggle.checked = state.normalizePlot;
   localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(state.normalizePlot));
 
@@ -1448,8 +1408,11 @@ function resetUserInputsToDefaults(): void {
   persistAutomationSettings();
 
   state.apoEqMode = DEFAULT_APO_EQ_MODE;
-  state.parametricApoMaxFilters = DEFAULT_APO_MAX_FILTERS;
+  state.parametricApoMaxFilters = 0;
   state.graphicApoMaxFilters = DEFAULT_APO_MAX_FILTERS;
+  state.parametricApoFilters = [];
+  state.graphicApoFilters = buildGraphicEqFilters(state.graphicApoMaxFilters);
+  state.nextApoFilterIndex = state.graphicApoFilters.length + 1;
   apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
   persistApoState();
 
@@ -1834,7 +1797,10 @@ async function runMeasurement(): Promise<LoadedMeasurement | null> {
     addMeasurement(measurement);
     updateLatestAutomationToleranceStatus(measurement, getSelectedApoReference());
     setStatus('Measurement complete.', 'success');
-    appendLog(`Measurement saved to ${saveResult.sessionDirectory}.`, 'success');
+    appendLog(
+      `Measurement saved to ${saveResult.sessionDirectory}.${getAutomationToleranceStatusSuffix()}`,
+      'success',
+    );
     return measurement;
   } catch (error) {
     const message = getErrorMessage(error);
@@ -2285,7 +2251,7 @@ function persistActiveConfiguration(): void {
     endFrequency: Number(endFrequencyInput.value),
     durationSeconds: Number(durationInput.value),
     sweepLevelDb: Number(volumeInput.value),
-    splOffsetDb: Number(splOffsetInput.value),
+    splOffsetDb: state.splOffsetDb,
     smoothingMode: getSelectedSmoothingMode(),
     normalizePlot: normalizePlotToggle.checked,
     apoEqMode: state.apoEqMode,
@@ -2386,13 +2352,6 @@ async function saveConfiguration(): Promise<void> {
     return;
   }
 
-  const outputFolder = state.outputFolder;
-  if (!outputFolder) {
-    setStatus('Choose a save folder before exporting a config.', 'error');
-    appendLog('Config export aborted because no save folder is selected.', 'error');
-    return;
-  }
-
   try {
     setBusy(true);
     setStatus('Saving configuration...', 'working');
@@ -2412,7 +2371,7 @@ async function saveConfiguration(): Promise<void> {
       endFrequency: Number(endFrequencyInput.value),
       durationSeconds: Number(durationInput.value),
       sweepLevelDb: Number(volumeInput.value),
-      splOffsetDb: Number(splOffsetInput.value),
+      splOffsetDb: state.splOffsetDb,
       smoothingMode: getSelectedSmoothingMode(),
       normalizePlot: normalizePlotToggle.checked,
       apoEqMode: state.apoEqMode,
@@ -2432,23 +2391,24 @@ async function saveConfiguration(): Promise<void> {
       graphicApoFilters: state.graphicApoFilters,
     };
 
-    const saveResult = await window.freakishEars.saveMeasurementSession({
-      folderPath: outputFolder,
-      sessionName: `configuration-${formatTimestampForPath(new Date())}`,
-      files: [
-        {
-          name: 'measurement-config.json',
-          contents: new TextEncoder().encode(JSON.stringify(payload, null, 2)),
-        },
-      ],
+    const saveResult = await window.freakishEars.saveFileAs({
+      title: 'Save configuration',
+      suggestedName: `measurement-config-${formatTimestampForPath(new Date())}.json`,
+      defaultFolderPath: state.outputFolder,
+      contents: new TextEncoder().encode(JSON.stringify(payload, null, 2)),
     });
 
+    if (saveResult.canceled || !saveResult.filePath) {
+      setStatus('Configuration save cancelled.', 'idle');
+      return;
+    }
+
     setStatus('Configuration saved.', 'success');
-    appendLog(`Saved configuration to ${saveResult.filePaths[0] ?? saveResult.sessionDirectory}.`, 'success');
+    appendLog(`Saved configuration to ${saveResult.filePath}.`, 'success');
     showToast({
       message: 'Configuration saved',
       actionLabel: 'View in Finder',
-      actionPath: saveResult.filePaths[0] ?? saveResult.sessionDirectory,
+      actionPath: saveResult.filePath,
     });
   } catch (error) {
     const message = getErrorMessage(error);
@@ -2522,11 +2482,11 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   setNumericInputValue(durationInput, config.durationSeconds);
   setNumericInputValue(volumeInput, config.sweepLevelDb);
   setNumericInputValue(volumeNumberInput, config.sweepLevelDb);
-  setNumericInputValue(splOffsetInput, config.splOffsetDb);
   localStorage.setItem(START_FREQUENCY_STORAGE_KEY, startFrequencyInput.value);
   localStorage.setItem(END_FREQUENCY_STORAGE_KEY, endFrequencyInput.value);
   localStorage.setItem(DURATION_STORAGE_KEY, durationInput.value);
   localStorage.setItem(SWEEP_LEVEL_STORAGE_KEY, volumeInput.value);
+  state.splOffsetDb = 0;
 
   smoothingModeSelect.value = isSmoothingMode(String(config.smoothingMode ?? ''))
     ? String(config.smoothingMode)
@@ -2534,7 +2494,7 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   state.smoothingMode = getSelectedSmoothingMode();
   localStorage.setItem(SMOOTHING_MODE_STORAGE_KEY, state.smoothingMode);
 
-  state.normalizePlot = Boolean(config.normalizePlot);
+  state.normalizePlot = typeof config.normalizePlot === 'boolean' ? config.normalizePlot : true;
   normalizePlotToggle.checked = state.normalizePlot;
   localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(state.normalizePlot));
 
@@ -2607,7 +2567,6 @@ apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
   updateAutomationUi();
 
   syncVolumeControls('slider');
-  syncSplOffsetControl(true);
   updateMeasurementBackendUi();
   const prunedMeasurements = pruneMeasurementsToKeepCount();
   if (prunedMeasurements.length > 0) {
@@ -4014,33 +3973,28 @@ async function exportApoConfig(): Promise<void> {
     return;
   }
 
-  if (!state.outputFolder) {
-    setStatus('Choose a save folder before exporting an APO config.', 'error');
-    appendLog('APO export aborted because no save folder is selected.', 'error');
-    return;
-  }
-
   try {
     setBusy(true);
     setStatus('Exporting Equalizer APO config...', 'working');
 
-    const saveResult = await window.freakishEars.saveMeasurementSession({
-      folderPath: state.outputFolder,
-      sessionName: `equalizer-apo-${formatTimestampForPath(new Date())}`,
-      files: [
-        {
-          name: 'config.txt',
-          contents: new TextEncoder().encode(buildApoConfigText()),
-        },
-      ],
+    const saveResult = await window.freakishEars.saveFileAs({
+      title: 'Export Equalizer APO config',
+      suggestedName: `equalizer-apo-${formatTimestampForPath(new Date())}.txt`,
+      defaultFolderPath: state.outputFolder,
+      contents: new TextEncoder().encode(buildApoConfigText()),
     });
 
+    if (saveResult.canceled || !saveResult.filePath) {
+      setStatus('Equalizer APO export cancelled.', 'idle');
+      return;
+    }
+
     setStatus('Equalizer APO config exported.', 'success');
-    appendLog(`Exported Equalizer APO config to ${saveResult.filePaths[0] ?? saveResult.sessionDirectory}.`, 'success');
+    appendLog(`Exported Equalizer APO config to ${saveResult.filePath}.`, 'success');
     showToast({
       message: 'Equalizer APO config exported',
       actionLabel: 'View in Finder',
-      actionPath: saveResult.filePaths[0] ?? saveResult.sessionDirectory,
+      actionPath: saveResult.filePath,
     });
   } catch (error) {
     const message = getErrorMessage(error);

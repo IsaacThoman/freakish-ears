@@ -1,6 +1,7 @@
 export const IPC_CHANNELS = {
   selectOutputFolder: 'dialog:selectOutputFolder',
   saveMeasurementSession: 'files:saveMeasurementSession',
+  saveFileAs: 'files:saveFileAs',
   showItemInFolder: 'files:showItemInFolder',
   runSoxMeasurement: 'measurement:runSoxMeasurement',
   getEqualizerApoStatus: 'equalizerApo:getStatus',
@@ -31,6 +32,18 @@ export type SaveMeasurementPayload = {
 export type SaveMeasurementResult = {
   sessionDirectory: string;
   filePaths: string[];
+};
+
+export type SaveFileAsPayload = {
+  title: string;
+  suggestedName: string;
+  defaultFolderPath: string | null;
+  contents: Uint8Array;
+};
+
+export type SaveFileAsResult = {
+  canceled: boolean;
+  filePath: string | null;
 };
 
 export type RunSoxMeasurementPayload = {
@@ -83,6 +96,7 @@ export type FreakishEarsApi = {
   saveMeasurementSession: (
     payload: SaveMeasurementPayload,
   ) => Promise<SaveMeasurementResult>;
+  saveFileAs: (payload: SaveFileAsPayload) => Promise<SaveFileAsResult>;
   showItemInFolder: (filePath: string) => Promise<void>;
   runSoxMeasurement: (
     payload: RunSoxMeasurementPayload,

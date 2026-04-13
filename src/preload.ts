@@ -4,6 +4,7 @@ import type {
   ApplyEqualizerApoConfigPayload,
   FreakishEarsApi,
   RunSoxMeasurementPayload,
+  SaveFileAsPayload,
   SaveMeasurementPayload,
 } from './shared/ipc';
 
@@ -11,6 +12,8 @@ const api: FreakishEarsApi = {
   selectOutputFolder: () => ipcRenderer.invoke(IPC_CHANNELS.selectOutputFolder),
   saveMeasurementSession: (payload: SaveMeasurementPayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.saveMeasurementSession, payload),
+  saveFileAs: (payload: SaveFileAsPayload) =>
+    ipcRenderer.invoke(IPC_CHANNELS.saveFileAs, payload),
   showItemInFolder: (filePath: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.showItemInFolder, filePath),
   runSoxMeasurement: (payload: RunSoxMeasurementPayload) =>

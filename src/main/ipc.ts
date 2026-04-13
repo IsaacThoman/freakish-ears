@@ -1,11 +1,13 @@
 import { dialog, ipcMain, shell } from 'electron';
+import path from 'node:path';
 
-import { applyEqualizerApoConfig, disablePeace, getEqualizerApoStatus, saveMeasurementSession } from './files';
+import { applyEqualizerApoConfig, disablePeace, getEqualizerApoStatus, saveFileAtPath, saveMeasurementSession } from './files';
 import { runSoxMeasurement } from './sox';
 import { IPC_CHANNELS } from '../shared/ipc';
 import type {
   ApplyEqualizerApoConfigPayload,
   RunSoxMeasurementPayload,
+  SaveFileAsPayload,
   SaveMeasurementPayload,
 } from '../shared/ipc';
 
@@ -27,6 +29,27 @@ export function registerIpcHandlers(): void {
     async (_event, payload: SaveMeasurementPayload) =>
       saveMeasurementSession(payload),
   );
+
+  ipcMain.handle(IPC_CHANNELS.saveFileAs, async (_event, payload: SaveFileAsPayload) => {
+    const result = await dialog.showSaveDialog({
+      title: payload.title,
+      defaultPath: payload.defaultFolderPath
+        ? path.join(payload.defaultFolderPath, payload.suggestedName)
+        : payload.suggestedName,
+    });
+
+    if (result.canceled || !result.filePath) {
+      return {
+        canceled: true,
+        filePath: null,
+      };
+    }
+
+    return {
+      canceled: false,
+      filePath: await saveFileAtPath(result.filePath, payload.contents),
+    };
+  });
 
   ipcMain.handle(IPC_CHANNELS.showItemInFolder, async (_event, filePath: string) => {
     shell.showItemInFolder(filePath);
