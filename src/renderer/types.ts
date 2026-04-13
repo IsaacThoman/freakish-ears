@@ -123,8 +123,9 @@ export type AppState = {
   focusedMeasurementId: string | null;
   nextMeasurementIndex: number;
   nextReferenceIndex: number;
-  apoFilters: ApoFilter[];
   apoEqMode: ApoEqMode;
+  parametricApoFilters: ApoFilter[];
+  graphicApoFilters: ApoFilter[];
   automationAlgorithm: AutomationAlgorithm;
   automationDelaySeconds: number;
   proportionalP: number;
@@ -136,7 +137,8 @@ export type AppState = {
   automationStopRequested: boolean;
   apoSelectedMeasurementId: string | null;
   apoSelectedReferenceId: string | null;
-  apoMaxFilters: number;
+  parametricApoMaxFilters: number;
+  graphicApoMaxFilters: number;
   apoMaxBoostDb: number;
   apoMaxCutDb: number;
   nextApoFilterIndex: number;

@@ -552,6 +552,8 @@ const toastButton = getElement<HTMLButtonElement>('toastButton');
 const PLOT_ASPECT_RATIO = 960 / 356;
 const PLOTS_GAP_PX = 12;
 const MIN_SPLIT_PLOT_HEIGHT_PX = 220;
+const storedApoFilters = readStoredApoFilterSets();
+const storedApoMaxFilterCounts = readStoredApoMaxFilterCounts();
 
 const state: AppState = {
   busy: false,
@@ -566,8 +568,9 @@ const state: AppState = {
   focusedMeasurementId: null,
   nextMeasurementIndex: 1,
   nextReferenceIndex: 1,
-  apoFilters: readStoredApoFilters(),
   apoEqMode: readStoredApoEqMode(),
+  parametricApoFilters: storedApoFilters.parametric,
+  graphicApoFilters: storedApoFilters.graphic,
   automationAlgorithm: readStoredAutomationAlgorithm(),
   automationDelaySeconds: clamp(
     readStoredNumber(
@@ -600,11 +603,8 @@ const state: AppState = {
   automationStopRequested: false,
   apoSelectedMeasurementId: localStorage.getItem(APO_SELECTED_MEASUREMENT_STORAGE_KEY),
   apoSelectedReferenceId: localStorage.getItem(APO_SELECTED_REFERENCE_STORAGE_KEY),
-  apoMaxFilters: clamp(
-    readStoredNumber(APO_MAX_FILTERS_STORAGE_KEY, DEFAULT_APO_MAX_FILTERS),
-    1,
-    16,
-  ),
+  parametricApoMaxFilters: storedApoMaxFilterCounts.parametric,
+  graphicApoMaxFilters: storedApoMaxFilterCounts.graphic,
   apoMaxBoostDb: clamp(
     readStoredNumber(APO_MAX_BOOST_STORAGE_KEY, DEFAULT_APO_MAX_BOOST_DB),
     0,
@@ -624,13 +624,39 @@ const state: AppState = {
 };
 
 state.nextApoFilterIndex =
-  state.apoFilters.reduce((maxId, filter) => {
+  [...state.parametricApoFilters, ...state.graphicApoFilters].reduce((maxId, filter) => {
     const numericId = Number(filter.id.replace('apo-filter-', ''));
     return Number.isFinite(numericId) ? Math.max(maxId, numericId) : maxId;
   }, 0) + 1;
 
-if (state.apoEqMode === 'graphic') {
-  syncGraphicEqFiltersToBandCount();
+function getActiveApoFilters(): ApoFilter[] {
+  return state.apoEqMode === 'graphic' ? state.graphicApoFilters : state.parametricApoFilters;
+}
+
+function setActiveApoFilters(filters: ApoFilter[]): void {
+  if (state.apoEqMode === 'graphic') {
+    state.graphicApoFilters = filters;
+    return;
+  }
+
+  state.parametricApoFilters = filters;
+}
+
+function getActiveApoMaxFilters(): number {
+  return state.apoEqMode === 'graphic' ? state.graphicApoMaxFilters : state.parametricApoMaxFilters;
+}
+
+function setActiveApoMaxFilters(value: number): void {
+  if (state.apoEqMode === 'graphic') {
+    state.graphicApoMaxFilters = value;
+    return;
+  }
+
+  state.parametricApoMaxFilters = value;
+}
+
+function syncParametricApoFilterCountToFilters(): void {
+  state.parametricApoMaxFilters = clamp(state.parametricApoFilters.length, 0, 250);
 }
 
 chooseFolderButton.addEventListener('click', () => {
@@ -952,10 +978,7 @@ apoEqModeToggle.addEventListener('click', (event) => {
   }
 
   state.apoEqMode = nextMode;
-  if (state.apoEqMode === 'graphic') {
-    syncGraphicEqFiltersToBandCount();
-  }
-
+  apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
@@ -1051,7 +1074,7 @@ syncVolumeControls('slider');
 syncSplOffsetControl(true);
 normalizePlotToggle.checked = state.normalizePlot;
 smoothingModeSelect.value = state.smoothingMode;
-apoMaxFiltersInput.value = String(state.apoMaxFilters);
+apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
 automationAlgorithmSelect.value = state.automationAlgorithm;
 proportionalPInput.value = state.proportionalP.toFixed(2);
 automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
@@ -1171,9 +1194,9 @@ function updateMeasurementActionState(): void {
   generateApoFiltersButton.disabled =
     state.busy || !state.apoSelectedMeasurementId || !state.apoSelectedReferenceId;
   addApoFilterButton.disabled = state.busy || state.apoEqMode === 'graphic';
-  clearApoFiltersButton.disabled = state.busy || state.apoFilters.length === 0;
+  clearApoFiltersButton.disabled = state.busy || getActiveApoFilters().length === 0;
   exportApoConfigButton.disabled = state.busy || !state.outputFolder;
-  const enabledFilterCount = state.apoFilters.filter((filter) => filter.enabled).length;
+  const enabledFilterCount = getActiveApoFilters().filter((filter) => filter.enabled).length;
   const apoInstalled = state.equalizerApoStatus?.installed ?? false;
   applyApoConfigButton.disabled = state.busy || enabledFilterCount === 0 || !apoInstalled;
 }
@@ -1932,9 +1955,10 @@ function renderPlotCard(
   // Render APO EQ plot
   const measurement = getSelectedApoMeasurement();
   const referenceCurve = getSelectedApoReference();
+  const activeApoFilters = getActiveApoFilters();
 
   apoPlotCard.innerHTML = renderApoEqPlot({
-    filters: state.apoFilters,
+    filters: activeApoFilters,
     eqMode: state.apoEqMode,
     measurementName: measurement?.name ?? null,
     targetName: referenceCurve?.name ?? null,
@@ -1944,7 +1968,7 @@ function renderPlotCard(
 
   attachApoPlotInteractions({
     plotCard: apoPlotCard,
-    filters: state.apoFilters,
+    filters: activeApoFilters,
     eqMode: state.apoEqMode,
     lockFrequency: state.apoEqMode === 'graphic',
     onFilterDrag: handleApoFilterDrag,
@@ -2123,10 +2147,12 @@ function persistActiveConfiguration(): void {
     automationRegressionLimit: state.automationRegressionLimit,
     apoSelectedMeasurementId: state.apoSelectedMeasurementId,
     apoSelectedReferenceId: state.apoSelectedReferenceId,
-    apoMaxFilters: state.apoMaxFilters,
+    parametricApoMaxFilters: state.parametricApoMaxFilters,
+    graphicApoMaxFilters: state.graphicApoMaxFilters,
     apoMaxBoostDb: state.apoMaxBoostDb,
     apoMaxCutDb: state.apoMaxCutDb,
-    apoFilters: state.apoFilters,
+    parametricApoFilters: state.parametricApoFilters,
+    graphicApoFilters: state.graphicApoFilters,
   };
 
   localStorage.setItem(ACTIVE_CONFIG_STORAGE_KEY, JSON.stringify(payload));
@@ -2248,10 +2274,12 @@ async function saveConfiguration(): Promise<void> {
       automationRegressionLimit: state.automationRegressionLimit,
       apoSelectedMeasurementId: state.apoSelectedMeasurementId,
       apoSelectedReferenceId: state.apoSelectedReferenceId,
-      apoMaxFilters: state.apoMaxFilters,
+      parametricApoMaxFilters: state.parametricApoMaxFilters,
+      graphicApoMaxFilters: state.graphicApoMaxFilters,
       apoMaxBoostDb: state.apoMaxBoostDb,
       apoMaxCutDb: state.apoMaxCutDb,
-      apoFilters: state.apoFilters,
+      parametricApoFilters: state.parametricApoFilters,
+      graphicApoFilters: state.graphicApoFilters,
     };
 
     const saveResult = await window.freakishEars.saveMeasurementSession({
@@ -2391,14 +2419,17 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
     0,
     20,
   );
-  state.apoFilters = normalizeApoFilters(config.apoFilters);
+  const importedApoFilters = normalizeImportedApoFilterSets(config, state.apoEqMode);
+  state.parametricApoFilters = importedApoFilters.parametric;
+  state.graphicApoFilters = importedApoFilters.graphic;
   state.apoSelectedMeasurementId = toOptionalString(config.apoSelectedMeasurementId);
   state.apoSelectedReferenceId = toOptionalString(config.apoSelectedReferenceId);
-  state.apoMaxFilters = clamp(
-    Number(config.apoMaxFilters) || DEFAULT_APO_MAX_FILTERS,
-    1,
-    16,
-  );
+  const importedApoMaxFilters = normalizeImportedApoMaxFilterCounts(config);
+  state.parametricApoMaxFilters = importedApoMaxFilters.parametric;
+  state.graphicApoMaxFilters = importedApoMaxFilters.graphic;
+  if (state.parametricApoFilters.length > 0 || state.parametricApoMaxFilters === 0) {
+    syncParametricApoFilterCountToFilters();
+  }
   state.apoMaxBoostDb = clamp(
     Number(config.apoMaxBoostDb) || DEFAULT_APO_MAX_BOOST_DB,
     0,
@@ -2409,11 +2440,8 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
     0,
     24,
   );
-  if (state.apoEqMode === 'graphic') {
-    syncGraphicEqFiltersToBandCount();
-  }
   state.nextApoFilterIndex =
-    state.apoFilters.reduce((maxId, filter) => {
+    [...state.parametricApoFilters, ...state.graphicApoFilters].reduce((maxId, filter) => {
       const numericId = Number(filter.id.replace('apo-filter-', ''));
       return Number.isFinite(numericId) ? Math.max(maxId, numericId) : maxId;
     }, 0) + 1;
@@ -2421,7 +2449,7 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   if (persist) {
     persistActiveConfiguration();
   }
-  apoMaxFiltersInput.value = String(state.apoMaxFilters);
+apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
   automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
   automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
   automationRegressionLimitInput.value = String(state.automationRegressionLimit);
@@ -2586,17 +2614,36 @@ function formatSmoothingModeLabel(value: MeasurementSmoothingMode): string {
   return value === 'raw' ? 'Off' : `${value} oct`;
 }
 
-function readStoredApoFilters(): ApoFilter[] {
+function readStoredApoFilterSets(): { parametric: ApoFilter[]; graphic: ApoFilter[] } {
   const stored = localStorage.getItem(APO_FILTERS_STORAGE_KEY);
 
   if (!stored) {
-    return [];
+    return { parametric: [], graphic: [] };
   }
 
   try {
-    return normalizeApoFilters(JSON.parse(stored));
+    return normalizeImportedApoFilterSets(JSON.parse(stored), readStoredApoEqMode());
   } catch {
-    return [];
+    return { parametric: [], graphic: [] };
+  }
+}
+
+function readStoredApoMaxFilterCounts(): { parametric: number; graphic: number } {
+  const stored = localStorage.getItem(APO_MAX_FILTERS_STORAGE_KEY);
+
+  if (!stored) {
+    return {
+      parametric: clamp(DEFAULT_APO_MAX_FILTERS, 0, 250),
+      graphic: clamp(DEFAULT_APO_MAX_FILTERS, 1, 250),
+    };
+  }
+
+  try {
+    return normalizeImportedApoMaxFilterCounts(JSON.parse(stored));
+  } catch {
+    const legacyValue = readStoredNumber(APO_MAX_FILTERS_STORAGE_KEY, DEFAULT_APO_MAX_FILTERS);
+    const normalizedLegacyValue = clamp(legacyValue, 0, 250);
+    return { parametric: normalizedLegacyValue, graphic: normalizedLegacyValue };
   }
 }
 
@@ -2645,6 +2692,48 @@ function normalizeApoFilters(value: unknown): ApoFilter[] {
   });
 }
 
+function normalizeImportedApoFilterSets(
+  value: unknown,
+  selectedMode: ApoEqMode,
+): { parametric: ApoFilter[]; graphic: ApoFilter[] } {
+  if (Array.isArray(value)) {
+    const legacyFilters = normalizeApoFilters(value);
+    return selectedMode === 'graphic'
+      ? { parametric: [], graphic: legacyFilters }
+      : { parametric: legacyFilters, graphic: [] };
+  }
+
+  if (!value || typeof value !== 'object') {
+    return { parametric: [], graphic: [] };
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    parametric: normalizeApoFilters(record.parametricApoFilters ?? record.parametric),
+    graphic: normalizeApoFilters(record.graphicApoFilters ?? record.graphic),
+  };
+}
+
+function normalizeImportedApoMaxFilterCounts(
+  value: unknown,
+): { parametric: number; graphic: number } {
+  if (typeof value === 'number' || typeof value === 'string') {
+    const legacyValue = clamp(Number(value) || DEFAULT_APO_MAX_FILTERS, 0, 250);
+    return { parametric: legacyValue, graphic: legacyValue };
+  }
+
+  if (!value || typeof value !== 'object') {
+    const fallback = clamp(DEFAULT_APO_MAX_FILTERS, 0, 250);
+    return { parametric: fallback, graphic: fallback };
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+      parametric: clamp(Number(record.parametricApoMaxFilters) || DEFAULT_APO_MAX_FILTERS, 0, 250),
+      graphic: clamp(Number(record.graphicApoMaxFilters) || DEFAULT_APO_MAX_FILTERS, 1, 250),
+  };
+}
+
 function isApoEqMode(value: unknown): value is ApoEqMode {
   return value === 'parametric' || value === 'graphic';
 }
@@ -2672,9 +2761,21 @@ function persistApoSelections(): void {
 }
 
 function persistApoState(): void {
-  localStorage.setItem(APO_FILTERS_STORAGE_KEY, JSON.stringify(state.apoFilters));
+  localStorage.setItem(
+    APO_FILTERS_STORAGE_KEY,
+    JSON.stringify({
+      parametricApoFilters: state.parametricApoFilters,
+      graphicApoFilters: state.graphicApoFilters,
+    }),
+  );
   localStorage.setItem(APO_EQ_MODE_STORAGE_KEY, state.apoEqMode);
-  localStorage.setItem(APO_MAX_FILTERS_STORAGE_KEY, String(state.apoMaxFilters));
+  localStorage.setItem(
+    APO_MAX_FILTERS_STORAGE_KEY,
+    JSON.stringify({
+      parametricApoMaxFilters: state.parametricApoMaxFilters,
+      graphicApoMaxFilters: state.graphicApoMaxFilters,
+    }),
+  );
   localStorage.setItem(APO_MAX_BOOST_STORAGE_KEY, String(state.apoMaxBoostDb));
   localStorage.setItem(APO_MAX_CUT_STORAGE_KEY, String(state.apoMaxCutDb));
   persistApoSelections();
@@ -2707,7 +2808,7 @@ function handleApoFilterDrag(
   gainDb: number,
   axis: ApoDragAxis,
 ): void {
-  state.apoFilters = state.apoFilters.map((filter) => {
+  setActiveApoFilters(getActiveApoFilters().map((filter) => {
     if (filter.id !== filterId) {
       return filter;
     }
@@ -2723,7 +2824,7 @@ function handleApoFilterDrag(
       frequencyHz: nextFrequencyHz,
       gainDb: nextGainDb,
     };
-  });
+  }));
   persistApoState();
   persistActiveConfiguration();
   renderPlotCard(
@@ -2739,13 +2840,14 @@ function handleApoFilterDragEnd(): void {
 
 function syncApoGenerationSettings(normalize: boolean): void {
   const parsedMaxFilters = Number(apoMaxFiltersInput.value);
+  const minimumFilters = state.apoEqMode === 'graphic' ? 1 : 0;
 
   if (Number.isFinite(parsedMaxFilters)) {
-    state.apoMaxFilters = clamp(Math.round(parsedMaxFilters), 1, 250);
+    setActiveApoMaxFilters(clamp(Math.round(parsedMaxFilters), minimumFilters, 250));
   }
 
   if (normalize) {
-    apoMaxFiltersInput.value = String(state.apoMaxFilters);
+    apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
   }
 
   if (state.apoEqMode === 'graphic') {
@@ -2820,6 +2922,8 @@ function syncAutomationSettings(normalize: boolean): void {
 
 function renderApoSection(): void {
   syncApoEqModeToggle();
+  apoMaxFiltersInput.min = state.apoEqMode === 'graphic' ? '1' : '0';
+  apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
   syncApoSelectionOptions();
   apoFilterList.innerHTML = renderApoFilterList();
   apoConfigPreview.value = buildApoConfigText();
@@ -2844,7 +2948,7 @@ function syncApoEqModeToggle(): void {
 }
 
 function getApoApplyStatusText(): string {
-  const enabledFilterCount = state.apoFilters.filter((filter) => filter.enabled).length;
+  const enabledFilterCount = getActiveApoFilters().filter((filter) => filter.enabled).length;
 
   if (enabledFilterCount === 0) {
     return 'Enable at least one filter to apply APO.';
@@ -2916,13 +3020,15 @@ function syncApoSelectionOptions(): void {
 }
 
 function renderApoFilterList(): string {
-  if (state.apoFilters.length === 0) {
+  const activeApoFilters = getActiveApoFilters();
+
+  if (activeApoFilters.length === 0) {
     return state.apoEqMode === 'graphic'
       ? '<div class="measurement-empty">No graphic EQ bands yet. Increase the filter count to create fixed bands.</div>'
       : '<div class="measurement-empty">No APO filters yet. Generate from a target curve or add one manually.</div>';
   }
 
-  const sortedFilters = [...state.apoFilters].sort(
+  const sortedFilters = [...activeApoFilters].sort(
     (aFilter, bFilter) => aFilter.frequencyHz - bFilter.frequencyHz,
   );
 
@@ -2952,29 +3058,63 @@ function addApoFilter(partial: Partial<ApoFilter> = {}): void {
     return;
   }
 
-  state.apoFilters = [
-    ...state.apoFilters,
+  const nextFrequencyHz = partial.frequencyHz ?? findNextParametricFilterFrequency();
+
+  setActiveApoFilters([
+    ...getActiveApoFilters(),
     {
       id: `apo-filter-${state.nextApoFilterIndex}`,
       enabled: partial.enabled ?? true,
       kind: 'PK',
-      frequencyHz: partial.frequencyHz ?? 1000,
+      frequencyHz: nextFrequencyHz,
       gainDb: partial.gainDb ?? 0,
       q: partial.q ?? 1.41,
     },
-  ];
+  ]);
+  syncParametricApoFilterCountToFilters();
   state.nextApoFilterIndex += 1;
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
 }
 
+function findNextParametricFilterFrequency(): number {
+  const sortedFrequencies = getActiveApoFilters()
+    .map((filter) => clamp(filter.frequencyHz, DEFAULT_START_FREQUENCY, DEFAULT_END_FREQUENCY))
+    .sort((left, right) => left - right);
+
+  if (sortedFrequencies.length === 0) {
+    return 1000;
+  }
+
+  const boundaries = [DEFAULT_START_FREQUENCY, ...sortedFrequencies, DEFAULT_END_FREQUENCY];
+  let widestGapIndex = 0;
+  let widestGapOctaves = Number.NEGATIVE_INFINITY;
+
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const startFrequencyHz = boundaries[index];
+    const endFrequencyHz = boundaries[index + 1];
+    const gapOctaves = Math.log2(endFrequencyHz / startFrequencyHz);
+
+    if (gapOctaves > widestGapOctaves) {
+      widestGapOctaves = gapOctaves;
+      widestGapIndex = index;
+    }
+  }
+
+  const gapStartFrequencyHz = boundaries[widestGapIndex];
+  const gapEndFrequencyHz = boundaries[widestGapIndex + 1];
+  return roundTo(Math.sqrt(gapStartFrequencyHz * gapEndFrequencyHz), 1);
+}
+
 function clearApoFilters(): void {
   if (state.apoEqMode === 'graphic') {
-    state.apoFilters = buildGraphicEqFilters(state.apoMaxFilters);
-    state.nextApoFilterIndex = state.apoFilters.length + 1;
+    const graphicFilters = buildGraphicEqFilters(getActiveApoMaxFilters());
+    setActiveApoFilters(graphicFilters);
+    state.nextApoFilterIndex = graphicFilters.length + 1;
   } else {
-    state.apoFilters = [];
+    setActiveApoFilters([]);
+    syncParametricApoFilterCountToFilters();
     state.nextApoFilterIndex = 1;
   }
   persistApoState();
@@ -2991,14 +3131,15 @@ function removeApoFilter(filterId: string): void {
     return;
   }
 
-  state.apoFilters = state.apoFilters.filter((filter) => filter.id !== filterId);
+  setActiveApoFilters(getActiveApoFilters().filter((filter) => filter.id !== filterId));
+  syncParametricApoFilterCountToFilters();
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
 }
 
 function updateApoFilter(filterId: string, field: string, value: string | boolean): void {
-  state.apoFilters = state.apoFilters.map((filter) => {
+  setActiveApoFilters(getActiveApoFilters().map((filter) => {
     if (filter.id !== filterId) {
       return filter;
     }
@@ -3031,7 +3172,7 @@ function updateApoFilter(filterId: string, field: string, value: string | boolea
     }
 
     return filter;
-  });
+  }));
 
   persistApoState();
   persistActiveConfiguration();
@@ -3063,7 +3204,10 @@ async function generateApoFilters(
     const generatedFilters = useAutomationAlgorithm
       ? buildFiltersForSelectedAlgorithm(measurement, referenceCurve)
       : buildApoFiltersFromCurves(measurement, referenceCurve);
-    state.apoFilters = generatedFilters;
+    setActiveApoFilters(generatedFilters);
+    if (state.apoEqMode === 'parametric') {
+      syncParametricApoFilterCountToFilters();
+    }
     state.nextApoFilterIndex = generatedFilters.length + 1;
     persistApoState();
     persistActiveConfiguration();
@@ -3106,7 +3250,9 @@ function buildProportionalApoFilters(
     return buildProportionalGraphicEqFilters(measurement, referenceCurve);
   }
 
-  if (state.apoFilters.length === 0) {
+  const activeApoFilters = getActiveApoFilters();
+
+  if (activeApoFilters.length === 0) {
     return buildApoFiltersFromCurves(measurement, referenceCurve).map((filter) => ({
       ...filter,
       gainDb: roundTo(
@@ -3119,7 +3265,7 @@ function buildProportionalApoFilters(
   const measurementPoints = getAutomationMeasurementPoints(measurement, referenceCurve);
   const referencePoints = getDisplayedReferencePoints(referenceCurve);
 
-  return state.apoFilters.map((filter) => {
+  return activeApoFilters.map((filter) => {
     const measurementPoint = findClosestPoint(measurementPoints, filter.frequencyHz);
     const referencePoint = findClosestPoint(referencePoints, filter.frequencyHz);
     const adjustmentDb =
@@ -3142,10 +3288,10 @@ function buildProportionalGraphicEqFilters(
 ): ApoFilter[] {
   const measurementPoints = getAutomationMeasurementPoints(measurement, referenceCurve);
   const referencePoints = getDisplayedReferencePoints(referenceCurve);
-  const filterCount = clamp(state.apoMaxFilters, 1, 250);
+  const filterCount = clamp(state.graphicApoMaxFilters, 1, 250);
   const expectedFrequencies = getGraphicEqFrequencies(filterCount);
-  const baseFilters = state.apoFilters.length === filterCount
-    ? state.apoFilters.map((filter, index) => ({
+  const baseFilters = state.graphicApoFilters.length === filterCount
+    ? state.graphicApoFilters.map((filter, index) => ({
         ...filter,
         frequencyHz: expectedFrequencies[index] ?? filter.frequencyHz,
         q: roundTo(getGraphicEqQ(expectedFrequencies, index), 0.01),
@@ -3192,7 +3338,7 @@ function buildApoFiltersFromCurves(
   const residuals = samplePoints.map((point) => point.targetGainDb);
   const filters: ApoFilter[] = [];
 
-  for (let index = 0; index < state.apoMaxFilters; index += 1) {
+  for (let index = 0; index < state.parametricApoMaxFilters; index += 1) {
     let dominantIndex = -1;
     let dominantMagnitude = 0;
 
@@ -3246,7 +3392,7 @@ function buildGraphicEqFiltersFromCurves(
 ): ApoFilter[] {
   const measurementPoints = getDisplayedMeasurementPoints(measurement, referenceCurve);
   const referencePoints = getDisplayedReferencePoints(referenceCurve);
-  const filterCount = clamp(state.apoMaxFilters, 1, 250);
+  const filterCount = clamp(state.graphicApoMaxFilters, 1, 250);
   const frequencies = getGraphicEqFrequencies(filterCount);
 
   return frequencies.map((frequencyHz, index) => {
@@ -3485,7 +3631,7 @@ function getApoFilterResponseDb(filter: ApoFilter, frequencyHz: number): number 
 }
 
 function getCombinedApoResponseDb(frequencyHz: number): number {
-  return getCombinedApoResponseDbForFilters(state.apoFilters, frequencyHz);
+  return getCombinedApoResponseDbForFilters(getActiveApoFilters(), frequencyHz);
 }
 
 function getCombinedApoResponseDbForFilters(filters: ApoFilter[], frequencyHz: number): number {
@@ -3499,7 +3645,7 @@ function getCombinedApoResponseDbForFilters(filters: ApoFilter[], frequencyHz: n
 }
 
 function buildApoConfigText(): string {
-  const enabledFilters = state.apoFilters.filter((filter) => filter.enabled);
+  const enabledFilters = getActiveApoFilters().filter((filter) => filter.enabled);
   const measurement = getSelectedApoMeasurement();
   const referenceCurve = getSelectedApoReference();
   const normalizationDb = getCombinedApoResponseDb(PLOT_NORMALIZATION_FREQUENCY_HZ);
@@ -3581,8 +3727,8 @@ function buildGraphicEqFilters(filterCount: number, sourceFilters: ApoFilter[] =
 }
 
 function syncGraphicEqFiltersToBandCount(): void {
-  state.apoFilters = buildGraphicEqFilters(state.apoMaxFilters, state.apoFilters);
-  state.nextApoFilterIndex = state.apoFilters.length + 1;
+  state.graphicApoFilters = buildGraphicEqFilters(state.graphicApoMaxFilters, state.graphicApoFilters);
+  state.nextApoFilterIndex = state.graphicApoFilters.length + 1;
 }
 
 async function exportApoConfig(): Promise<void> {
@@ -3705,7 +3851,7 @@ async function toggleAutomationLoop(): Promise<void> {
   let completedWithinTolerance = false;
   let toleranceSummary = '';
   let bestScoreDb = Number.POSITIVE_INFINITY;
-  let bestFilters = cloneApoFilters(state.apoFilters);
+  let bestFilters = cloneApoFilters(getActiveApoFilters());
   let consecutiveRegressionCount = 0;
 
   try {
@@ -3727,7 +3873,7 @@ async function toggleAutomationLoop(): Promise<void> {
 
         if (toleranceResult && toleranceResult.scoreDb < bestScoreDb - 0.01) {
           bestScoreDb = toleranceResult.scoreDb;
-          bestFilters = cloneApoFilters(state.apoFilters);
+          bestFilters = cloneApoFilters(getActiveApoFilters());
           consecutiveRegressionCount = 0;
         } else if (
           toleranceResult &&
@@ -3740,8 +3886,8 @@ async function toggleAutomationLoop(): Promise<void> {
           );
 
           if (consecutiveRegressionCount >= state.automationRegressionLimit) {
-            state.apoFilters = cloneApoFilters(bestFilters);
-            state.nextApoFilterIndex = state.apoFilters.length + 1;
+            setActiveApoFilters(cloneApoFilters(bestFilters));
+            state.nextApoFilterIndex = bestFilters.length + 1;
             persistApoState();
             persistActiveConfiguration();
             renderApoSection();
