@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   for (let runIndex = 0; runIndex < options.repeat; runIndex += 1) {
     const measurementNumber = runIndex + 1;
     console.log(
-      `[freakish-ears] Starting scripted SoX measurement ${measurementNumber}/${options.repeat}`,
+      `[autocal] Starting scripted SoX measurement ${measurementNumber}/${options.repeat}`,
     );
 
     const capture = await runSoxMeasurement({
@@ -203,6 +203,6 @@ function wait(durationMs: number): Promise<void> {
 
 void main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`[freakish-ears] Scripted measurement failed: ${message}`);
+  console.error(`[autocal] Scripted measurement failed: ${message}`);
   process.exit(1);
 });

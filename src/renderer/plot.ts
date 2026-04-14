@@ -631,12 +631,12 @@ function buildApoPreviewSampledPoints(
     return {
       frequencyHz,
       totalDb:
-        (eqMode === 'graphic'
+        eqMode === 'graphic'
           ? getGraphicEqResponseDb(enabledFilters, frequencyHz)
           : enabledFilters.reduce(
               (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz, sampleRate),
               0,
-            ) * responseMultiplier) + preampDb,
+            ) * responseMultiplier + preampDb,
     };
   });
 }

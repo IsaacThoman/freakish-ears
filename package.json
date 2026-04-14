@@ -1,6 +1,6 @@
 {
-  "name": "freakish-ears",
-  "productName": "freakish-ears",
+  "name": "autocal",
+  "productName": "autocal",
   "version": "1.0.0",
   "description": "My Electron application description",
   "main": ".vite/build/main.js",

@@ -11,6 +11,10 @@ if (started) {
   app.quit();
 }
 
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.squirrel.autocal.autocal');
+}
+
 nativeTheme.themeSource = 'dark';
 
 registerIpcHandlers();
@@ -21,7 +25,7 @@ app.on('ready', () => {
   if (headlessMeasurementMode) {
     void runHeadlessMeasurementMode(process.argv).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[freakish-ears] Headless measurement failed: ${message}`);
+      console.error(`[autocal] Headless measurement failed: ${message}`);
       app.exit(1);
     });
     return;

@@ -103,8 +103,8 @@ export function buildRewMeasurementText(input: {
         ? '* Note: Magnitude values are exported in relative dB using the plotted response trace.'
         : '* Note: Magnitude values are exported from the imported SPL trace.';
   const lines = [
-    '* Measurement data exported by Freakish Ears',
-    `* Source: ${input.measurement.sourcePath ?? 'Freakish Ears'}`,
+    '* Measurement data exported by autocal',
+    `* Source: ${input.measurement.sourcePath ?? 'autocal'}`,
     `* Dated: ${new Date().toLocaleString()}`,
     `* Measurement: ${input.measurement.name}`,
     exportUnitLabel,
@@ -376,6 +376,7 @@ function inferTextMeasurementMagnitudeMode(contents: string): MeasurementMagnitu
 
   if (
     lowerContents.includes('measurement data exported by freakish ears') ||
+    lowerContents.includes('measurement data exported by autocal') ||
     lowerContents.includes('relative db using the plotted response trace') ||
     lowerContents.includes('relative dB using the plotted response trace'.toLowerCase()) ||
     lowerContents.includes('include the current spl offset')

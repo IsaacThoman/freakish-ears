@@ -10,10 +10,15 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    icon: 'src/assets/autocal-icon.ico',
+    extraResource: ['src/assets/autocal-icon.ico', 'src/assets/autocal-icon.png'],
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({
+      name: 'autocal',
+      setupIcon: 'src/assets/autocal-icon.ico',
+    }),
     new MakerZIP({}, ['darwin']),
     new MakerRpm({}),
     new MakerDeb({}),

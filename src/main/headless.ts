@@ -33,7 +33,7 @@ export async function runHeadlessMeasurementMode(argv: string[]): Promise<void> 
   for (let runIndex = 0; runIndex < options.repeat; runIndex += 1) {
     const measurementNumber = runIndex + 1;
     console.log(
-      `[freakish-ears] Starting headless SoX measurement ${measurementNumber}/${options.repeat}`,
+      `[autocal] Starting headless SoX measurement ${measurementNumber}/${options.repeat}`,
     );
 
     const capture = await runSoxMeasurement({
