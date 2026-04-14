@@ -289,6 +289,10 @@ input {
   gap: 8px;
 }
 
+.automation-fields[hidden] {
+  display: none !important;
+}
+
 .automation-hint {
   color: var(--text-muted);
   font-size: 11px;

@@ -16,7 +16,14 @@ import {
   AUTOMATION_REGRESSION_LIMIT_STORAGE_KEY,
   AUTOMATION_STOP_ON_TOLERANCE_STORAGE_KEY,
   AUTOMATION_TOLERANCE_MAX_ACCEPTABLE_ERROR_WIDTH_STORAGE_KEY,
+  DAMPED_REFIT_BLEND_STORAGE_KEY,
   DEFAULT_DYNAMIC_PROPORTIONAL_P,
+  DEFAULT_DAMPED_REFIT_BLEND,
+  DEFAULT_MOMENTUM_BLEND,
+  DEFAULT_MOMENTUM_DECAY,
+  DEFAULT_PID_DERIVATIVE_GAIN,
+  DEFAULT_PID_INTEGRAL_GAIN,
+  DEFAULT_PID_PROPORTIONAL_GAIN,
   DEFAULT_APO_EQ_MODE,
   DEFAULT_GRAPHIC_APO_MAX_FILTERS,
   DEFAULT_MEASUREMENT_BACKEND,
@@ -46,6 +53,8 @@ import {
   INPUT_CHANNEL_STORAGE_KEY,
   MEASUREMENT_BACKEND_STORAGE_KEY,
   MEASUREMENT_KEEP_COUNT_STORAGE_KEY,
+  MOMENTUM_BLEND_STORAGE_KEY,
+  MOMENTUM_DECAY_STORAGE_KEY,
   MAX_SWEEP_LEVEL_DB,
   MIN_SWEEP_LEVEL_DB,
   NORMALIZE_PLOT_STORAGE_KEY,
@@ -53,6 +62,9 @@ import {
   OUTPUT_DEVICE_STORAGE_KEY,
   POST_ROLL_SECONDS,
   PRE_ROLL_SECONDS,
+  PID_DERIVATIVE_GAIN_STORAGE_KEY,
+  PID_INTEGRAL_GAIN_STORAGE_KEY,
+  PID_PROPORTIONAL_GAIN_STORAGE_KEY,
   PROPORTIONAL_P_STORAGE_KEY,
   PLOT_COLORS,
   PLOT_NORMALIZATION_FREQUENCY_HZ,
@@ -193,6 +205,7 @@ const AUTOMATION_TOLERANCE_BANDS: Array<{
 ];
 
 const DYNAMIC_PROPORTIONAL_P_FULL_SCALE_ERROR_DB = 12;
+const PID_INTEGRAL_ERROR_LIMIT_DB = 120;
 
 if (!app) {
   throw new Error('Unable to find the app root.');
@@ -313,10 +326,13 @@ app.innerHTML = `
             <label for="automationAlgorithmSelect">Algorithm</label>
             <select id="automationAlgorithmSelect">
               <option value="proportional">Proportional</option>
+              <option value="pid">PID</option>
+              <option value="damped-refit">Damped Refit</option>
+              <option value="momentum">Momentum</option>
             </select>
           </div>
 
-          <div id="proportionalAutomationFields" class="automation-fields">
+          <div class="automation-fields">
             <div class="field">
               <label for="automationDelayInput">Delay Between Runs</label>
               <div class="number-input-row">
@@ -324,6 +340,9 @@ app.innerHTML = `
                 <span>s</span>
               </div>
             </div>
+          </div>
+
+          <div id="proportionalAutomationFields" class="automation-fields">
             <div id="proportionalPField" class="field">
               <label for="proportionalPInput">P Value</label>
               <div class="number-input-row">
@@ -334,6 +353,58 @@ app.innerHTML = `
               <input id="dynamicProportionalPToggle" type="checkbox" />
               <span>Dynamic P Value</span>
             </label>
+            <span class="automation-hint">Each pass measures the current response, adds (target - measured) * P to the current APO correction, then applies the updated APO config.</span>
+          </div>
+
+          <div id="pidAutomationFields" class="automation-fields" hidden>
+            <div class="field">
+              <label for="pidProportionalGainInput">P Value</label>
+              <div class="number-input-row">
+                <input id="pidProportionalGainInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PID_PROPORTIONAL_GAIN.toFixed(2)}" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="pidIntegralGainInput">I Value</label>
+              <div class="number-input-row">
+                <input id="pidIntegralGainInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PID_INTEGRAL_GAIN.toFixed(2)}" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="pidDerivativeGainInput">D Value</label>
+              <div class="number-input-row">
+                <input id="pidDerivativeGainInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PID_DERIVATIVE_GAIN.toFixed(2)}" />
+              </div>
+            </div>
+            <span class="automation-hint">Each pass updates the current APO correction with proportional, accumulated, and change-rate error terms.</span>
+          </div>
+
+          <div id="dampedRefitAutomationFields" class="automation-fields" hidden>
+            <div class="field">
+              <label for="dampedRefitBlendInput">Blend</label>
+              <div class="number-input-row">
+                <input id="dampedRefitBlendInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_DAMPED_REFIT_BLEND.toFixed(2)}" />
+              </div>
+            </div>
+            <span class="automation-hint">Each pass computes a fresh graphic EQ fit and blends part of it into the current correction.</span>
+          </div>
+
+          <div id="momentumAutomationFields" class="automation-fields" hidden>
+            <div class="field">
+              <label for="momentumBlendInput">Blend</label>
+              <div class="number-input-row">
+                <input id="momentumBlendInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_MOMENTUM_BLEND.toFixed(2)}" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="momentumDecayInput">Decay</label>
+              <div class="number-input-row">
+                <input id="momentumDecayInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_MOMENTUM_DECAY.toFixed(2)}" />
+              </div>
+            </div>
+            <span class="automation-hint">Each pass blends toward a fresh fit while carrying forward part of the previous step.</span>
+          </div>
+
+          <div class="automation-fields">
             <div class="field">
               <label for="automationRegressionLimitInput">Revert After Regressions</label>
               <div class="number-input-row">
@@ -367,7 +438,6 @@ app.innerHTML = `
                 ).join('')}
               </div>
             </div>
-            <span class="automation-hint">Each pass measures the current response, adds (target - measured) * P to the current APO correction, then applies the updated APO config.</span>
           </div>
           <button id="runAutomationButton" class="btn btn-primary automation-run-button" type="button">
             Run Automatic Calibration
@@ -537,10 +607,19 @@ const runMeasurementButton = getElement<HTMLButtonElement>('runMeasurementButton
 const runAutomationButton = getElement<HTMLButtonElement>('runAutomationButton');
 const automationAlgorithmSelect = getElement<HTMLSelectElement>('automationAlgorithmSelect');
 const proportionalAutomationFields = getElement<HTMLDivElement>('proportionalAutomationFields');
+const pidAutomationFields = getElement<HTMLDivElement>('pidAutomationFields');
+const dampedRefitAutomationFields = getElement<HTMLDivElement>('dampedRefitAutomationFields');
+const momentumAutomationFields = getElement<HTMLDivElement>('momentumAutomationFields');
 const automationDelayInput = getElement<HTMLInputElement>('automationDelayInput');
 const proportionalPField = getElement<HTMLDivElement>('proportionalPField');
 const proportionalPInput = getElement<HTMLInputElement>('proportionalPInput');
 const dynamicProportionalPToggle = getElement<HTMLInputElement>('dynamicProportionalPToggle');
+const pidProportionalGainInput = getElement<HTMLInputElement>('pidProportionalGainInput');
+const pidIntegralGainInput = getElement<HTMLInputElement>('pidIntegralGainInput');
+const pidDerivativeGainInput = getElement<HTMLInputElement>('pidDerivativeGainInput');
+const dampedRefitBlendInput = getElement<HTMLInputElement>('dampedRefitBlendInput');
+const momentumBlendInput = getElement<HTMLInputElement>('momentumBlendInput');
+const momentumDecayInput = getElement<HTMLInputElement>('momentumDecayInput');
 const automationStopOnToleranceToggle = getElement<HTMLInputElement>('automationStopOnToleranceToggle');
 const automationRegressionLimitInput = getElement<HTMLInputElement>('automationRegressionLimitInput');
 const automationToleranceFields = getElement<HTMLDivElement>('automationToleranceFields');
@@ -631,6 +710,36 @@ const state: AppState = {
     localStorage.getItem(DYNAMIC_PROPORTIONAL_P_STORAGE_KEY) === 'true'
       ? true
       : DEFAULT_DYNAMIC_PROPORTIONAL_P,
+  pidProportionalGain: clamp(
+    readStoredNumber(PID_PROPORTIONAL_GAIN_STORAGE_KEY, DEFAULT_PID_PROPORTIONAL_GAIN),
+    0,
+    1,
+  ),
+  pidIntegralGain: clamp(
+    readStoredNumber(PID_INTEGRAL_GAIN_STORAGE_KEY, DEFAULT_PID_INTEGRAL_GAIN),
+    0,
+    1,
+  ),
+  pidDerivativeGain: clamp(
+    readStoredNumber(PID_DERIVATIVE_GAIN_STORAGE_KEY, DEFAULT_PID_DERIVATIVE_GAIN),
+    0,
+    1,
+  ),
+  dampedRefitBlend: clamp(
+    readStoredNumber(DAMPED_REFIT_BLEND_STORAGE_KEY, DEFAULT_DAMPED_REFIT_BLEND),
+    0,
+    1,
+  ),
+  momentumBlend: clamp(
+    readStoredNumber(MOMENTUM_BLEND_STORAGE_KEY, DEFAULT_MOMENTUM_BLEND),
+    0,
+    1,
+  ),
+  momentumDecay: clamp(
+    readStoredNumber(MOMENTUM_DECAY_STORAGE_KEY, DEFAULT_MOMENTUM_DECAY),
+    0,
+    1,
+  ),
   automationStopOnTolerance:
     localStorage.getItem(AUTOMATION_STOP_ON_TOLERANCE_STORAGE_KEY) === 'true'
       ? true
@@ -656,6 +765,9 @@ const state: AppState = {
   automationRunning: false,
   automationStopRequested: false,
   automationPassCount: 0,
+  automationPidIntegralByBand: {},
+  automationPidPreviousErrorByBand: {},
+  automationMomentumByBand: {},
   apoSelectedMeasurementId: localStorage.getItem(APO_SELECTED_MEASUREMENT_STORAGE_KEY),
   apoSelectedReferenceId: localStorage.getItem(APO_SELECTED_REFERENCE_STORAGE_KEY),
   parametricApoMaxFilters: storedApoMaxFilterCounts.parametric,
@@ -1071,6 +1183,54 @@ dynamicProportionalPToggle.addEventListener('change', () => {
   updateAutomationUi();
 });
 
+pidProportionalGainInput.addEventListener('input', () => {
+  syncAutomationSettings(false);
+});
+
+pidProportionalGainInput.addEventListener('blur', () => {
+  syncAutomationSettings(true);
+});
+
+pidIntegralGainInput.addEventListener('input', () => {
+  syncAutomationSettings(false);
+});
+
+pidIntegralGainInput.addEventListener('blur', () => {
+  syncAutomationSettings(true);
+});
+
+pidDerivativeGainInput.addEventListener('input', () => {
+  syncAutomationSettings(false);
+});
+
+pidDerivativeGainInput.addEventListener('blur', () => {
+  syncAutomationSettings(true);
+});
+
+dampedRefitBlendInput.addEventListener('input', () => {
+  syncAutomationSettings(false);
+});
+
+dampedRefitBlendInput.addEventListener('blur', () => {
+  syncAutomationSettings(true);
+});
+
+momentumBlendInput.addEventListener('input', () => {
+  syncAutomationSettings(false);
+});
+
+momentumBlendInput.addEventListener('blur', () => {
+  syncAutomationSettings(true);
+});
+
+momentumDecayInput.addEventListener('input', () => {
+  syncAutomationSettings(false);
+});
+
+momentumDecayInput.addEventListener('blur', () => {
+  syncAutomationSettings(true);
+});
+
 automationStopOnToleranceToggle.addEventListener('change', () => {
   syncAutomationSettings(true);
   setStatus(state.latestStatusMessage, state.latestStatusTone);
@@ -1365,6 +1525,12 @@ function setBusy(isBusy: boolean): void {
   automationAlgorithmSelect.disabled = isBusy;
   automationDelayInput.disabled = isBusy;
   dynamicProportionalPToggle.disabled = isBusy;
+  pidProportionalGainInput.disabled = isBusy;
+  pidIntegralGainInput.disabled = isBusy;
+  pidDerivativeGainInput.disabled = isBusy;
+  dampedRefitBlendInput.disabled = isBusy;
+  momentumBlendInput.disabled = isBusy;
+  momentumDecayInput.disabled = isBusy;
   automationStopOnToleranceToggle.disabled = isBusy;
   automationRegressionLimitInput.disabled = isBusy;
   updateProportionalPControlState();
@@ -1495,11 +1661,23 @@ function updateAutomationToleranceFieldState(): void {
 
 function updateAutomationUi(): void {
   const isProportional = state.automationAlgorithm === 'proportional';
+  const isPid = state.automationAlgorithm === 'pid';
+  const isDampedRefit = state.automationAlgorithm === 'damped-refit';
+  const isMomentum = state.automationAlgorithm === 'momentum';
   automationAlgorithmSelect.value = state.automationAlgorithm;
   automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
   proportionalAutomationFields.hidden = !isProportional;
+  pidAutomationFields.hidden = !isPid;
+  dampedRefitAutomationFields.hidden = !isDampedRefit;
+  momentumAutomationFields.hidden = !isMomentum;
   dynamicProportionalPToggle.checked = state.dynamicProportionalP;
   updateProportionalPControlState();
+  pidProportionalGainInput.value = state.pidProportionalGain.toFixed(2);
+  pidIntegralGainInput.value = state.pidIntegralGain.toFixed(2);
+  pidDerivativeGainInput.value = state.pidDerivativeGain.toFixed(2);
+  dampedRefitBlendInput.value = state.dampedRefitBlend.toFixed(2);
+  momentumBlendInput.value = state.momentumBlend.toFixed(2);
+  momentumDecayInput.value = state.momentumDecay.toFixed(2);
   automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
   automationToleranceMaxAcceptableErrorWidthInput.value = String(
     Math.round(state.automationToleranceMaxAcceptableErrorWidthHz),
@@ -1640,12 +1818,21 @@ function resetUserInputsToDefaults(): void {
   state.automationDelaySeconds = DEFAULT_AUTOMATION_DELAY_SECONDS;
   state.proportionalP = DEFAULT_PROPORTIONAL_P;
   state.dynamicProportionalP = DEFAULT_DYNAMIC_PROPORTIONAL_P;
+  state.pidProportionalGain = DEFAULT_PID_PROPORTIONAL_GAIN;
+  state.pidIntegralGain = DEFAULT_PID_INTEGRAL_GAIN;
+  state.pidDerivativeGain = DEFAULT_PID_DERIVATIVE_GAIN;
+  state.dampedRefitBlend = DEFAULT_DAMPED_REFIT_BLEND;
+  state.momentumBlend = DEFAULT_MOMENTUM_BLEND;
+  state.momentumDecay = DEFAULT_MOMENTUM_DECAY;
   state.automationStopOnTolerance = DEFAULT_AUTOMATION_STOP_ON_TOLERANCE;
   state.automationBandTolerances = createDefaultAutomationBandTolerances();
   state.automationToleranceMaxAcceptableErrorWidthHz =
     DEFAULT_AUTOMATION_TOLERANCE_MAX_ACCEPTABLE_ERROR_WIDTH_HZ;
   state.automationRegressionLimit = DEFAULT_AUTOMATION_REGRESSION_LIMIT;
   state.latestAutomationToleranceStatus = null;
+  state.automationPidIntegralByBand = {};
+  state.automationPidPreviousErrorByBand = {};
+  state.automationMomentumByBand = {};
   persistAutomationSettings();
 
   state.apoEqMode = DEFAULT_APO_EQ_MODE;
@@ -2533,10 +2720,17 @@ function persistActiveConfiguration(): void {
     automationDelaySeconds: state.automationDelaySeconds,
     proportionalP: state.proportionalP,
     dynamicProportionalP: state.dynamicProportionalP,
+    pidProportionalGain: state.pidProportionalGain,
+    pidIntegralGain: state.pidIntegralGain,
+    pidDerivativeGain: state.pidDerivativeGain,
+    dampedRefitBlend: state.dampedRefitBlend,
+    momentumBlend: state.momentumBlend,
+    momentumDecay: state.momentumDecay,
     automationStopOnTolerance: state.automationStopOnTolerance,
     automationBandTolerances: state.automationBandTolerances,
     automationToleranceMaxAcceptableErrorWidthHz: state.automationToleranceMaxAcceptableErrorWidthHz,
     automationRegressionLimit: state.automationRegressionLimit,
+    apoFilterListPageSize: state.apoFilterListPageSize,
     apoSelectedMeasurementId: state.apoSelectedMeasurementId,
     apoSelectedReferenceId: state.apoSelectedReferenceId,
     parametricApoMaxFilters: state.parametricApoMaxFilters,
@@ -2647,16 +2841,27 @@ async function saveConfiguration(): Promise<void> {
       inputDeviceLabel: microphoneSelect.selectedOptions[0]?.textContent ?? null,
       outputDeviceId: outputSelect.value,
       outputDeviceLabel: outputSelect.selectedOptions[0]?.textContent ?? null,
+      startFrequency: Number(startFrequencyInput.value),
+      endFrequency: Number(endFrequencyInput.value),
+      durationSeconds: Number(durationInput.value),
+      sweepLevelDb: Number(volumeInput.value),
       smoothingMode: getSelectedSmoothingMode(),
       normalizePlot: normalizePlotToggle.checked,
       automationAlgorithm: state.automationAlgorithm,
       automationDelaySeconds: state.automationDelaySeconds,
       proportionalP: state.proportionalP,
       dynamicProportionalP: state.dynamicProportionalP,
+      pidProportionalGain: state.pidProportionalGain,
+      pidIntegralGain: state.pidIntegralGain,
+      pidDerivativeGain: state.pidDerivativeGain,
+      dampedRefitBlend: state.dampedRefitBlend,
+      momentumBlend: state.momentumBlend,
+      momentumDecay: state.momentumDecay,
       automationStopOnTolerance: state.automationStopOnTolerance,
       automationBandTolerances: state.automationBandTolerances,
       automationToleranceMaxAcceptableErrorWidthHz: state.automationToleranceMaxAcceptableErrorWidthHz,
       automationRegressionLimit: state.automationRegressionLimit,
+      apoFilterListPageSize: state.apoFilterListPageSize,
     };
 
     const saveResult = await window.freakishEars.saveFileAs({
@@ -2699,7 +2904,6 @@ async function importConfiguration(file: File): Promise<void> {
     const parsed = JSON.parse(await file.text()) as Record<string, unknown>;
     applyImportedConfiguration(parsed, {
       persist: true,
-      includeMeasurementSweepSettings: false,
       includeApoState: false,
     });
 
@@ -2804,6 +3008,48 @@ function applyImportedConfiguration(
     typeof config.dynamicProportionalP === 'boolean'
       ? config.dynamicProportionalP
       : DEFAULT_DYNAMIC_PROPORTIONAL_P;
+  state.pidProportionalGain = clamp(
+    Number.isFinite(Number(config.pidProportionalGain))
+      ? Number(config.pidProportionalGain)
+      : DEFAULT_PID_PROPORTIONAL_GAIN,
+    0,
+    1,
+  );
+  state.pidIntegralGain = clamp(
+    Number.isFinite(Number(config.pidIntegralGain))
+      ? Number(config.pidIntegralGain)
+      : DEFAULT_PID_INTEGRAL_GAIN,
+    0,
+    1,
+  );
+  state.pidDerivativeGain = clamp(
+    Number.isFinite(Number(config.pidDerivativeGain))
+      ? Number(config.pidDerivativeGain)
+      : DEFAULT_PID_DERIVATIVE_GAIN,
+    0,
+    1,
+  );
+  state.dampedRefitBlend = clamp(
+    Number.isFinite(Number(config.dampedRefitBlend))
+      ? Number(config.dampedRefitBlend)
+      : DEFAULT_DAMPED_REFIT_BLEND,
+    0,
+    1,
+  );
+  state.momentumBlend = clamp(
+    Number.isFinite(Number(config.momentumBlend))
+      ? Number(config.momentumBlend)
+      : DEFAULT_MOMENTUM_BLEND,
+    0,
+    1,
+  );
+  state.momentumDecay = clamp(
+    Number.isFinite(Number(config.momentumDecay))
+      ? Number(config.momentumDecay)
+      : DEFAULT_MOMENTUM_DECAY,
+    0,
+    1,
+  );
   state.automationStopOnTolerance =
     typeof config.automationStopOnTolerance === 'boolean'
       ? config.automationStopOnTolerance
@@ -2825,6 +3071,17 @@ function applyImportedConfiguration(
     0,
     20,
   );
+  state.apoFilterListPageSize = clamp(
+    Number.isFinite(Number(config.apoFilterListPageSize))
+      ? Math.round(Number(config.apoFilterListPageSize))
+      : state.apoFilterListPageSize,
+    1,
+    MAX_GRAPHIC_APO_FILTERS,
+  );
+  state.apoFilterListPage = 1;
+  state.automationPidIntegralByBand = {};
+  state.automationPidPreviousErrorByBand = {};
+  state.automationMomentumByBand = {};
   if (includeApoState) {
     const hasImportedApoEqMode = hasOwnConfigProperty(config, 'apoEqMode');
     const hasImportedParametricApoFilters =
@@ -2902,7 +3159,14 @@ function applyImportedConfiguration(
   }
   apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
   automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
+  proportionalPInput.value = state.proportionalP.toFixed(2);
   dynamicProportionalPToggle.checked = state.dynamicProportionalP;
+  pidProportionalGainInput.value = state.pidProportionalGain.toFixed(2);
+  pidIntegralGainInput.value = state.pidIntegralGain.toFixed(2);
+  pidDerivativeGainInput.value = state.pidDerivativeGain.toFixed(2);
+  dampedRefitBlendInput.value = state.dampedRefitBlend.toFixed(2);
+  momentumBlendInput.value = state.momentumBlend.toFixed(2);
+  momentumDecayInput.value = state.momentumDecay.toFixed(2);
   automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
   automationToleranceMaxAcceptableErrorWidthInput.value = String(
     Math.round(state.automationToleranceMaxAcceptableErrorWidthHz),
@@ -2981,7 +3245,7 @@ function getSelectedSampleRate(): number {
 }
 
 function getSelectedAutomationAlgorithm(): AutomationAlgorithm {
-  return automationAlgorithmSelect.value === 'proportional'
+  return isAutomationAlgorithm(automationAlgorithmSelect.value)
     ? automationAlgorithmSelect.value
     : DEFAULT_AUTOMATION_ALGORITHM;
 }
@@ -3220,7 +3484,12 @@ function isApoEqMode(value: unknown): value is ApoEqMode {
 }
 
 function isAutomationAlgorithm(value: unknown): value is AutomationAlgorithm {
-  return value === 'proportional';
+  return (
+    value === 'proportional' ||
+    value === 'pid' ||
+    value === 'damped-refit' ||
+    value === 'momentum'
+  );
 }
 
 function toOptionalString(value: unknown): string | null {
@@ -3272,6 +3541,30 @@ function persistAutomationSettings(): void {
   localStorage.setItem(
     DYNAMIC_PROPORTIONAL_P_STORAGE_KEY,
     String(state.dynamicProportionalP),
+  );
+  localStorage.setItem(
+    PID_PROPORTIONAL_GAIN_STORAGE_KEY,
+    String(state.pidProportionalGain),
+  );
+  localStorage.setItem(
+    PID_INTEGRAL_GAIN_STORAGE_KEY,
+    String(state.pidIntegralGain),
+  );
+  localStorage.setItem(
+    PID_DERIVATIVE_GAIN_STORAGE_KEY,
+    String(state.pidDerivativeGain),
+  );
+  localStorage.setItem(
+    DAMPED_REFIT_BLEND_STORAGE_KEY,
+    String(state.dampedRefitBlend),
+  );
+  localStorage.setItem(
+    MOMENTUM_BLEND_STORAGE_KEY,
+    String(state.momentumBlend),
+  );
+  localStorage.setItem(
+    MOMENTUM_DECAY_STORAGE_KEY,
+    String(state.momentumDecay),
   );
   localStorage.setItem(
     AUTOMATION_STOP_ON_TOLERANCE_STORAGE_KEY,
@@ -3370,6 +3663,12 @@ function syncAutomationSettings(normalize: boolean): void {
   const previousDynamicProportionalP = state.dynamicProportionalP;
   const parsedDelaySeconds = Number(automationDelayInput.value);
   const parsedProportionalP = Number(proportionalPInput.value);
+  const parsedPidProportionalGain = Number(pidProportionalGainInput.value);
+  const parsedPidIntegralGain = Number(pidIntegralGainInput.value);
+  const parsedPidDerivativeGain = Number(pidDerivativeGainInput.value);
+  const parsedDampedRefitBlend = Number(dampedRefitBlendInput.value);
+  const parsedMomentumBlend = Number(momentumBlendInput.value);
+  const parsedMomentumDecay = Number(momentumDecayInput.value);
   const parsedMaxAcceptableErrorWidthHz = Number(
     automationToleranceMaxAcceptableErrorWidthInput.value,
   );
@@ -3385,6 +3684,30 @@ function syncAutomationSettings(normalize: boolean): void {
   }
 
   state.dynamicProportionalP = dynamicProportionalPToggle.checked;
+
+  if (Number.isFinite(parsedPidProportionalGain)) {
+    state.pidProportionalGain = clamp(parsedPidProportionalGain, 0, 1);
+  }
+
+  if (Number.isFinite(parsedPidIntegralGain)) {
+    state.pidIntegralGain = clamp(parsedPidIntegralGain, 0, 1);
+  }
+
+  if (Number.isFinite(parsedPidDerivativeGain)) {
+    state.pidDerivativeGain = clamp(parsedPidDerivativeGain, 0, 1);
+  }
+
+  if (Number.isFinite(parsedDampedRefitBlend)) {
+    state.dampedRefitBlend = clamp(parsedDampedRefitBlend, 0, 1);
+  }
+
+  if (Number.isFinite(parsedMomentumBlend)) {
+    state.momentumBlend = clamp(parsedMomentumBlend, 0, 1);
+  }
+
+  if (Number.isFinite(parsedMomentumDecay)) {
+    state.momentumDecay = clamp(parsedMomentumDecay, 0, 1);
+  }
 
   if (Number.isFinite(parsedMaxAcceptableErrorWidthHz)) {
     state.automationToleranceMaxAcceptableErrorWidthHz = clamp(
@@ -3425,6 +3748,12 @@ function syncAutomationSettings(normalize: boolean): void {
     automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
     proportionalPInput.value = state.proportionalP.toFixed(2);
     dynamicProportionalPToggle.checked = state.dynamicProportionalP;
+    pidProportionalGainInput.value = state.pidProportionalGain.toFixed(2);
+    pidIntegralGainInput.value = state.pidIntegralGain.toFixed(2);
+    pidDerivativeGainInput.value = state.pidDerivativeGain.toFixed(2);
+    dampedRefitBlendInput.value = state.dampedRefitBlend.toFixed(2);
+    momentumBlendInput.value = state.momentumBlend.toFixed(2);
+    momentumDecayInput.value = state.momentumDecay.toFixed(2);
     automationStopOnToleranceToggle.checked = state.automationStopOnTolerance;
     automationToleranceMaxAcceptableErrorWidthInput.value = String(
       Math.round(state.automationToleranceMaxAcceptableErrorWidthHz),
@@ -4042,6 +4371,18 @@ function buildFiltersForSelectedAlgorithm(
     return buildProportionalApoFilters(measurement, referenceCurve);
   }
 
+  if (state.automationAlgorithm === 'pid') {
+    return buildPidApoFilters(measurement, referenceCurve);
+  }
+
+  if (state.automationAlgorithm === 'damped-refit') {
+    return buildDampedRefitApoFilters(measurement, referenceCurve);
+  }
+
+  if (state.automationAlgorithm === 'momentum') {
+    return buildMomentumApoFilters(measurement, referenceCurve);
+  }
+
   return buildApoFiltersFromCurves(measurement, referenceCurve);
 }
 
@@ -4095,15 +4436,7 @@ function buildProportionalGraphicEqFilters(
 ): ApoFilter[] {
   const measurementPoints = getAutomationMeasurementPoints(measurement, referenceCurve);
   const referencePoints = getDisplayedReferencePoints(referenceCurve);
-  const filterCount = clamp(state.graphicApoMaxFilters, 1, MAX_GRAPHIC_APO_FILTERS);
-  const expectedFrequencies = getGraphicEqFrequencies(filterCount);
-  const baseFilters = state.graphicApoFilters.length === filterCount
-    ? state.graphicApoFilters.map((filter, index) => ({
-        ...filter,
-        frequencyHz: expectedFrequencies[index] ?? filter.frequencyHz,
-        q: roundTo(getGraphicEqQ(expectedFrequencies, index), 0.01),
-      }))
-    : buildGraphicEqFilters(filterCount);
+  const baseFilters = getAutomationGraphicEqBaseFilters();
 
   return baseFilters.map((filter) => {
     const measurementPoint = findClosestPoint(measurementPoints, filter.frequencyHz);
@@ -4121,6 +4454,131 @@ function buildProportionalGraphicEqFilters(
       ),
     };
   });
+}
+
+function buildPidApoFilters(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve,
+): ApoFilter[] {
+  if (state.apoEqMode !== 'graphic') {
+    return buildApoFiltersFromCurves(measurement, referenceCurve);
+  }
+
+  const measurementPoints = getAutomationMeasurementPoints(measurement, referenceCurve);
+  const referencePoints = getDisplayedReferencePoints(referenceCurve);
+  const baseFilters = getAutomationGraphicEqBaseFilters();
+  const nextIntegralByBand: Record<string, number> = {};
+  const nextPreviousErrorByBand: Record<string, number> = {};
+
+  const nextFilters = baseFilters.map((filter) => {
+    const bandKey = getAutomationPidBandKey(filter.frequencyHz);
+    const measurementPoint = findClosestPoint(measurementPoints, filter.frequencyHz);
+    const referencePoint = findClosestPoint(referencePoints, filter.frequencyHz);
+    const errorDb =
+      referencePoint.smoothedMagnitudeDbRelative - measurementPoint.smoothedMagnitudeDbRelative;
+    const integralErrorDb = clamp(
+      (state.automationPidIntegralByBand[bandKey] ?? 0) + errorDb,
+      -PID_INTEGRAL_ERROR_LIMIT_DB,
+      PID_INTEGRAL_ERROR_LIMIT_DB,
+    );
+    const previousErrorDb = state.automationPidPreviousErrorByBand[bandKey];
+    const derivativeErrorDb = previousErrorDb === undefined ? 0 : errorDb - previousErrorDb;
+    const adjustmentDb =
+      errorDb * state.pidProportionalGain +
+      integralErrorDb * state.pidIntegralGain +
+      derivativeErrorDb * state.pidDerivativeGain;
+
+    nextIntegralByBand[bandKey] = integralErrorDb;
+    nextPreviousErrorByBand[bandKey] = errorDb;
+
+    return {
+      ...filter,
+      gainDb: roundTo(
+        clamp(filter.gainDb + adjustmentDb, -state.apoMaxCutDb, state.apoMaxBoostDb),
+        0.1,
+      ),
+    };
+  });
+
+  state.automationPidIntegralByBand = nextIntegralByBand;
+  state.automationPidPreviousErrorByBand = nextPreviousErrorByBand;
+
+  return nextFilters;
+}
+
+function buildDampedRefitApoFilters(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve,
+): ApoFilter[] {
+  if (state.apoEqMode !== 'graphic') {
+    return buildApoFiltersFromCurves(measurement, referenceCurve);
+  }
+
+  const baseFilters = getAutomationGraphicEqBaseFilters();
+  const refitFilters = buildGraphicEqFiltersFromCurves(measurement, referenceCurve);
+
+  return baseFilters.map((filter, index) => {
+    const targetFilter = refitFilters[index] ?? filter;
+    const blendedGainDb = filter.gainDb + (targetFilter.gainDb - filter.gainDb) * state.dampedRefitBlend;
+
+    return {
+      ...filter,
+      gainDb: roundTo(clamp(blendedGainDb, -state.apoMaxCutDb, state.apoMaxBoostDb), 0.1),
+    };
+  });
+}
+
+function buildMomentumApoFilters(
+  measurement: LoadedMeasurement,
+  referenceCurve: ReferenceCurve,
+): ApoFilter[] {
+  if (state.apoEqMode !== 'graphic') {
+    return buildApoFiltersFromCurves(measurement, referenceCurve);
+  }
+
+  const baseFilters = getAutomationGraphicEqBaseFilters();
+  const refitFilters = buildGraphicEqFiltersFromCurves(measurement, referenceCurve);
+  const nextMomentumByBand: Record<string, number> = {};
+
+  const nextFilters = baseFilters.map((filter, index) => {
+    const bandKey = getAutomationPidBandKey(filter.frequencyHz);
+    const targetFilter = refitFilters[index] ?? filter;
+    const targetDeltaDb = targetFilter.gainDb - filter.gainDb;
+    const momentumDb =
+      (state.automationMomentumByBand[bandKey] ?? 0) * state.momentumDecay +
+      targetDeltaDb * state.momentumBlend;
+
+    nextMomentumByBand[bandKey] = momentumDb;
+
+    return {
+      ...filter,
+      gainDb: roundTo(
+        clamp(filter.gainDb + momentumDb, -state.apoMaxCutDb, state.apoMaxBoostDb),
+        0.1,
+      ),
+    };
+  });
+
+  state.automationMomentumByBand = nextMomentumByBand;
+
+  return nextFilters;
+}
+
+function getAutomationGraphicEqBaseFilters(): ApoFilter[] {
+  const filterCount = clamp(state.graphicApoMaxFilters, 1, MAX_GRAPHIC_APO_FILTERS);
+  const expectedFrequencies = getGraphicEqFrequencies(filterCount);
+
+  return state.graphicApoFilters.length === filterCount
+    ? state.graphicApoFilters.map((filter, index) => ({
+        ...filter,
+        frequencyHz: expectedFrequencies[index] ?? filter.frequencyHz,
+        q: roundTo(getGraphicEqQ(expectedFrequencies, index), 0.01),
+      }))
+    : buildGraphicEqFilters(filterCount);
+}
+
+function getAutomationPidBandKey(frequencyHz: number): string {
+  return frequencyHz.toFixed(3);
 }
 
 function getProportionalAdjustmentDb(errorDb: number, proportionalP: number): number {
@@ -4182,7 +4640,19 @@ function getAutomationErrorScoreDb(
 }
 
 function formatAutomationAlgorithmLabel(algorithm: AutomationAlgorithm): string {
-  return algorithm === 'proportional' ? 'proportional' : algorithm;
+  if (algorithm === 'pid') {
+    return 'PID';
+  }
+
+  if (algorithm === 'damped-refit') {
+    return 'damped refit';
+  }
+
+  if (algorithm === 'momentum') {
+    return 'momentum';
+  }
+
+  return 'proportional';
 }
 
 function buildApoFiltersFromCurves(
@@ -4645,6 +5115,11 @@ function buildGraphicEqFilters(filterCount: number, sourceFilters: ApoFilter[] =
 
 function syncGraphicEqFiltersToBandCount(): void {
   state.graphicApoFilters = buildGraphicEqFilters(state.graphicApoMaxFilters, state.graphicApoFilters);
+  state.nextApoFilterIndex = state.graphicApoFilters.length + 1;
+}
+
+function resetGraphicEqFiltersToFlat(): void {
+  state.graphicApoFilters = buildGraphicEqFilters(state.graphicApoMaxFilters);
   state.nextApoFilterIndex = state.graphicApoFilters.length + 1;
 }
 
@@ -5195,12 +5670,28 @@ async function toggleAutomationLoop(): Promise<void> {
   state.automationRunning = true;
   state.automationStopRequested = false;
   state.automationPassCount = 0;
+  state.automationPidIntegralByBand = {};
+  state.automationPidPreviousErrorByBand = {};
+  state.automationMomentumByBand = {};
   state.apoEqMode = 'graphic';
-  syncGraphicEqFiltersToBandCount();
+  resetGraphicEqFiltersToFlat();
   persistApoState();
   persistActiveConfiguration();
   updateAutomationUi();
   renderApoSection();
+
+  const appliedFlatProfile = await applyApoConfig({ continueOnBusyFileError: true });
+  if (!appliedFlatProfile) {
+    state.automationRunning = false;
+    state.automationStopRequested = false;
+    state.automationPassCount = 0;
+    state.automationPidIntegralByBand = {};
+    state.automationPidPreviousErrorByBand = {};
+    state.automationMomentumByBand = {};
+    updateAutomationUi();
+    return;
+  }
+
   appendLog(`Started ${formatAutomationAlgorithmLabel(state.automationAlgorithm)} automation.`, 'success');
   let completedWithinTolerance = false;
   let toleranceSummary = '';

@@ -106,7 +106,7 @@ export type ApoFilterKind =
   | 'HSCQ';
 
 export type ApoEqMode = 'parametric' | 'graphic';
-export type AutomationAlgorithm = 'proportional';
+export type AutomationAlgorithm = 'proportional' | 'pid' | 'damped-refit' | 'momentum';
 export type AutomationToleranceBand =
   | 'subBass'
   | 'bass'
@@ -150,6 +150,12 @@ export type AppState = {
   automationDelaySeconds: number;
   proportionalP: number;
   dynamicProportionalP: boolean;
+  pidProportionalGain: number;
+  pidIntegralGain: number;
+  pidDerivativeGain: number;
+  dampedRefitBlend: number;
+  momentumBlend: number;
+  momentumDecay: number;
   automationStopOnTolerance: boolean;
   automationBandTolerances: AutomationBandTolerances;
   automationToleranceMaxAcceptableErrorWidthHz: number;
@@ -158,6 +164,9 @@ export type AppState = {
   automationRunning: boolean;
   automationStopRequested: boolean;
   automationPassCount: number;
+  automationPidIntegralByBand: Record<string, number>;
+  automationPidPreviousErrorByBand: Record<string, number>;
+  automationMomentumByBand: Record<string, number>;
   apoSelectedMeasurementId: string | null;
   apoSelectedReferenceId: string | null;
   parametricApoMaxFilters: number;
