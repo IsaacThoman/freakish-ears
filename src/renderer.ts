@@ -5718,6 +5718,12 @@ async function toggleAutomationLoop(): Promise<void> {
           ? updateLatestAutomationToleranceStatus(measurement, referenceCurve)
           : evaluateAutomationTolerance(measurement, referenceCurve);
 
+        if (state.automationStopOnTolerance && toleranceResult?.satisfied) {
+          completedWithinTolerance = true;
+          toleranceSummary = toleranceResult.bandSummaries.join(', ');
+          break;
+        }
+
         if (toleranceResult && toleranceResult.scoreDb < bestScoreDb - 0.01) {
           bestScoreDb = toleranceResult.scoreDb;
           bestFilters = cloneApoFilters(getActiveApoFilters());
@@ -5766,11 +5772,6 @@ async function toggleAutomationLoop(): Promise<void> {
           consecutiveRegressionCount = 0;
         }
 
-        if (state.automationStopOnTolerance && toleranceResult?.satisfied) {
-          completedWithinTolerance = true;
-          toleranceSummary = toleranceResult.bandSummaries.join(', ');
-          break;
-        }
       }
 
       const generated = await generateApoFilters(measurement, true);
