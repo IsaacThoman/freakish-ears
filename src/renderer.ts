@@ -76,6 +76,25 @@ import {
   parseImportedMeasurementFile,
 } from './renderer/measurements';
 import {
+  PARAMETRIC_APO_FILTER_KIND_OPTIONS,
+  apoFilterKindUsesGain,
+  apoFilterKindUsesOrder,
+  apoFilterKindUsesQ,
+  apoFilterKindUsesShape,
+  apoFilterKindUsesSlopeDb,
+  buildApoFilterConfigLines,
+  getApoFilterResponseDb,
+  getDefaultApoFilterOrder,
+  getDefaultApoFilterQ,
+  getDefaultApoFilterSlopeDbPerOct,
+  getExpandedApoSectionCount,
+  getApoFilterShapeLabel,
+  isApoFilterKind,
+  normalizeApoFilterOrder,
+  normalizeApoFilterSlopeDbPerOct,
+  parseLogicalApoFilterComment,
+} from './renderer/apo';
+import {
   type ApoDragAxis,
   attachApoPlotInteractions,
   attachPlotInteractions,
@@ -151,7 +170,7 @@ const AUTOMATION_TOLERANCE_BANDS: Array<{
   },
   {
     key: 'upMid',
-    label: 'Up mid',
+    label: 'Upper mid',
     minimumFrequencyHz: 2000,
     maximumFrequencyHz: 4000,
     defaultToleranceDb: 3,
@@ -173,20 +192,6 @@ const AUTOMATION_TOLERANCE_BANDS: Array<{
 ];
 
 const DYNAMIC_PROPORTIONAL_P_FULL_SCALE_ERROR_DB = 12;
-
-const PARAMETRIC_APO_FILTER_KIND_OPTIONS: Array<{
-  value: ApoFilterKind;
-  label: string;
-}> = [
-  { value: 'PK', label: 'Peak' },
-  { value: 'LS', label: 'Low Shelf' },
-  { value: 'HS', label: 'High Shelf' },
-  { value: 'LP', label: 'Low Pass' },
-  { value: 'HP', label: 'High Pass' },
-  { value: 'NO', label: 'Notch' },
-  { value: 'BP', label: 'Band Pass' },
-  { value: 'AP', label: 'All Pass' },
-];
 
 if (!app) {
   throw new Error('Unable to find the app root.');
@@ -341,7 +346,7 @@ app.innerHTML = `
             </label>
             <div id="automationToleranceFields" class="automation-fields">
               <div class="field">
-                <label for="automationToleranceMaxAcceptableErrorWidthInput">Max acceptable error width</label>
+                <label for="automationToleranceMaxAcceptableErrorWidthInput">Max Acceptable Error Width</label>
                 <div class="number-input-row">
                   <input id="automationToleranceMaxAcceptableErrorWidthInput" class="level-number-input" type="number" min="0" max="5000" step="1" value="${DEFAULT_AUTOMATION_TOLERANCE_MAX_ACCEPTABLE_ERROR_WIDTH_HZ.toFixed(0)}" />
                   <span>Hz</span>
@@ -427,6 +432,7 @@ app.innerHTML = `
           <input id="measurementFileInput" type="file" accept=".txt,.csv,.json,.targetcurve,text/plain,application/json" multiple hidden />
           <input id="referenceFileInput" type="file" accept=".txt,.csv,.targetcurve,text/plain" multiple hidden />
           <input id="configFileInput" type="file" accept=".json,application/json,text/plain" hidden />
+          <input id="apoConfigFileInput" type="file" accept=".txt,.peace,.peq,.ini,text/plain" hidden />
 
           <div id="measurementsPlotCard" class="plot-card">
             <span style="color:var(--text-muted);font-size:11px">Run or import measurements to plot response</span>
@@ -451,8 +457,11 @@ app.innerHTML = `
               <button id="clearApoFiltersButton" class="btn btn-secondary" type="button">
                 Clear
               </button>
+              <button id="importApoConfigButton" class="btn btn-secondary" type="button">
+                Import EQ
+              </button>
               <button id="exportApoConfigButton" class="btn btn-secondary" type="button">
-                Export APO
+                Export EQ
               </button>
               <div class="apo-apply-anchor">
                 <button id="applyApoConfigButton" class="btn btn-secondary" type="button">
@@ -487,7 +496,7 @@ app.innerHTML = `
             <span class="apo-filter-header-cell apo-filter-header-type">Type</span>
             <span class="apo-filter-header-cell">Freq (Hz)</span>
             <span class="apo-filter-header-cell">Gain (dB)</span>
-            <span class="apo-filter-header-cell apo-filter-header-q">Q</span>
+            <span class="apo-filter-header-cell apo-filter-header-q">Q / Order / Slope</span>
             <span class="apo-filter-header-cell">Action</span>
           </div>
 
@@ -557,6 +566,7 @@ const smoothingModeSelect = getElement<HTMLSelectElement>('smoothingModeSelect')
 const measurementFileInput = getElement<HTMLInputElement>('measurementFileInput');
 const referenceFileInput = getElement<HTMLInputElement>('referenceFileInput');
 const configFileInput = getElement<HTMLInputElement>('configFileInput');
+const apoConfigFileInput = getElement<HTMLInputElement>('apoConfigFileInput');
 const plotsContainer = getElement<HTMLDivElement>('plotsContainer');
 const measurementsPlotCard = getElement<HTMLDivElement>('measurementsPlotCard');
 const apoEqModeToggle = getElement<HTMLDivElement>('apoEqModeToggle');
@@ -567,6 +577,7 @@ const apoCard = getElement<HTMLDivElement>('apoCard');
 const generateApoFiltersButton = getElement<HTMLButtonElement>('generateApoFiltersButton');
 const addApoFilterButton = getElement<HTMLButtonElement>('addApoFilterButton');
 const clearApoFiltersButton = getElement<HTMLButtonElement>('clearApoFiltersButton');
+const importApoConfigButton = getElement<HTMLButtonElement>('importApoConfigButton');
 const exportApoConfigButton = getElement<HTMLButtonElement>('exportApoConfigButton');
 const applyApoConfigButton = getElement<HTMLButtonElement>('applyApoConfigButton');
 const apoApplyWarning = getElement<HTMLDivElement>('apoApplyWarning');
@@ -648,6 +659,10 @@ const state: AppState = {
   apoSelectedReferenceId: localStorage.getItem(APO_SELECTED_REFERENCE_STORAGE_KEY),
   parametricApoMaxFilters: storedApoMaxFilterCounts.parametric,
   graphicApoMaxFilters: storedApoMaxFilterCounts.graphic,
+  parametricApoImportedPreampDb: null,
+  graphicApoImportedPreampDb: null,
+  parametricApoImportedBlockRepeatCount: null,
+  graphicApoImportedBlockRepeatCount: null,
   // These caps are fixed now that the UI setting is gone.
   apoMaxBoostDb: DEFAULT_APO_MAX_BOOST_DB,
   apoMaxCutDb: DEFAULT_APO_MAX_CUT_DB,
@@ -699,6 +714,44 @@ function setActiveApoMaxFilters(value: number): void {
   state.parametricApoMaxFilters = value;
 }
 
+function getActiveImportedApoPreampDb(): number | null {
+  return state.apoEqMode === 'graphic'
+    ? state.graphicApoImportedPreampDb
+    : state.parametricApoImportedPreampDb;
+}
+
+function setActiveImportedApoPreampDb(value: number | null): void {
+  if (state.apoEqMode === 'graphic') {
+    state.graphicApoImportedPreampDb = value;
+    return;
+  }
+
+  state.parametricApoImportedPreampDb = value;
+}
+
+function clearActiveImportedApoPreamp(): void {
+  setActiveImportedApoPreampDb(null);
+}
+
+function getActiveImportedApoBlockRepeatCount(): number | null {
+  return state.apoEqMode === 'graphic'
+    ? state.graphicApoImportedBlockRepeatCount
+    : state.parametricApoImportedBlockRepeatCount;
+}
+
+function setActiveImportedApoBlockRepeatCount(value: number | null): void {
+  if (state.apoEqMode === 'graphic') {
+    state.graphicApoImportedBlockRepeatCount = value;
+    return;
+  }
+
+  state.parametricApoImportedBlockRepeatCount = value;
+}
+
+function clearActiveImportedApoBlockRepeatCount(): void {
+  setActiveImportedApoBlockRepeatCount(null);
+}
+
 function syncParametricApoFilterCountToFilters(): void {
   state.parametricApoMaxFilters = clamp(state.parametricApoFilters.length, 0, MAX_PARAMETRIC_APO_FILTERS);
 }
@@ -721,7 +774,9 @@ function syncParametricFiltersToCount(): void {
           kind: 'PK',
           frequencyHz: findNextParametricFilterFrequency(nextFilters),
           gainDb: 0,
-          q: 1.41,
+          q: getDefaultApoFilterQ('PK'),
+          order: null,
+          slopeDbPerOct: null,
         },
       ];
       state.nextApoFilterIndex += 1;
@@ -801,6 +856,15 @@ configFileInput.addEventListener('change', () => {
 
   if (file) {
     void importConfiguration(file);
+  }
+});
+
+apoConfigFileInput.addEventListener('change', () => {
+  const file = apoConfigFileInput.files?.[0] ?? null;
+  apoConfigFileInput.value = '';
+
+  if (file) {
+    void importEqProfile(file);
   }
 });
 
@@ -1064,6 +1128,10 @@ clearApoFiltersButton.addEventListener('click', () => {
   clearApoFilters();
 });
 
+importApoConfigButton.addEventListener('click', () => {
+  apoConfigFileInput.click();
+});
+
 exportApoConfigButton.addEventListener('click', () => {
   void exportApoConfig();
 });
@@ -1231,6 +1299,7 @@ function setBusy(isBusy: boolean): void {
   measurementFileInput.disabled = isBusy;
   referenceFileInput.disabled = isBusy;
   configFileInput.disabled = isBusy;
+  apoConfigFileInput.disabled = isBusy;
   measurementBackendSelect.disabled = isBusy;
   automationAlgorithmSelect.disabled = isBusy;
   automationDelayInput.disabled = isBusy;
@@ -1243,6 +1312,7 @@ function setBusy(isBusy: boolean): void {
   generateApoFiltersButton.disabled = isBusy;
   addApoFilterButton.disabled = isBusy;
   clearApoFiltersButton.disabled = isBusy;
+  importApoConfigButton.disabled = isBusy;
   exportApoConfigButton.disabled = isBusy;
   applyApoConfigButton.disabled = isBusy;
   apoEqModeParametricButton.disabled = isBusy;
@@ -1312,6 +1382,7 @@ function updateMeasurementActionState(): void {
     state.busy || !state.apoSelectedMeasurementId || !state.apoSelectedReferenceId;
   addApoFilterButton.disabled = state.busy || state.apoEqMode === 'graphic';
   clearApoFiltersButton.disabled = state.busy || getActiveApoFilters().length === 0;
+  importApoConfigButton.disabled = state.busy;
   exportApoConfigButton.disabled = state.busy || !state.outputFolder;
   const enabledFilterCount = getActiveApoFilters().filter((filter) => filter.enabled).length;
   const apoInstalled = state.equalizerApoStatus?.installed ?? false;
@@ -1519,6 +1590,10 @@ function resetUserInputsToDefaults(): void {
   state.apoEqMode = DEFAULT_APO_EQ_MODE;
   state.parametricApoMaxFilters = DEFAULT_APO_MAX_FILTERS;
   state.graphicApoMaxFilters = DEFAULT_GRAPHIC_APO_MAX_FILTERS;
+  state.parametricApoImportedPreampDb = null;
+  state.graphicApoImportedPreampDb = null;
+  state.parametricApoImportedBlockRepeatCount = null;
+  state.graphicApoImportedBlockRepeatCount = null;
   state.parametricApoFilters = [];
   state.graphicApoFilters = [];
   state.nextApoFilterIndex = 1;
@@ -2209,6 +2284,8 @@ function renderPlotCard(
     filters: activeApoFilters,
     eqMode: state.apoEqMode,
     sampleRate: getSelectedSampleRate(),
+    responseMultiplier: getActiveImportedApoBlockRepeatCount() ?? 1,
+    preampDb: getAppliedApoPreampDb(),
     measurementName: measurement?.name ?? null,
     targetName: referenceCurve?.name ?? null,
     compact: apoCompact,
@@ -2220,6 +2297,8 @@ function renderPlotCard(
     filters: activeApoFilters,
     eqMode: state.apoEqMode,
     sampleRate: getSelectedSampleRate(),
+    responseMultiplier: getActiveImportedApoBlockRepeatCount() ?? 1,
+    preampDb: getAppliedApoPreampDb(),
     lockFrequency: state.apoEqMode === 'graphic',
     onFilterDrag: handleApoFilterDrag,
     onDragEnd: handleApoFilterDragEnd,
@@ -2401,6 +2480,10 @@ function persistActiveConfiguration(): void {
     apoSelectedReferenceId: state.apoSelectedReferenceId,
     parametricApoMaxFilters: state.parametricApoMaxFilters,
     graphicApoMaxFilters: state.graphicApoMaxFilters,
+    parametricApoImportedPreampDb: state.parametricApoImportedPreampDb,
+    graphicApoImportedPreampDb: state.graphicApoImportedPreampDb,
+    parametricApoImportedBlockRepeatCount: state.parametricApoImportedBlockRepeatCount,
+    graphicApoImportedBlockRepeatCount: state.graphicApoImportedBlockRepeatCount,
     apoMaxBoostDb: state.apoMaxBoostDb,
     apoMaxCutDb: state.apoMaxCutDb,
     parametricApoFilters: state.parametricApoFilters,
@@ -2523,6 +2606,10 @@ async function saveConfiguration(): Promise<void> {
       apoSelectedReferenceId: state.apoSelectedReferenceId,
       parametricApoMaxFilters: state.parametricApoMaxFilters,
       graphicApoMaxFilters: state.graphicApoMaxFilters,
+      parametricApoImportedPreampDb: state.parametricApoImportedPreampDb,
+      graphicApoImportedPreampDb: state.graphicApoImportedPreampDb,
+      parametricApoImportedBlockRepeatCount: state.parametricApoImportedBlockRepeatCount,
+      graphicApoImportedBlockRepeatCount: state.graphicApoImportedBlockRepeatCount,
       apoMaxBoostDb: state.apoMaxBoostDb,
       apoMaxCutDb: state.apoMaxCutDb,
       parametricApoFilters: state.parametricApoFilters,
@@ -2686,6 +2773,10 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   const importedApoMaxFilters = normalizeImportedApoMaxFilterCounts(config);
   state.parametricApoMaxFilters = importedApoMaxFilters.parametric;
   state.graphicApoMaxFilters = importedApoMaxFilters.graphic;
+  state.parametricApoImportedPreampDb = normalizeImportedApoPreamp(config.parametricApoImportedPreampDb);
+  state.graphicApoImportedPreampDb = normalizeImportedApoPreamp(config.graphicApoImportedPreampDb);
+  state.parametricApoImportedBlockRepeatCount = normalizeImportedApoBlockRepeatCount(config.parametricApoImportedBlockRepeatCount);
+  state.graphicApoImportedBlockRepeatCount = normalizeImportedApoBlockRepeatCount(config.graphicApoImportedBlockRepeatCount);
   if (state.parametricApoFilters.length > 0 || state.parametricApoMaxFilters === 0) {
     syncParametricApoFilterCountToFilters();
   }
@@ -2924,9 +3015,13 @@ function normalizeApoFilters(value: unknown): ApoFilter[] {
     }
 
     const record = entry as Record<string, unknown>;
+    const kind = isApoFilterKind(record.kind) ? record.kind : 'PK';
     const frequencyHz = clamp(Number(record.frequencyHz), 20, 20000);
     const gainDb = clamp(Number(record.gainDb), -24, 24);
-    const q = clamp(Number(record.q), 0.1, 10);
+    const defaultQ = getDefaultApoFilterQ(kind);
+    const q = clamp(Number(record.q) || defaultQ, 0.1, 10);
+    const order = normalizeApoFilterOrder(record.order, kind);
+    const slopeDbPerOct = normalizeApoFilterSlopeDbPerOct(record.slopeDbPerOct, kind);
 
     if (!Number.isFinite(frequencyHz) || !Number.isFinite(gainDb) || !Number.isFinite(q)) {
       return [];
@@ -2939,10 +3034,12 @@ function normalizeApoFilters(value: unknown): ApoFilter[] {
               ? record.id
               : `apo-filter-${index + 1}`,
           enabled: record.enabled !== false,
-          kind: isApoFilterKind(record.kind) ? record.kind : 'PK',
+          kind,
           frequencyHz,
           gainDb,
           q,
+          order,
+          slopeDbPerOct,
         },
     ];
   });
@@ -2995,26 +3092,18 @@ function normalizeImportedApoMaxFilterCounts(
   };
 }
 
+function normalizeImportedApoPreamp(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? clamp(parsed, -60, 20) : null;
+}
+
+function normalizeImportedApoBlockRepeatCount(value: unknown): number | null {
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed) ? clamp(parsed, 1, 8) : null;
+}
+
 function isApoEqMode(value: unknown): value is ApoEqMode {
   return value === 'parametric' || value === 'graphic';
-}
-
-function isApoFilterKind(value: unknown): value is ApoFilterKind {
-  return PARAMETRIC_APO_FILTER_KIND_OPTIONS.some((option) => option.value === value);
-}
-
-function apoFilterKindUsesGain(kind: ApoFilterKind): boolean {
-  return kind === 'PK' || kind === 'LS' || kind === 'HS';
-}
-
-function buildApoFilterConfigLine(filter: ApoFilter, index: number): string {
-  const prefix = `Filter ${index + 1}: ON ${filter.kind} Fc ${filter.frequencyHz.toFixed(1)} Hz`;
-
-  if (apoFilterKindUsesGain(filter.kind)) {
-    return `${prefix} Gain ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}`;
-  }
-
-  return `${prefix} Q ${filter.q.toFixed(2)}`;
 }
 
 function isAutomationAlgorithm(value: unknown): value is AutomationAlgorithm {
@@ -3115,6 +3204,7 @@ function handleApoFilterDrag(
       gainDb: nextGainDb,
     };
   }));
+  clearActiveImportedApoPreamp();
   persistApoState();
   persistActiveConfiguration();
   renderPlotCard(
@@ -3147,8 +3237,12 @@ function syncApoGenerationSettings(normalize: boolean): void {
   }
 
   if (state.apoEqMode === 'graphic') {
+    clearActiveImportedApoPreamp();
+    clearActiveImportedApoBlockRepeatCount();
     syncGraphicEqFiltersToBandCount();
   } else {
+    clearActiveImportedApoPreamp();
+    clearActiveImportedApoBlockRepeatCount();
     syncParametricFiltersToCount();
   }
 
@@ -3363,18 +3457,36 @@ function renderApoFilterList(): string {
           ${state.apoEqMode === 'graphic'
             ? ''
             : `<select data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="kind" ${state.busy ? 'disabled' : ''}>
-            ${PARAMETRIC_APO_FILTER_KIND_OPTIONS.map(
-              (option) => `<option value="${option.value}" ${filter.kind === option.value ? 'selected' : ''}>${option.label}</option>`,
-            ).join('')}
-          </select>`}
+             ${PARAMETRIC_APO_FILTER_KIND_OPTIONS.map(
+               (option) => `<option value="${option.value}" ${filter.kind === option.value ? 'selected' : ''}>${option.label}</option>`,
+             ).join('')}
+           </select>`}
           <input type="number" min="20" max="20000" step="1" value="${filter.frequencyHz.toFixed(0)}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="frequencyHz" ${(state.busy || state.apoEqMode === 'graphic') ? 'disabled' : ''} />
           <input type="number" min="-24" max="24" step="0.1" value="${filter.gainDb.toFixed(1)}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="gainDb" ${(state.busy || !apoFilterKindUsesGain(filter.kind)) ? 'disabled' : ''} />
-          <input class="apo-filter-q" type="number" min="0.1" max="10" step="0.05" value="${filter.q.toFixed(2)}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="q" ${(state.busy || state.apoEqMode === 'graphic') ? 'disabled' : ''} />
+          ${renderApoFilterShapeInput(filter)}
           <button class="btn btn-secondary measurement-remove-button" type="button" data-apo-filter-remove="${escapeHtml(filter.id)}" ${(state.busy || state.apoEqMode === 'graphic') ? 'disabled' : ''}>Remove</button>
         </div>
       `,
     )
     .join('');
+}
+
+function renderApoFilterShapeInput(filter: ApoFilter): string {
+  if (state.apoEqMode === 'graphic' || !apoFilterKindUsesShape(filter.kind)) {
+    return `<input class="apo-filter-shape" type="number" value="" placeholder="-" disabled />`;
+  }
+
+  const disabledAttribute = state.busy ? 'disabled' : '';
+
+  if (apoFilterKindUsesOrder(filter.kind)) {
+    return `<input class="apo-filter-shape" type="number" min="${filter.kind === 'LPBW' || filter.kind === 'HPBW' ? '2' : '4'}" max="20" step="2" value="${String(normalizeApoFilterOrder(filter.order, filter.kind) ?? getDefaultApoFilterOrder(filter.kind) ?? 4)}" title="${escapeHtml(getApoFilterShapeLabel(filter.kind))}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="shapeValue" ${disabledAttribute} />`;
+  }
+
+  if (apoFilterKindUsesSlopeDb(filter.kind)) {
+    return `<input class="apo-filter-shape" type="number" min="0.1" max="60" step="0.1" value="${(normalizeApoFilterSlopeDbPerOct(filter.slopeDbPerOct, filter.kind) ?? getDefaultApoFilterSlopeDbPerOct(filter.kind) ?? 6).toFixed(1)}" title="${escapeHtml(getApoFilterShapeLabel(filter.kind))}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="shapeValue" ${disabledAttribute} />`;
+  }
+
+  return `<input class="apo-filter-shape" type="number" min="0.1" max="10" step="0.05" value="${filter.q.toFixed(2)}" title="${escapeHtml(getApoFilterShapeLabel(filter.kind))}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="shapeValue" ${disabledAttribute} />`;
 }
 
 function addApoFilter(partial: Partial<ApoFilter> = {}): void {
@@ -3392,9 +3504,13 @@ function addApoFilter(partial: Partial<ApoFilter> = {}): void {
       kind: 'PK',
       frequencyHz: nextFrequencyHz,
       gainDb: partial.gainDb ?? 0,
-      q: partial.q ?? 1.41,
+      q: partial.q ?? getDefaultApoFilterQ('PK'),
+      order: partial.order ?? null,
+      slopeDbPerOct: partial.slopeDbPerOct ?? null,
     },
   ]);
+  clearActiveImportedApoPreamp();
+  clearActiveImportedApoBlockRepeatCount();
   syncParametricApoFilterCountToFilters();
   state.nextApoFilterIndex += 1;
   persistApoState();
@@ -3432,6 +3548,8 @@ function findNextParametricFilterFrequency(filters: ApoFilter[] = getActiveApoFi
 }
 
 function clearApoFilters(): void {
+  clearActiveImportedApoPreamp();
+  clearActiveImportedApoBlockRepeatCount();
   if (state.apoEqMode === 'graphic') {
     const graphicFilters = buildGraphicEqFilters(getActiveApoMaxFilters());
     setActiveApoFilters(graphicFilters);
@@ -3456,6 +3574,8 @@ function removeApoFilter(filterId: string): void {
   }
 
   setActiveApoFilters(getActiveApoFilters().filter((filter) => filter.id !== filterId));
+  clearActiveImportedApoPreamp();
+  clearActiveImportedApoBlockRepeatCount();
   syncParametricApoFilterCountToFilters();
   persistApoState();
   persistActiveConfiguration();
@@ -3473,10 +3593,14 @@ function updateApoFilter(filterId: string, field: string, value: string | boolea
     }
 
     if (field === 'kind' && typeof value === 'string' && isApoFilterKind(value)) {
+      const nextKind = value;
       return {
         ...filter,
-        kind: value,
-        gainDb: apoFilterKindUsesGain(value) ? filter.gainDb : 0,
+        kind: nextKind,
+        gainDb: apoFilterKindUsesGain(nextKind) ? filter.gainDb : 0,
+        q: apoFilterKindUsesQ(nextKind) ? filter.q || getDefaultApoFilterQ(nextKind) : getDefaultApoFilterQ(nextKind),
+        order: normalizeApoFilterOrder(filter.order, nextKind),
+        slopeDbPerOct: normalizeApoFilterSlopeDbPerOct(filter.slopeDbPerOct, nextKind),
       };
     }
 
@@ -3498,18 +3622,38 @@ function updateApoFilter(filterId: string, field: string, value: string | boolea
       return Number.isFinite(gainDb) ? { ...filter, gainDb } : filter;
     }
 
-    if (field === 'q') {
+    if (field === 'shapeValue') {
       if (state.apoEqMode === 'graphic') {
         return filter;
       }
 
-      const q = clamp(Number(value), 0.1, 10);
-      return Number.isFinite(q) ? { ...filter, q } : filter;
+      if (apoFilterKindUsesOrder(filter.kind)) {
+        return {
+          ...filter,
+          order: normalizeApoFilterOrder(value, filter.kind),
+        };
+      }
+
+      if (apoFilterKindUsesSlopeDb(filter.kind)) {
+        return {
+          ...filter,
+          slopeDbPerOct: normalizeApoFilterSlopeDbPerOct(value, filter.kind),
+        };
+      }
+
+      if (apoFilterKindUsesQ(filter.kind)) {
+        const q = clamp(Number(value), 0.1, 10);
+        return Number.isFinite(q) ? { ...filter, q } : filter;
+      }
+
+      return filter;
     }
 
     return filter;
   }));
 
+  clearActiveImportedApoPreamp();
+  clearActiveImportedApoBlockRepeatCount();
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
@@ -3552,6 +3696,8 @@ async function generateApoFilters(
       ? buildFiltersForSelectedAlgorithm(measurement, referenceCurve)
       : buildApoFiltersFromCurves(measurement, referenceCurve);
     setActiveApoFilters(generatedFilters);
+    clearActiveImportedApoPreamp();
+    clearActiveImportedApoBlockRepeatCount();
     if (state.apoEqMode === 'parametric') {
       syncParametricApoFilterCountToFilters();
     }
@@ -3784,12 +3930,14 @@ function buildApoFiltersFromCurves(
       frequencyHz: dominantPoint.frequencyHz,
       gainDb: roundTo(gainDb, 0.1),
       q: roundTo(q, 0.01),
+      order: null,
+      slopeDbPerOct: null,
     };
 
     filters.push(filter);
 
     for (let sampleIndex = 0; sampleIndex < samplePoints.length; sampleIndex += 1) {
-      residuals[sampleIndex] -= getApoFilterResponseDb(filter, samplePoints[sampleIndex].frequencyHz);
+      residuals[sampleIndex] -= getApoFilterResponseDbForCurrentSampleRate(filter, samplePoints[sampleIndex].frequencyHz);
     }
   }
 
@@ -3819,6 +3967,8 @@ function buildGraphicEqFiltersFromCurves(
       frequencyHz,
       gainDb: roundTo(gainDb, 0.1),
       q: roundTo(getGraphicEqQ(frequencies, index), 0.01),
+      order: null,
+      slopeDbPerOct: null,
     };
   });
 }
@@ -4025,6 +4175,15 @@ function cloneApoFilters(filters: ApoFilter[]): ApoFilter[] {
   return filters.map((filter) => ({ ...filter }));
 }
 
+function getNextApoFilterIndex(): number {
+  return (
+    [...state.parametricApoFilters, ...state.graphicApoFilters].reduce((maxId, filter) => {
+      const numericId = Number(filter.id.replace('apo-filter-', ''));
+      return Number.isFinite(numericId) ? Math.max(maxId, numericId) : maxId;
+    }, 0) + 1
+  );
+}
+
 function getDisplayedReferencePoints(referenceCurve: ReferenceCurve) {
   return getMeasurementPointsForDisplay(
     referenceCurve.plotPoints,
@@ -4048,103 +4207,8 @@ function getSelectedApoReference(): ReferenceCurve | null {
   ) ?? null;
 }
 
-function getApoFilterResponseDb(filter: ApoFilter, frequencyHz: number): number {
-  if (filter.kind === 'PK') {
-    const distanceOctaves = Math.log2(frequencyHz / filter.frequencyHz);
-    const sigma = 0.6 / Math.sqrt(filter.q);
-    return filter.gainDb * Math.exp(-(distanceOctaves * distanceOctaves) / (2 * sigma * sigma));
-  }
-
-  const sampleRate = getSelectedSampleRate();
-  const normalizedFrequencyHz = clamp(filter.frequencyHz, 20, sampleRate / 2 - 1);
-  const normalizedQ = clamp(filter.q, 0.1, 10);
-  const omega0 = (2 * Math.PI * normalizedFrequencyHz) / sampleRate;
-  const cosOmega0 = Math.cos(omega0);
-  const sinOmega0 = Math.sin(omega0);
-  const alpha = sinOmega0 / (2 * normalizedQ);
-  const gainAmplitude = Math.pow(10, filter.gainDb / 40);
-  let b0 = 1;
-  let b1 = 0;
-  let b2 = 0;
-  let a0 = 1;
-  let a1 = 0;
-  let a2 = 0;
-
-  switch (filter.kind) {
-    case 'LS': {
-      const sqrtA = Math.sqrt(gainAmplitude);
-      const twoSqrtAAlpha = 2 * sqrtA * alpha;
-      b0 = gainAmplitude * ((gainAmplitude + 1) - (gainAmplitude - 1) * cosOmega0 + twoSqrtAAlpha);
-      b1 = 2 * gainAmplitude * ((gainAmplitude - 1) - (gainAmplitude + 1) * cosOmega0);
-      b2 = gainAmplitude * ((gainAmplitude + 1) - (gainAmplitude - 1) * cosOmega0 - twoSqrtAAlpha);
-      a0 = (gainAmplitude + 1) + (gainAmplitude - 1) * cosOmega0 + twoSqrtAAlpha;
-      a1 = -2 * ((gainAmplitude - 1) + (gainAmplitude + 1) * cosOmega0);
-      a2 = (gainAmplitude + 1) + (gainAmplitude - 1) * cosOmega0 - twoSqrtAAlpha;
-      break;
-    }
-    case 'HS': {
-      const sqrtA = Math.sqrt(gainAmplitude);
-      const twoSqrtAAlpha = 2 * sqrtA * alpha;
-      b0 = gainAmplitude * ((gainAmplitude + 1) + (gainAmplitude - 1) * cosOmega0 + twoSqrtAAlpha);
-      b1 = -2 * gainAmplitude * ((gainAmplitude - 1) + (gainAmplitude + 1) * cosOmega0);
-      b2 = gainAmplitude * ((gainAmplitude + 1) + (gainAmplitude - 1) * cosOmega0 - twoSqrtAAlpha);
-      a0 = (gainAmplitude + 1) - (gainAmplitude - 1) * cosOmega0 + twoSqrtAAlpha;
-      a1 = 2 * ((gainAmplitude - 1) - (gainAmplitude + 1) * cosOmega0);
-      a2 = (gainAmplitude + 1) - (gainAmplitude - 1) * cosOmega0 - twoSqrtAAlpha;
-      break;
-    }
-    case 'LP':
-      b0 = (1 - cosOmega0) / 2;
-      b1 = 1 - cosOmega0;
-      b2 = (1 - cosOmega0) / 2;
-      a0 = 1 + alpha;
-      a1 = -2 * cosOmega0;
-      a2 = 1 - alpha;
-      break;
-    case 'HP':
-      b0 = (1 + cosOmega0) / 2;
-      b1 = -(1 + cosOmega0);
-      b2 = (1 + cosOmega0) / 2;
-      a0 = 1 + alpha;
-      a1 = -2 * cosOmega0;
-      a2 = 1 - alpha;
-      break;
-    case 'NO':
-      b0 = 1;
-      b1 = -2 * cosOmega0;
-      b2 = 1;
-      a0 = 1 + alpha;
-      a1 = -2 * cosOmega0;
-      a2 = 1 - alpha;
-      break;
-    case 'BP':
-      b0 = alpha;
-      b1 = 0;
-      b2 = -alpha;
-      a0 = 1 + alpha;
-      a1 = -2 * cosOmega0;
-      a2 = 1 - alpha;
-      break;
-    case 'AP':
-      b0 = 1 - alpha;
-      b1 = -2 * cosOmega0;
-      b2 = 1 + alpha;
-      a0 = 1 + alpha;
-      a1 = -2 * cosOmega0;
-      a2 = 1 - alpha;
-      break;
-  }
-
-  const omega = (2 * Math.PI * clamp(frequencyHz, 20, sampleRate / 2 - 1)) / sampleRate;
-  const numeratorReal = b0 + b1 * Math.cos(omega) + b2 * Math.cos(2 * omega);
-  const numeratorImag = -b1 * Math.sin(omega) - b2 * Math.sin(2 * omega);
-  const denominatorReal = a0 + a1 * Math.cos(omega) + a2 * Math.cos(2 * omega);
-  const denominatorImag = -a1 * Math.sin(omega) - a2 * Math.sin(2 * omega);
-  const numeratorMagnitude = Math.hypot(numeratorReal, numeratorImag);
-  const denominatorMagnitude = Math.hypot(denominatorReal, denominatorImag);
-  const magnitude = denominatorMagnitude === 0 ? 1 : numeratorMagnitude / denominatorMagnitude;
-
-  return 20 * Math.log10(Math.max(magnitude, 1e-6));
+function getApoFilterResponseDbForCurrentSampleRate(filter: ApoFilter, frequencyHz: number): number {
+  return getApoFilterResponseDb(filter, frequencyHz, getSelectedSampleRate());
 }
 
 function getCombinedApoResponseDb(frequencyHz: number): number {
@@ -4152,40 +4216,66 @@ function getCombinedApoResponseDb(frequencyHz: number): number {
 }
 
 function getCombinedApoResponseDbForFilters(filters: ApoFilter[], frequencyHz: number): number {
-  return filters.reduce((total, filter) => {
+  const totalResponseDb = filters.reduce((total, filter) => {
     if (!filter.enabled) {
       return total;
     }
 
-    return total + getApoFilterResponseDb(filter, frequencyHz);
+    return total + getApoFilterResponseDbForCurrentSampleRate(filter, frequencyHz);
   }, 0);
+
+  return totalResponseDb * (state.apoEqMode === 'parametric' ? getActiveImportedApoBlockRepeatCount() ?? 1 : 1);
+}
+
+function getAppliedApoPreampDb(): number {
+  const importedPreampDb = getActiveImportedApoPreampDb();
+  if (importedPreampDb !== null) {
+    return roundTo(importedPreampDb, 0.1);
+  }
+
+  return -roundTo(getCombinedApoResponseDb(PLOT_NORMALIZATION_FREQUENCY_HZ), 0.1);
 }
 
 function buildApoConfigText(): string {
   const enabledFilters = getActiveApoFilters().filter((filter) => filter.enabled);
   const measurement = getSelectedApoMeasurement();
   const referenceCurve = getSelectedApoReference();
-  const normalizationDb = getCombinedApoResponseDb(PLOT_NORMALIZATION_FREQUENCY_HZ);
-  const preampDb = -roundTo(normalizationDb, 0.1);
-  const lines = [
+  const importedBlockRepeatCount = getActiveImportedApoBlockRepeatCount() ?? 1;
+  const preampDb = getAppliedApoPreampDb();
+  const headerLines = [
     '# Equalizer APO config generated by Freakish Ears',
     measurement ? `# Measurement: ${measurement.name}` : '# Measurement: none selected',
     referenceCurve ? `# Target: ${referenceCurve.name}` : '# Target: none selected',
-    `Preamp: ${preampDb.toFixed(1)} dB`,
   ];
 
-  if (enabledFilters.length === 0) {
-    lines.push('# No enabled filters');
-  } else if (state.apoEqMode === 'graphic') {
-    lines.push(
-      `GraphicEQ: ${enabledFilters
-        .map((filter) => `${filter.frequencyHz.toFixed(1)} ${filter.gainDb.toFixed(1)}`)
-        .join('; ')}`,
-    );
-  } else {
-    enabledFilters.forEach((filter, index) => {
-      lines.push(buildApoFilterConfigLine(filter, index));
-    });
+  const lines = [...headerLines];
+
+  const buildFilterBlockLines = (): string[] => {
+    const blockLines = [`Preamp: ${preampDb.toFixed(1)} dB`];
+
+    if (enabledFilters.length === 0) {
+      blockLines.push('# No enabled filters');
+    } else if (state.apoEqMode === 'graphic') {
+      blockLines.push(
+        `GraphicEQ: ${enabledFilters
+          .map((filter) => `${filter.frequencyHz.toFixed(1)} ${filter.gainDb.toFixed(1)}`)
+          .join('; ')}`,
+      );
+    } else {
+      enabledFilters.forEach((filter, index) => {
+        blockLines.push(...buildApoFilterConfigLines(filter, index));
+      });
+    }
+
+    return blockLines;
+  };
+
+  const blockRepeatCount = state.apoEqMode === 'parametric' ? importedBlockRepeatCount : 1;
+  for (let index = 0; index < blockRepeatCount; index += 1) {
+    if (index > 0) {
+      lines.push('');
+    }
+    lines.push(...buildFilterBlockLines());
   }
 
   return lines.join('\n');
@@ -4238,6 +4328,8 @@ function buildGraphicEqFilters(filterCount: number, sourceFilters: ApoFilter[] =
     frequencyHz,
     gainDb: roundTo(getCombinedApoResponseDbForFilters(sourceFilters, frequencyHz), 0.1),
     q: roundTo(getGraphicEqQ(frequencies, index), 0.01),
+    order: null,
+    slopeDbPerOct: null,
   }));
 }
 
@@ -4281,6 +4373,445 @@ async function exportApoConfig(): Promise<void> {
   } finally {
     setBusy(false);
   }
+}
+
+type ImportedEqProfile = {
+  mode: ApoEqMode;
+  filters: ApoFilter[];
+  preampDb: number;
+  blockRepeatCount: number;
+};
+
+async function importEqProfile(file: File): Promise<void> {
+  if (state.busy) {
+    return;
+  }
+
+  try {
+    setBusy(true);
+    setStatus('Importing EQ profile...', 'working');
+
+    const contents = await file.text();
+    const importedProfile = parseImportedEqProfile(contents);
+    const maxFilterCount =
+      importedProfile.mode === 'graphic' ? MAX_GRAPHIC_APO_FILTERS : MAX_PARAMETRIC_APO_FILTERS;
+    const importedFilters = cloneApoFilters(importedProfile.filters.slice(0, maxFilterCount));
+
+    if (importedFilters.length === 0) {
+      throw new Error('No supported EQ filters were found in the selected profile.');
+    }
+
+    state.apoEqMode = importedProfile.mode;
+
+    if (importedProfile.mode === 'graphic') {
+      state.graphicApoFilters = importedFilters;
+      state.graphicApoMaxFilters = clamp(importedFilters.length, 1, MAX_GRAPHIC_APO_FILTERS);
+      state.graphicApoImportedPreampDb = importedProfile.preampDb;
+      state.graphicApoImportedBlockRepeatCount = importedProfile.blockRepeatCount;
+    } else {
+      state.parametricApoFilters = importedFilters;
+      state.parametricApoMaxFilters = clamp(importedFilters.length, 0, MAX_PARAMETRIC_APO_FILTERS);
+      state.parametricApoImportedPreampDb = importedProfile.preampDb;
+      state.parametricApoImportedBlockRepeatCount = importedProfile.blockRepeatCount;
+    }
+
+    state.nextApoFilterIndex = getNextApoFilterIndex();
+
+    persistApoState();
+    persistActiveConfiguration();
+    renderApoSection();
+
+    const importSummary =
+      importedProfile.mode === 'graphic'
+        ? `Imported ${importedFilters.length} graphic EQ band${importedFilters.length === 1 ? '' : 's'}`
+        : `Imported ${importedFilters.length} parametric filter${importedFilters.length === 1 ? '' : 's'}`;
+    const truncated = importedProfile.filters.length > importedFilters.length;
+    const modeLabel = importedProfile.mode === 'graphic' ? 'Graphic' : 'Parametric';
+    setStatus(`${importSummary}.`, 'success');
+    appendLog(
+      `${importSummary} from ${file.name} and switched to ${modeLabel} mode${truncated ? ` (limited to ${maxFilterCount}).` : '.'}`,
+      'success',
+    );
+  } catch (error) {
+    const message = getErrorMessage(error);
+    setStatus(`EQ import failed: ${message}`, 'error');
+    appendLog(`EQ import failed for ${file.name}: ${message}`, 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
+function parseImportedEqProfile(contents: string): ImportedEqProfile {
+  const peaceParametricFilters = parsePeaceParametricEqFilters(contents);
+  if (peaceParametricFilters.length > 0) {
+    return {
+      mode: 'parametric',
+      filters: normalizeImportedEqFilters(peaceParametricFilters, 'parametric'),
+      preampDb: parsePeacePreampDb(contents),
+      blockRepeatCount: 2,
+    };
+  }
+
+  const parametricFilters = parseParametricEqFilters(contents);
+  if (parametricFilters.length > 0) {
+    return {
+      mode: 'parametric',
+      filters: normalizeImportedEqFilters(parametricFilters, 'parametric'),
+      preampDb: parseEqualizerApoPreampDb(contents),
+      blockRepeatCount: 1,
+    };
+  }
+
+  const graphicFilters = parseGraphicEqFilters(contents);
+  if (graphicFilters.length > 0) {
+    return {
+      mode: 'graphic',
+      filters: normalizeImportedEqFilters(graphicFilters, 'graphic'),
+      preampDb: parseEqualizerApoPreampDb(contents),
+      blockRepeatCount: 1,
+    };
+  }
+
+  throw new Error('The selected file is not a supported Equalizer APO or Peace profile.');
+}
+
+function parsePeaceParametricEqFilters(contents: string): ApoFilter[] {
+  const sections = parseIniSections(contents);
+  const frequencySection = sections.get('frequencies');
+  if (!frequencySection) {
+    return [];
+  }
+
+  const gainsSection = sections.get('gains') ?? new Map<string, string>();
+  const qualitiesSection = sections.get('qualities') ?? new Map<string, string>();
+  const filtersSection = sections.get('filters') ?? new Map<string, string>();
+  const orderedIndexes = Array.from(frequencySection.keys())
+    .map((key) => key.match(/^frequency(\d+)$/iu))
+    .flatMap((match) => (match ? [Number(match[1])] : []))
+    .sort((left, right) => left - right);
+
+  if (orderedIndexes.length === 0) {
+    return [];
+  }
+
+  return orderedIndexes.flatMap((index) => {
+    const frequencyHz = Number(frequencySection.get(`frequency${index}`));
+    if (!Number.isFinite(frequencyHz)) {
+      return [];
+    }
+
+    const gainDb = Number(gainsSection.get(`gain${index}`) ?? '0');
+    const q = Number(qualitiesSection.get(`quality${index}`) ?? '1.41');
+    return [
+      {
+        id: `apo-filter-${index}`,
+        enabled: true,
+        kind: mapPeaceFilterCode(filtersSection.get(`filter${index}`)),
+        frequencyHz,
+        gainDb: Number.isFinite(gainDb) ? gainDb : 0,
+        q: Number.isFinite(q) ? q : 1.41,
+        order: null,
+        slopeDbPerOct: null,
+      },
+    ];
+  });
+}
+
+function parsePeacePreampDb(contents: string): number {
+  const sections = parseIniSections(contents);
+  const generalSection = sections.get('general');
+  if (!generalSection) {
+    return 0;
+  }
+
+  const parsed = Number(generalSection.get('preamp'));
+  return Number.isFinite(parsed) ? clamp(parsed, -60, 20) : 0;
+}
+
+function parseGraphicEqFilters(contents: string): ApoFilter[] {
+  const graphicEqMatches = Array.from(contents.matchAll(/^GraphicEQ:\s*(.+)$/gimu));
+  if (graphicEqMatches.length === 0) {
+    return [];
+  }
+
+  const entries = graphicEqMatches
+    .flatMap((match) => match[1].split(';'))
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .flatMap((entry) => {
+      const parsedEntry = entry.match(/^([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)$/u);
+      if (!parsedEntry) {
+        return [];
+      }
+
+      return [
+        {
+          frequencyHz: Number(parsedEntry[1]),
+          gainDb: Number(parsedEntry[2]),
+        },
+      ];
+    })
+    .filter(
+      (entry) => Number.isFinite(entry.frequencyHz) && Number.isFinite(entry.gainDb),
+    )
+    .sort((left, right) => left.frequencyHz - right.frequencyHz);
+
+  const frequencies = entries.map((entry) => entry.frequencyHz);
+  return entries.map((entry, index) => ({
+    id: `apo-filter-${index + 1}`,
+    enabled: true,
+    kind: 'PK',
+    frequencyHz: entry.frequencyHz,
+    gainDb: entry.gainDb,
+    q: roundTo(getGraphicEqQ(frequencies, index), 0.01),
+    order: null,
+    slopeDbPerOct: null,
+  }));
+}
+
+function parseParametricEqFilters(contents: string): ApoFilter[] {
+  const filters: ApoFilter[] = [];
+  let skippedExpandedSectionCount = 0;
+
+  for (const line of contents.split(/\r?\n/u).map((entry) => entry.trim())) {
+    if (line.length === 0) {
+      continue;
+    }
+
+    const logicalFilter = parseLogicalApoFilterComment(line);
+    if (logicalFilter) {
+      filters.push({
+        ...logicalFilter,
+        id: `apo-filter-${filters.length + 1}`,
+      });
+      skippedExpandedSectionCount = getExpandedApoSectionCount(logicalFilter);
+      continue;
+    }
+
+    const parsedLine = line.match(/^Filter(?:\s+\d+(?:\.\d+)?)?:\s+(ON|OFF)\s+(.+)$/iu);
+    if (!parsedLine) {
+      continue;
+    }
+
+    if (skippedExpandedSectionCount > 0) {
+      skippedExpandedSectionCount -= 1;
+      continue;
+    }
+
+    const remainder = parsedLine[2].trim();
+    const frequencyMatch = remainder.match(/\bFc\s+([+-]?\d+(?:\.\d+)?)\s+Hz\b/iu);
+    if (!frequencyMatch) {
+      continue;
+    }
+
+    const frequencyIndex = remainder.search(/\bFc\b/iu);
+    const typeSegment = frequencyIndex >= 0 ? remainder.slice(0, frequencyIndex).trim() : remainder;
+    const parameterSegment = frequencyIndex >= 0 ? remainder.slice(frequencyIndex) : '';
+    const gainMatch = parameterSegment.match(/\bGain\s+([+-]?\d+(?:\.\d+)?)\s+dB\b/iu);
+    const qMatch = parameterSegment.match(/\bQ\s+([+-]?\d+(?:\.\d+)?)\b/iu);
+    const descriptor = parseImportedFilterDescriptor(typeSegment, qMatch ? Number(qMatch[1]) : null);
+    if (!descriptor) {
+      continue;
+    }
+
+    filters.push({
+      id: `apo-filter-${filters.length + 1}`,
+      enabled: parsedLine[1].toUpperCase() === 'ON',
+      kind: descriptor.kind,
+      frequencyHz: Number(frequencyMatch[1]),
+      gainDb: gainMatch ? Number(gainMatch[1]) : 0,
+      q:
+        descriptor.q ??
+        (qMatch ? Number(qMatch[1]) : getDefaultApoFilterQ(descriptor.kind)),
+      order: descriptor.order,
+      slopeDbPerOct: descriptor.slopeDbPerOct,
+    });
+  }
+
+  return filters;
+}
+
+function parseEqualizerApoPreampDb(contents: string): number {
+  const preampMatch = contents.match(/^Preamp:\s*([+-]?\d+(?:\.\d+)?)\s*dB$/imu);
+  if (!preampMatch) {
+    return 0;
+  }
+
+  const parsed = Number(preampMatch[1]);
+  return Number.isFinite(parsed) ? clamp(parsed, -60, 20) : 0;
+}
+
+function normalizeImportedEqFilters(filters: ApoFilter[], mode: ApoEqMode): ApoFilter[] {
+  const normalizedFilters = filters
+    .map((filter, index) => ({
+      id: `apo-filter-${index + 1}`,
+      enabled: filter.enabled !== false,
+      kind: mode === 'graphic' ? 'PK' : filter.kind,
+      frequencyHz: clamp(filter.frequencyHz, 20, 20000),
+      gainDb: clamp(filter.gainDb, -24, 24),
+      q: clamp(filter.q || getDefaultApoFilterQ(mode === 'graphic' ? 'PK' : filter.kind), 0.1, 10),
+      order: normalizeApoFilterOrder(filter.order, mode === 'graphic' ? 'PK' : filter.kind),
+      slopeDbPerOct: normalizeApoFilterSlopeDbPerOct(filter.slopeDbPerOct, mode === 'graphic' ? 'PK' : filter.kind),
+    }))
+    .filter(
+      (filter) =>
+        Number.isFinite(filter.frequencyHz) &&
+        Number.isFinite(filter.gainDb) &&
+        Number.isFinite(filter.q),
+    )
+    .sort((left, right) => left.frequencyHz - right.frequencyHz);
+
+  if (mode !== 'graphic') {
+    return normalizedFilters;
+  }
+
+  const frequencies = normalizedFilters.map((filter) => filter.frequencyHz);
+  return normalizedFilters.map((filter, index) => ({
+    ...filter,
+    kind: 'PK',
+    q: roundTo(getGraphicEqQ(frequencies, index), 0.01),
+    order: null,
+    slopeDbPerOct: null,
+  }));
+}
+
+function parseIniSections(contents: string): Map<string, Map<string, string>> {
+  const sections = new Map<string, Map<string, string>>();
+  let currentSectionName: string | null = null;
+
+  for (const rawLine of contents.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith(';') || line.startsWith('#')) {
+      continue;
+    }
+
+    const sectionMatch = line.match(/^\[(.+)\]$/u);
+    if (sectionMatch) {
+      currentSectionName = sectionMatch[1].trim().toLowerCase();
+      if (!sections.has(currentSectionName)) {
+        sections.set(currentSectionName, new Map<string, string>());
+      }
+      continue;
+    }
+
+    if (!currentSectionName) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex < 0) {
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim().toLowerCase();
+    const value = line.slice(separatorIndex + 1).trim();
+    sections.get(currentSectionName)?.set(key, value);
+  }
+
+  return sections;
+}
+
+function mapPeaceFilterCode(value: string | undefined): ApoFilterKind {
+  switch (value?.trim()) {
+    case '14':
+      return 'LSCQ';
+    case '15':
+      return 'HSCQ';
+    default:
+      return 'PK';
+  }
+}
+
+function parseImportedFilterDescriptor(
+  typeSegment: string,
+  parsedQ: number | null,
+): {
+  kind: ApoFilterKind;
+  q: number | null;
+  order: number | null;
+  slopeDbPerOct: number | null;
+} | null {
+  const normalizedType = typeSegment.replace(/\s+/gu, ' ').trim().toUpperCase();
+
+  if (normalizedType === 'PK' || normalizedType === 'PEQ') {
+    return { kind: 'PK', q: parsedQ, order: null, slopeDbPerOct: null };
+  }
+
+  if (normalizedType === 'LP' || normalizedType === 'LPQ') {
+    return { kind: 'LP', q: parsedQ ?? getDefaultApoFilterQ('LP'), order: null, slopeDbPerOct: null };
+  }
+
+  if (normalizedType === 'HP' || normalizedType === 'HPQ') {
+    return { kind: 'HP', q: parsedQ ?? getDefaultApoFilterQ('HP'), order: null, slopeDbPerOct: null };
+  }
+
+  if (normalizedType === 'BP') {
+    return { kind: 'BP', q: parsedQ ?? getDefaultApoFilterQ('BP'), order: null, slopeDbPerOct: null };
+  }
+
+  if (normalizedType === 'NO') {
+    return { kind: 'NO', q: parsedQ ?? getDefaultApoFilterQ('NO'), order: null, slopeDbPerOct: null };
+  }
+
+  if (normalizedType === 'AP') {
+    return { kind: 'AP', q: parsedQ ?? getDefaultApoFilterQ('AP'), order: null, slopeDbPerOct: null };
+  }
+
+  if (normalizedType === 'LS') {
+    return {
+      kind: parsedQ === null ? 'LS' : 'LSQ',
+      q: parsedQ,
+      order: null,
+      slopeDbPerOct: null,
+    };
+  }
+
+  if (normalizedType === 'HS') {
+    return {
+      kind: parsedQ === null ? 'HS' : 'HSQ',
+      q: parsedQ,
+      order: null,
+      slopeDbPerOct: null,
+    };
+  }
+
+  const lscSlopeMatch = normalizedType.match(/^LSC\s+([+-]?\d+(?:\.\d+)?)\s+DB$/u);
+  if (lscSlopeMatch) {
+    return {
+      kind: 'LSC_DB',
+      q: null,
+      order: null,
+      slopeDbPerOct: Number(lscSlopeMatch[1]),
+    };
+  }
+
+  const hscSlopeMatch = normalizedType.match(/^HSC\s+([+-]?\d+(?:\.\d+)?)\s+DB$/u);
+  if (hscSlopeMatch) {
+    return {
+      kind: 'HSC_DB',
+      q: null,
+      order: null,
+      slopeDbPerOct: Number(hscSlopeMatch[1]),
+    };
+  }
+
+  if (normalizedType === 'LSC') {
+    return { kind: 'LSCQ', q: parsedQ ?? getDefaultApoFilterQ('LSCQ'), order: null, slopeDbPerOct: null };
+  }
+
+  if (normalizedType === 'HSC') {
+    return { kind: 'HSCQ', q: parsedQ ?? getDefaultApoFilterQ('HSCQ'), order: null, slopeDbPerOct: null };
+  }
+
+  if (normalizedType === 'LS 6DB' || normalizedType === 'LS 12DB') {
+    return { kind: 'LS', q: null, order: null, slopeDbPerOct: null };
+  }
+
+  if (normalizedType === 'HS 6DB' || normalizedType === 'HS 12DB') {
+    return { kind: 'HS', q: null, order: null, slopeDbPerOct: null };
+  }
+
+  return null;
 }
 
 async function refreshEqualizerApoStatus(): Promise<void> {

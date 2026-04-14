@@ -85,7 +85,25 @@ export type MeasurementImport = {
   summary: MeasurementSummary;
 };
 
-export type ApoFilterKind = 'PK' | 'LS' | 'HS' | 'LP' | 'HP' | 'NO' | 'BP' | 'AP';
+export type ApoFilterKind =
+  | 'PK'
+  | 'LP'
+  | 'HP'
+  | 'BP'
+  | 'LS'
+  | 'HS'
+  | 'NO'
+  | 'AP'
+  | 'LSC_DB'
+  | 'HSC_DB'
+  | 'LPBW'
+  | 'HPBW'
+  | 'LPLR'
+  | 'HPLR'
+  | 'LSQ'
+  | 'HSQ'
+  | 'LSCQ'
+  | 'HSCQ';
 
 export type ApoEqMode = 'parametric' | 'graphic';
 export type AutomationAlgorithm = 'proportional';
@@ -106,6 +124,8 @@ export type ApoFilter = {
   frequencyHz: number;
   gainDb: number;
   q: number;
+  order: number | null;
+  slopeDbPerOct: number | null;
 };
 
 export type PlotViewMode = 'measurements' | 'apo';
@@ -142,6 +162,10 @@ export type AppState = {
   apoSelectedReferenceId: string | null;
   parametricApoMaxFilters: number;
   graphicApoMaxFilters: number;
+  parametricApoImportedPreampDb: number | null;
+  graphicApoImportedPreampDb: number | null;
+  parametricApoImportedBlockRepeatCount: number | null;
+  graphicApoImportedBlockRepeatCount: number | null;
   apoMaxBoostDb: number;
   apoMaxCutDb: number;
   nextApoFilterIndex: number;
