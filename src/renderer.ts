@@ -543,6 +543,18 @@ app.innerHTML = `
               <button id="clearApoFiltersButton" class="btn btn-secondary" type="button">
                 Clear
               </button>
+              <div id="apoPresetMenuAnchor" class="apo-preset-menu-anchor">
+                <button
+                  id="selectApoPresetButton"
+                  class="btn btn-secondary"
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                >
+                  Select Preset
+                </button>
+                <div id="apoPresetMenu" class="apo-preset-menu" role="menu" hidden></div>
+              </div>
               <button id="importApoConfigButton" class="btn btn-secondary" type="button">
                 Import EQ
               </button>
@@ -670,6 +682,9 @@ const apoCard = getElement<HTMLDivElement>('apoCard');
 const generateApoFiltersButton = getElement<HTMLButtonElement>('generateApoFiltersButton');
 const addApoFilterButton = getElement<HTMLButtonElement>('addApoFilterButton');
 const clearApoFiltersButton = getElement<HTMLButtonElement>('clearApoFiltersButton');
+const apoPresetMenuAnchor = getElement<HTMLDivElement>('apoPresetMenuAnchor');
+const selectApoPresetButton = getElement<HTMLButtonElement>('selectApoPresetButton');
+const apoPresetMenu = getElement<HTMLDivElement>('apoPresetMenu');
 const importApoConfigButton = getElement<HTMLButtonElement>('importApoConfigButton');
 const exportApoConfigButton = getElement<HTMLButtonElement>('exportApoConfigButton');
 const applyApoConfigButton = getElement<HTMLButtonElement>('applyApoConfigButton');
@@ -802,6 +817,8 @@ const state: AppState = {
   latestStatusMessage: 'Ready',
   latestStatusTone: 'idle',
   equalizerApoStatus: null,
+  peacePresets: [],
+  apoPresetMenuOpen: false,
   toast: null,
   toastTimeoutId: 0,
 };
@@ -885,11 +902,11 @@ function clearActiveImportedApoBlockRepeatCount(): void {
 }
 
 function syncParametricApoFilterCountToFilters(): void {
-  state.parametricApoMaxFilters = clamp(state.parametricApoFilters.length, 0, MAX_PARAMETRIC_APO_FILTERS);
+  state.parametricApoMaxFilters = clamp(state.parametricApoFilters.length, 1, MAX_PARAMETRIC_APO_FILTERS);
 }
 
 function syncParametricFiltersToCount(): void {
-  const targetCount = clamp(state.parametricApoMaxFilters, 0, MAX_PARAMETRIC_APO_FILTERS);
+  const targetCount = clamp(state.parametricApoMaxFilters, 1, MAX_PARAMETRIC_APO_FILTERS);
   const currentFilters = [...state.parametricApoFilters].sort(
     (left, right) => left.frequencyHz - right.frequencyHz,
   );
@@ -1009,6 +1026,12 @@ runAutomationButton.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && state.apoPresetMenuOpen) {
+    state.apoPresetMenuOpen = false;
+    renderApoSection();
+    return;
+  }
+
   if (
     event.key.toLowerCase() === 's' &&
     event.ctrlKey &&
@@ -1034,6 +1057,20 @@ document.addEventListener('keydown', (event) => {
 
   event.preventDefault();
   resetUserInputsToDefaults();
+});
+
+document.addEventListener('click', (event) => {
+  if (!state.apoPresetMenuOpen) {
+    return;
+  }
+
+  const target = event.target;
+  if (target instanceof Node && apoPresetMenuAnchor.contains(target)) {
+    return;
+  }
+
+  state.apoPresetMenuOpen = false;
+  renderApoSection();
 });
 
 measurementsPlotCard.addEventListener('change', (event) => {
@@ -1308,6 +1345,30 @@ clearApoFiltersButton.addEventListener('click', () => {
   clearApoFilters();
 });
 
+selectApoPresetButton.addEventListener('click', () => {
+  if (state.busy || state.peacePresets.length === 0) {
+    return;
+  }
+
+  state.apoPresetMenuOpen = !state.apoPresetMenuOpen;
+  renderApoSection();
+});
+
+apoPresetMenu.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const presetButton = target.closest<HTMLButtonElement>('[data-apo-preset-file-name]');
+  const fileName = presetButton?.dataset.apoPresetFileName;
+  if (!fileName) {
+    return;
+  }
+
+  void importPeacePreset(fileName);
+});
+
 importApoConfigButton.addEventListener('click', () => {
   apoConfigFileInput.click();
 });
@@ -1556,6 +1617,7 @@ function setBusy(isBusy: boolean): void {
   generateApoFiltersButton.disabled = isBusy;
   addApoFilterButton.disabled = isBusy;
   clearApoFiltersButton.disabled = isBusy;
+  selectApoPresetButton.disabled = isBusy || state.peacePresets.length === 0;
   importApoConfigButton.disabled = isBusy;
   exportApoConfigButton.disabled = isBusy;
   applyApoConfigButton.disabled = isBusy;
@@ -1626,6 +1688,7 @@ function updateMeasurementActionState(): void {
     state.busy || !state.apoSelectedMeasurementId || !state.apoSelectedReferenceId;
   addApoFilterButton.disabled = state.busy || state.apoEqMode === 'graphic';
   clearApoFiltersButton.disabled = state.busy || getActiveApoFilters().length === 0;
+  selectApoPresetButton.disabled = state.busy || state.peacePresets.length === 0;
   importApoConfigButton.disabled = state.busy;
   exportApoConfigButton.disabled = state.busy || !state.outputFolder;
   const enabledFilterCount = getActiveApoFilters().filter((filter) => filter.enabled).length;
@@ -2601,7 +2664,7 @@ function renderPlotCard(
     eqMode: state.apoEqMode,
     sampleRate: getSelectedSampleRate(),
     responseMultiplier: getActiveImportedApoBlockRepeatCount() ?? 1,
-    preampDb: getAppliedApoPreampDb(),
+    preampDb: getPlotAppliedApoPreampDb(),
     measurementName: measurement?.name ?? null,
     targetName: referenceCurve?.name ?? null,
     compact: apoCompact,
@@ -2614,10 +2677,11 @@ function renderPlotCard(
     eqMode: state.apoEqMode,
     sampleRate: getSelectedSampleRate(),
     responseMultiplier: getActiveImportedApoBlockRepeatCount() ?? 1,
-    preampDb: getAppliedApoPreampDb(),
+    preampDb: getPlotAppliedApoPreampDb(),
     lockFrequency: state.apoEqMode === 'graphic',
     onFilterDrag: handleApoFilterDrag,
     onDragEnd: handleApoFilterDragEnd,
+    onAddFilter: addApoFilterAtPoint,
   });
 
   updatePlotsLayout();
@@ -3207,11 +3271,22 @@ function applyImportedConfiguration(
     if (hasImportedGraphicApoBlockRepeatCount) {
       state.graphicApoImportedBlockRepeatCount = normalizeImportedApoBlockRepeatCount(config.graphicApoImportedBlockRepeatCount);
     }
-    if (
-      (hasImportedParametricApoFilters || hasImportedParametricApoMaxFilters) &&
-      (state.parametricApoFilters.length > 0 || state.parametricApoMaxFilters === 0)
-    ) {
+    if (hasImportedParametricApoMaxFilters) {
+      syncParametricFiltersToCount();
+    } else if (hasImportedParametricApoFilters && state.parametricApoFilters.length > 0) {
       syncParametricApoFilterCountToFilters();
+    } else if (hasImportedParametricApoFilters) {
+      state.parametricApoMaxFilters = 1;
+      syncParametricFiltersToCount();
+    }
+
+    if (hasImportedGraphicApoMaxFilters) {
+      syncGraphicEqFiltersToBandCount();
+    } else if (hasImportedGraphicApoFilters && state.graphicApoFilters.length > 0) {
+      state.graphicApoMaxFilters = clamp(state.graphicApoFilters.length, 1, MAX_GRAPHIC_APO_FILTERS);
+    } else if (hasImportedGraphicApoFilters) {
+      state.graphicApoMaxFilters = 1;
+      syncGraphicEqFiltersToBandCount();
     }
   }
   state.apoMaxBoostDb = DEFAULT_APO_MAX_BOOST_DB;
@@ -3423,7 +3498,7 @@ function readStoredApoMaxFilterCounts(): { parametric: number; graphic: number }
 
   if (!stored) {
       return {
-        parametric: clamp(DEFAULT_APO_MAX_FILTERS, 0, MAX_PARAMETRIC_APO_FILTERS),
+        parametric: clamp(DEFAULT_APO_MAX_FILTERS, 1, MAX_PARAMETRIC_APO_FILTERS),
         graphic: clamp(DEFAULT_GRAPHIC_APO_MAX_FILTERS, 1, MAX_GRAPHIC_APO_FILTERS),
       };
   }
@@ -3433,7 +3508,7 @@ function readStoredApoMaxFilterCounts(): { parametric: number; graphic: number }
   } catch {
     const legacyValue = readStoredNumber(APO_MAX_FILTERS_STORAGE_KEY, DEFAULT_APO_MAX_FILTERS);
     return {
-      parametric: clamp(legacyValue, 0, MAX_PARAMETRIC_APO_FILTERS),
+      parametric: clamp(legacyValue, 1, MAX_PARAMETRIC_APO_FILTERS),
       graphic: clamp(legacyValue, 1, MAX_GRAPHIC_APO_FILTERS),
     };
   }
@@ -3518,21 +3593,21 @@ function normalizeImportedApoMaxFilterCounts(
   if (typeof value === 'number' || typeof value === 'string') {
     const legacyValue = Number(value) || DEFAULT_APO_MAX_FILTERS;
     return {
-      parametric: clamp(legacyValue, 0, MAX_PARAMETRIC_APO_FILTERS),
+      parametric: clamp(legacyValue, 1, MAX_PARAMETRIC_APO_FILTERS),
       graphic: clamp(legacyValue, 1, MAX_GRAPHIC_APO_FILTERS),
     };
   }
 
   if (!value || typeof value !== 'object') {
       return {
-      parametric: clamp(DEFAULT_APO_MAX_FILTERS, 0, MAX_PARAMETRIC_APO_FILTERS),
+      parametric: clamp(DEFAULT_APO_MAX_FILTERS, 1, MAX_PARAMETRIC_APO_FILTERS),
       graphic: clamp(DEFAULT_GRAPHIC_APO_MAX_FILTERS, 1, MAX_GRAPHIC_APO_FILTERS),
     };
   }
 
   const record = value as Record<string, unknown>;
   return {
-      parametric: clamp(Number(record.parametricApoMaxFilters) || DEFAULT_APO_MAX_FILTERS, 0, MAX_PARAMETRIC_APO_FILTERS),
+      parametric: clamp(Number(record.parametricApoMaxFilters) || DEFAULT_APO_MAX_FILTERS, 1, MAX_PARAMETRIC_APO_FILTERS),
       graphic: clamp(Number(record.graphicApoMaxFilters) || DEFAULT_GRAPHIC_APO_MAX_FILTERS, 1, MAX_GRAPHIC_APO_FILTERS),
   };
 }
@@ -3679,6 +3754,7 @@ function handleApoFilterDrag(
     };
   }));
   clearActiveImportedApoPreamp();
+  clearActiveImportedApoBlockRepeatCount();
   persistApoState();
   persistActiveConfiguration();
   renderPlotCard(
@@ -3694,7 +3770,7 @@ function handleApoFilterDragEnd(): void {
 
 function syncApoGenerationSettings(normalize: boolean): void {
   const parsedMaxFilters = Number(apoMaxFiltersInput.value);
-  const minimumFilters = state.apoEqMode === 'graphic' ? 1 : 0;
+  const minimumFilters = 1;
 
   if (Number.isFinite(parsedMaxFilters)) {
     setActiveApoMaxFilters(
@@ -3842,7 +3918,7 @@ function syncAutomationSettings(normalize: boolean): void {
 
 function renderApoSection(): void {
   syncApoEqModeToggle();
-  apoMaxFiltersInput.min = state.apoEqMode === 'graphic' ? '1' : '0';
+  apoMaxFiltersInput.min = '1';
   apoMaxFiltersInput.max = String(
     state.apoEqMode === 'graphic' ? MAX_GRAPHIC_APO_FILTERS : MAX_PARAMETRIC_APO_FILTERS,
   );
@@ -3872,6 +3948,7 @@ function renderApoSection(): void {
   apoConfigPreview.value = buildApoConfigText();
   apoApplyStatus.textContent = getApoApplyStatusText();
   apoApplyWarning.hidden = !state.equalizerApoStatus?.peaceRunning;
+  renderApoPresetMenu();
   renderPlotCard(
     state.measurements.filter((measurement) => measurement.visible),
     state.referenceCurves.filter((referenceCurve) => referenceCurve.visible),
@@ -4000,7 +4077,7 @@ function renderApoFilterList(): string {
           <input type="number" min="20" max="20000" step="1" value="${filter.frequencyHz.toFixed(0)}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="frequencyHz" ${(state.busy || state.apoEqMode === 'graphic') ? 'disabled' : ''} />
           <input type="number" min="-24" max="24" step="0.1" value="${filter.gainDb.toFixed(1)}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="gainDb" ${(state.busy || !apoFilterKindUsesGain(filter.kind)) ? 'disabled' : ''} />
           ${renderApoFilterShapeInput(filter)}
-          <button class="btn btn-secondary measurement-remove-button" type="button" data-apo-filter-remove="${escapeHtml(filter.id)}" ${(state.busy || state.apoEqMode === 'graphic') ? 'disabled' : ''}>Remove</button>
+          <button class="btn btn-secondary measurement-remove-button" type="button" data-apo-filter-remove="${escapeHtml(filter.id)}" ${(state.busy || state.apoEqMode === 'graphic' || activeApoFilters.length <= 1) ? 'disabled' : ''}>Remove</button>
         </div>
       `,
     )
@@ -4268,21 +4345,40 @@ function clearApoFilters(): void {
     setActiveApoFilters(graphicFilters);
     state.nextApoFilterIndex = graphicFilters.length + 1;
   } else {
-    setActiveApoFilters([]);
+    setActiveApoFilters([
+      {
+        id: 'apo-filter-1',
+        enabled: true,
+        kind: 'PK',
+        frequencyHz: findNextParametricFilterFrequency([]),
+        gainDb: 0,
+        q: getDefaultApoFilterQ('PK'),
+        order: null,
+        slopeDbPerOct: null,
+      },
+    ]);
     syncParametricApoFilterCountToFilters();
-    state.nextApoFilterIndex = 1;
+    state.nextApoFilterIndex = 2;
   }
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
   appendLog(
-    state.apoEqMode === 'graphic' ? 'Reset graphic EQ bands to flat.' : 'Cleared all APO filters.',
+    state.apoEqMode === 'graphic'
+      ? 'Reset graphic EQ bands to flat.'
+      : 'Cleared parametric APO filters back to one centered peak filter.',
     'neutral',
   );
 }
 
 function removeApoFilter(filterId: string): void {
   if (state.apoEqMode === 'graphic') {
+    return;
+  }
+
+  if (state.parametricApoFilters.length <= 1) {
+    appendLog('Parametric EQ requires at least one filter.', 'neutral');
+    renderApoSection();
     return;
   }
 
@@ -4372,6 +4468,59 @@ function updateApoFilter(filterId: string, field: string, value: string | boolea
   renderApoSection();
 }
 
+function addApoFilterAtPoint(frequencyHz: number, gainDb: number): void {
+  const clampedFrequencyHz = clamp(frequencyHz, DEFAULT_START_FREQUENCY, DEFAULT_END_FREQUENCY);
+  const clampedGainDb = clamp(gainDb, -24, 24);
+
+  if (state.apoEqMode === 'graphic') {
+    if (state.graphicApoFilters.length >= MAX_GRAPHIC_APO_FILTERS) {
+      appendLog(`Graphic EQ bands are limited to ${MAX_GRAPHIC_APO_FILTERS}.`, 'neutral');
+      renderApoSection();
+      return;
+    }
+
+    const sourceFilters = [
+      ...state.graphicApoFilters,
+      {
+        id: `apo-filter-${state.nextApoFilterIndex}`,
+        enabled: true,
+        kind: 'PK',
+        frequencyHz: clampedFrequencyHz,
+        gainDb: clampedGainDb,
+        q: getDefaultApoFilterQ('PK'),
+        order: null,
+        slopeDbPerOct: null,
+      },
+    ];
+    const nextBandCount = clamp(state.graphicApoMaxFilters + 1, 1, MAX_GRAPHIC_APO_FILTERS);
+    const nextFilters = buildGraphicEqFilters(nextBandCount, sourceFilters);
+    const nearestFilter = nextFilters.reduce<ApoFilter | null>((closest, filter) => {
+      if (!closest) {
+        return filter;
+      }
+
+      return Math.abs(filter.frequencyHz - clampedFrequencyHz) <
+        Math.abs(closest.frequencyHz - clampedFrequencyHz)
+        ? filter
+        : closest;
+    }, null);
+
+    state.graphicApoMaxFilters = nextBandCount;
+    state.graphicApoFilters = nextFilters.map((filter) =>
+      nearestFilter && filter.id === nearestFilter.id ? { ...filter, gainDb: clampedGainDb } : filter,
+    );
+    clearActiveImportedApoPreamp();
+    clearActiveImportedApoBlockRepeatCount();
+    state.nextApoFilterIndex = state.graphicApoFilters.length + 1;
+    persistApoState();
+    persistActiveConfiguration();
+    renderApoSection();
+    return;
+  }
+
+  addApoFilter({ frequencyHz: clampedFrequencyHz, gainDb: clampedGainDb });
+}
+
 async function generateApoFilters(
   measurementOverride: LoadedMeasurement | null = null,
   useAutomationAlgorithm = false,
@@ -4458,6 +4607,26 @@ function buildFiltersForSelectedAlgorithm(
   }
 
   return buildApoFiltersFromCurves(measurement, referenceCurve);
+}
+
+function renderApoPresetMenu(): void {
+  const presets = state.peacePresets;
+
+  if (presets.length === 0) {
+    state.apoPresetMenuOpen = false;
+  }
+
+  selectApoPresetButton.setAttribute('aria-expanded', String(state.apoPresetMenuOpen));
+  apoPresetMenuAnchor.classList.toggle('is-open', state.apoPresetMenuOpen);
+  apoPresetMenu.hidden = !state.apoPresetMenuOpen;
+  apoPresetMenu.innerHTML = presets.length
+    ? presets
+        .map(
+          (preset) =>
+            `<button class="apo-preset-menu-item" type="button" role="menuitem" data-apo-preset-file-name="${escapeHtml(preset.fileName)}">${escapeHtml(preset.displayName)}</button>`,
+        )
+        .join('')
+    : '<div class="apo-preset-menu-empty">No PEACE presets found.</div>';
 }
 
 function buildProportionalApoFilters(
@@ -5090,6 +5259,11 @@ function getAppliedApoPreampDb(): number {
   return -roundTo(getCombinedApoResponseDb(PLOT_NORMALIZATION_FREQUENCY_HZ), 0.1);
 }
 
+function getPlotAppliedApoPreampDb(): number {
+  const importedPreampDb = getActiveImportedApoPreampDb();
+  return importedPreampDb === null ? 0 : roundTo(importedPreampDb, 0.1);
+}
+
 function buildApoConfigText(): string {
   const enabledFilters = getActiveApoFilters().filter((filter) => filter.enabled);
   const measurement = getSelectedApoMeasurement();
@@ -5251,46 +5425,7 @@ async function importEqProfile(file: File): Promise<void> {
     setStatus('Importing EQ profile...', 'working');
 
     const contents = await file.text();
-    const importedProfile = parseImportedEqProfile(contents);
-    const maxFilterCount =
-      importedProfile.mode === 'graphic' ? MAX_GRAPHIC_APO_FILTERS : MAX_PARAMETRIC_APO_FILTERS;
-    const importedFilters = cloneApoFilters(importedProfile.filters.slice(0, maxFilterCount));
-
-    if (importedFilters.length === 0) {
-      throw new Error('No supported EQ filters were found in the selected profile.');
-    }
-
-    state.apoEqMode = importedProfile.mode;
-
-    if (importedProfile.mode === 'graphic') {
-      state.graphicApoFilters = importedFilters;
-      state.graphicApoMaxFilters = clamp(importedFilters.length, 1, MAX_GRAPHIC_APO_FILTERS);
-      state.graphicApoImportedPreampDb = importedProfile.preampDb;
-      state.graphicApoImportedBlockRepeatCount = importedProfile.blockRepeatCount;
-    } else {
-      state.parametricApoFilters = importedFilters;
-      state.parametricApoMaxFilters = clamp(importedFilters.length, 0, MAX_PARAMETRIC_APO_FILTERS);
-      state.parametricApoImportedPreampDb = importedProfile.preampDb;
-      state.parametricApoImportedBlockRepeatCount = importedProfile.blockRepeatCount;
-    }
-
-    state.nextApoFilterIndex = getNextApoFilterIndex();
-
-    persistApoState();
-    persistActiveConfiguration();
-    renderApoSection();
-
-    const importSummary =
-      importedProfile.mode === 'graphic'
-        ? `Imported ${importedFilters.length} graphic EQ band${importedFilters.length === 1 ? '' : 's'}`
-        : `Imported ${importedFilters.length} parametric filter${importedFilters.length === 1 ? '' : 's'}`;
-    const truncated = importedProfile.filters.length > importedFilters.length;
-    const modeLabel = importedProfile.mode === 'graphic' ? 'Graphic' : 'Parametric';
-    setStatus(`${importSummary}.`, 'success');
-    appendLog(
-      `${importSummary} from ${file.name} and switched to ${modeLabel} mode${truncated ? ` (limited to ${maxFilterCount}).` : '.'}`,
-      'success',
-    );
+    applyImportedEqProfile(parseImportedEqProfile(contents), file.name);
   } catch (error) {
     const message = getErrorMessage(error);
     setStatus(`EQ import failed: ${message}`, 'error');
@@ -5298,6 +5433,71 @@ async function importEqProfile(file: File): Promise<void> {
   } finally {
     setBusy(false);
   }
+}
+
+async function importPeacePreset(fileName: string): Promise<void> {
+  if (state.busy) {
+    return;
+  }
+
+  state.apoPresetMenuOpen = false;
+  renderApoSection();
+
+  try {
+    setBusy(true);
+    setStatus('Importing PEACE preset...', 'working');
+
+    const preset = await window.freakishEars.readPeacePreset(fileName);
+    applyImportedEqProfile(parseImportedEqProfile(preset.contents), preset.fileName);
+  } catch (error) {
+    const message = getErrorMessage(error);
+    setStatus(`PEACE preset import failed: ${message}`, 'error');
+    appendLog(`PEACE preset import failed for ${fileName}: ${message}`, 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
+function applyImportedEqProfile(importedProfile: ImportedEqProfile, sourceLabel: string): void {
+  const maxFilterCount =
+    importedProfile.mode === 'graphic' ? MAX_GRAPHIC_APO_FILTERS : MAX_PARAMETRIC_APO_FILTERS;
+  const importedFilters = cloneApoFilters(importedProfile.filters.slice(0, maxFilterCount));
+
+  if (importedFilters.length === 0) {
+    throw new Error('No supported EQ filters were found in the selected profile.');
+  }
+
+  state.apoEqMode = importedProfile.mode;
+
+  if (importedProfile.mode === 'graphic') {
+    state.graphicApoFilters = importedFilters;
+    state.graphicApoMaxFilters = clamp(importedFilters.length, 1, MAX_GRAPHIC_APO_FILTERS);
+    state.graphicApoImportedPreampDb = importedProfile.preampDb;
+    state.graphicApoImportedBlockRepeatCount = importedProfile.blockRepeatCount;
+  } else {
+    state.parametricApoFilters = importedFilters;
+    state.parametricApoMaxFilters = clamp(importedFilters.length, 1, MAX_PARAMETRIC_APO_FILTERS);
+    state.parametricApoImportedPreampDb = importedProfile.preampDb;
+    state.parametricApoImportedBlockRepeatCount = importedProfile.blockRepeatCount;
+  }
+
+  state.nextApoFilterIndex = getNextApoFilterIndex();
+
+  persistApoState();
+  persistActiveConfiguration();
+  renderApoSection();
+
+  const importSummary =
+    importedProfile.mode === 'graphic'
+      ? `Imported ${importedFilters.length} graphic EQ band${importedFilters.length === 1 ? '' : 's'}`
+      : `Imported ${importedFilters.length} parametric filter${importedFilters.length === 1 ? '' : 's'}`;
+  const truncated = importedProfile.filters.length > importedFilters.length;
+  const modeLabel = importedProfile.mode === 'graphic' ? 'Graphic' : 'Parametric';
+  setStatus(`${importSummary}.`, 'success');
+  appendLog(
+    `${importSummary} from ${sourceLabel} and switched to ${modeLabel} mode${truncated ? ` (limited to ${maxFilterCount}).` : '.'}`,
+    'success',
+  );
 }
 
 function parseImportedEqProfile(contents: string): ImportedEqProfile {
@@ -5674,11 +5874,23 @@ function parseImportedFilterDescriptor(
 }
 
 async function refreshEqualizerApoStatus(): Promise<void> {
-  try {
-    state.equalizerApoStatus = await window.freakishEars.getEqualizerApoStatus();
-  } catch (error) {
-    appendLog(`Unable to read Equalizer APO status: ${getErrorMessage(error)}`, 'error');
+  const [statusResult, presetResult] = await Promise.allSettled([
+    window.freakishEars.getEqualizerApoStatus(),
+    window.freakishEars.listPeacePresets(),
+  ]);
+
+  if (statusResult.status === 'fulfilled') {
+    state.equalizerApoStatus = statusResult.value;
+  } else {
+    appendLog(`Unable to read Equalizer APO status: ${getErrorMessage(statusResult.reason)}`, 'error');
     state.equalizerApoStatus = null;
+  }
+
+  if (presetResult.status === 'fulfilled') {
+    state.peacePresets = presetResult.value;
+  } else {
+    appendLog(`Unable to load PEACE presets: ${getErrorMessage(presetResult.reason)}`, 'error');
+    state.peacePresets = [];
   }
 
   renderApoSection();

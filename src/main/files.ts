@@ -8,9 +8,12 @@ import type {
   ApplyEqualizerApoConfigPayload,
   ApplyEqualizerApoConfigResult,
   EqualizerApoStatus,
+  PeacePresetSummary,
+  ReadPeacePresetResult,
   SaveMeasurementPayload,
   SaveMeasurementResult,
 } from '../shared/ipc';
+import { BUNDLED_PEACE_PRESETS } from '../shared/peace-presets';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_EQUALIZER_APO_CONFIG_FOLDER = 'C:\\Program Files\\EqualizerAPO\\config';
@@ -111,6 +114,33 @@ export async function getEqualizerApoStatus(): Promise<EqualizerApoStatus> {
     peaceRunning,
     peaceIncludedInConfig: hasActiveInclude(configContents, PEACE_PROFILE_NAME),
     freakishEarsIncludedInConfig: hasActiveInclude(configContents, FREAKISH_EARS_PROFILE_NAME),
+  };
+}
+
+export async function listPeacePresets(): Promise<PeacePresetSummary[]> {
+  return BUNDLED_PEACE_PRESETS.map((preset) => ({
+    fileName: preset.fileName,
+    displayName: preset.displayName,
+    filePath: preset.fileName,
+  }));
+}
+
+export async function readPeacePreset(fileName: string): Promise<ReadPeacePresetResult> {
+  const normalizedFileName = path.basename(fileName);
+
+  if (normalizedFileName !== fileName || !/\.peace$/iu.test(normalizedFileName)) {
+    throw new Error('Invalid PEACE preset name.');
+  }
+
+  const preset = BUNDLED_PEACE_PRESETS.find((entry) => entry.fileName === normalizedFileName);
+
+  if (!preset) {
+    throw new Error(`PEACE preset not found: ${normalizedFileName}`);
+  }
+
+  return {
+    fileName: normalizedFileName,
+    contents: preset.contents,
   };
 }
 

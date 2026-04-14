@@ -6,6 +6,8 @@ import {
   deleteMeasurementSession,
   disablePeace,
   getEqualizerApoStatus,
+  listPeacePresets,
+  readPeacePreset,
   saveFileAtPath,
   saveMeasurementSession,
 } from './files';
@@ -73,6 +75,12 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.getEqualizerApoStatus, async () => getEqualizerApoStatus());
+
+  ipcMain.handle(IPC_CHANNELS.listPeacePresets, async () => listPeacePresets());
+
+  ipcMain.handle(IPC_CHANNELS.readPeacePreset, async (_event, fileName: string) =>
+    readPeacePreset(fileName),
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.applyEqualizerApoConfig,

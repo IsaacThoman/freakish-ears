@@ -21,6 +21,8 @@ const api: FreakishEarsApi = {
   runSoxMeasurement: (payload: RunSoxMeasurementPayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.runSoxMeasurement, payload),
   getEqualizerApoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getEqualizerApoStatus),
+  listPeacePresets: () => ipcRenderer.invoke(IPC_CHANNELS.listPeacePresets),
+  readPeacePreset: (fileName: string) => ipcRenderer.invoke(IPC_CHANNELS.readPeacePreset, fileName),
   applyEqualizerApoConfig: (payload: ApplyEqualizerApoConfigPayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.applyEqualizerApoConfig, payload),
   disablePeace: () => ipcRenderer.invoke(IPC_CHANNELS.disablePeace),

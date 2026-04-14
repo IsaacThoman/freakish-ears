@@ -46,6 +46,13 @@ type ApoBandVisualStyle = {
   fillBottom: string;
 };
 
+type BandFillPolarity = 'positive' | 'negative';
+
+type BandFillSegment = {
+  path: string;
+  polarity: BandFillPolarity;
+};
+
 type SvgGradientStop = {
   color: string;
   opacity: number;
@@ -585,9 +592,12 @@ export function renderApoEqPlot(input: {
         filter,
         points: sampledPoints.map((point) => ({
           frequencyHz: point.frequencyHz,
-          totalDb:
-            getApoFilterResponseDb(filter, point.frequencyHz, input.sampleRate) *
+          totalDb: getRenderedApoEqValueDb(
+            getApoFilterResponseDb(filter, point.frequencyHz, input.sampleRate),
+            input.eqMode,
             input.responseMultiplier,
+            input.preampDb,
+          ),
         })),
       }));
   const labelSizing = getPlotLabelSizing(input.compact);
@@ -598,6 +608,9 @@ export function renderApoEqPlot(input: {
     individualPointSets,
     input.containerWidth,
     input.sampleRate,
+    input.eqMode,
+    input.responseMultiplier,
+    input.preampDb,
     labelSizing,
     yAxisLabelText,
   );
@@ -620,7 +633,7 @@ export function renderApoEqPlot(input: {
     style: getApoBandVisualStyle(index),
     gradientId: `${graphIdBase}-band-gradient-${index}`,
   }));
-  const combinedGradientId = `${graphIdBase}-combined-gradient`;
+  const combinedGradientIdBase = `${graphIdBase}-combined-gradient`;
   const combinedVisualStyle: ApoBandVisualStyle = {
     nodeFill: '#f8a145',
     strokeSoft: '#f8a145',
@@ -630,18 +643,18 @@ export function renderApoEqPlot(input: {
   const svgDefs = isParametricMode
     ? `
       <defs>
-        ${buildApoBandGradientDef(combinedGradientId, sampledPoints, geometry, xAxisY, combinedVisualStyle)}
+        ${buildApoBandGradientDef(combinedGradientIdBase, combinedVisualStyle)}
         ${bandVisuals
-          .map(({ style, gradientId, points }) => buildApoBandGradientDef(gradientId, points, geometry, xAxisY, style))
+          .map(({ style, gradientId }) => buildApoBandGradientDef(gradientId, style))
           .join('')}
       </defs>`
     : `
       <defs>
-        ${buildApoBandGradientDef(combinedGradientId, sampledPoints, geometry, xAxisY, combinedVisualStyle)}
+        ${buildApoBandGradientDef(combinedGradientIdBase, combinedVisualStyle)}
       </defs>`;
 
   return `
-    <div class="plot-hover">EQ Graph: ${escapeHtml(input.measurementName ?? 'No measurement')} -> ${escapeHtml(input.targetName ?? 'No target')}</div>
+    <div class="plot-hover" id="apoPlotHover">Hover: --</div>
     <svg class="apo-eq-svg${isParametricMode ? ' apo-eq-svg-parametric' : ' apo-eq-svg-graphic'}" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Equalizer APO frequency response graph">
       ${svgDefs}
       <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
@@ -660,9 +673,9 @@ export function renderApoEqPlot(input: {
       ${individualPointSets
         .map(({ filter, points }, index) => {
           const linePath = buildPolylinePath(points, geometry);
-          const fillPath = buildClosedBandFillPath(points, geometry, xAxisY);
+          const fillSegments = buildClosedBandFillSegments(points, geometry, xAxisY);
           const visualStyle = bandVisuals[index]?.style ?? getApoBandVisualStyle(index);
-          const gradientId = bandVisuals[index]?.gradientId ?? `${graphIdBase}-band-gradient-${index}`;
+          const gradientIdBase = bandVisuals[index]?.gradientId ?? `${graphIdBase}-band-gradient-${index}`;
 
           const filterSummary = apoFilterKindUsesGain(filter.kind)
             ? `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB`
@@ -680,26 +693,33 @@ export function renderApoEqPlot(input: {
             return `<polyline points="${points.map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`).join(' ')}" fill="none" stroke="rgba(125,125,125,0.65)" stroke-width="1.5" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"><title>${escapeHtml(input.eqMode === 'graphic' ? `GEQ ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}` : `${filterSummary}${shapeSummary}`)}</title></polyline>`;
           }
 
-          const fillMarkup = fillPath.length > 0
-            ? `<path d="${fillPath}" fill="url(#${gradientId})" stroke="none"></path>`
-            : '';
+          const fillMarkup = fillSegments
+            .map((segment) => `<path d="${segment.path}" fill="url(#${getApoBandGradientId(gradientIdBase, segment.polarity)})" stroke="none"></path>`)
+            .join('');
           return `<g class="apo-parametric-band-visual" data-apo-filter-id="${escapeHtml(filter.id)}">${fillMarkup}<path d="${linePath}" fill="none" stroke="${visualStyle.strokeSoft}" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"><title>${escapeHtml(`${filterSummary}${shapeSummary}`)}</title></path></g>`;
         })
         .join('')}
       ${(() => {
-        const combinedFillPath = buildClosedBandFillPath(sampledPoints, geometry, xAxisY);
-        const combinedFillMarkup = combinedFillPath.length > 0
-          ? `<path d="${combinedFillPath}" fill="url(#${combinedGradientId})" stroke="none"></path>`
-          : '';
+        const combinedFillSegments = buildClosedBandFillSegments(sampledPoints, geometry, xAxisY);
+        const combinedFillMarkup = combinedFillSegments
+          .map((segment) => `<path d="${segment.path}" fill="url(#${getApoBandGradientId(combinedGradientIdBase, segment.polarity)})" stroke="none"></path>`)
+          .join('');
         return isParametricMode
           ? `${combinedFillMarkup}<path d="${combinedStrokePath}" fill="none" stroke="#f8a145" stroke-width="3.45" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>`
           : `${combinedFillMarkup}<polyline points="${sampledPoints.map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`).join(' ')}" fill="none" stroke="#f8a145" stroke-width="3.45" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>`;
       })()}
+      <line id="apoPlotHoverLine" x1="0" y1="${geometry.top}" x2="0" y2="${geometry.height - geometry.bottom}" stroke="#f8a145" stroke-width="1" opacity="0" vector-effect="non-scaling-stroke"></line>
       ${enabledFilters
         .filter((filter, index) => shouldRenderGraphicEqNode(index, enabledFilters.length, input.eqMode, graphicNodeProfile))
         .map((filter, index) => {
           const x = getPlotX(filter.frequencyHz, geometry);
-          const nodeGainDb = getApoFilterNodeGainDb(filter, input.sampleRate);
+          const nodeGainDb = getRenderedApoFilterNodeGainDb(
+            filter,
+            input.sampleRate,
+            input.eqMode,
+            input.responseMultiplier,
+            input.preampDb,
+          );
           const y = getPlotY(nodeGainDb, geometry);
           const visualStyle = isParametricMode
             ? (bandVisuals[index]?.style ?? getApoBandVisualStyle(index))
@@ -753,13 +773,22 @@ function getApoEqPlotGeometry(
   }>,
   containerWidth: number,
   sampleRate: number,
+  eqMode: ApoEqMode,
+  responseMultiplier: number,
+  preampDb: number,
   labelSizing: PlotLabelSizing,
   yAxisLabelText: string,
 ): ResponsePlotGeometry {
   const allValues = [
     ...sampledPoints.map((point) => point.totalDb),
     ...individualPointSets.flatMap((entry) => entry.points.map((point) => point.totalDb)),
-    ...enabledFilters.map((filter) => getApoFilterNodeGainDb(filter, sampleRate)),
+    ...enabledFilters.map((filter) => getRenderedApoFilterNodeGainDb(
+      filter,
+      sampleRate,
+      eqMode,
+      responseMultiplier,
+      preampDb,
+    )),
     0,
   ];
   const minDb = Math.min(-12, Math.floor((Math.min(...allValues) - 1) / 3) * 3);
@@ -835,47 +864,42 @@ function getSvgGradientStop(color: string): SvgGradientStop {
   };
 }
 
+function getApoBandGradientId(gradientIdBase: string, polarity: BandFillPolarity): string {
+  return `${gradientIdBase}-${polarity}`;
+}
+
 function buildApoBandGradientDef(
-  gradientId: string,
-  points: Array<{ frequencyHz: number; totalDb: number }>,
-  geometry: ResponsePlotGeometry,
-  baselineY: number,
+  gradientIdBase: string,
   style: ApoBandVisualStyle,
 ): string {
   const visibleStop = getSvgGradientStop(style.fillTop);
 
-  return buildBaselineAnchoredGradientDef(
-    gradientId,
-    points,
-    geometry,
-    baselineY,
-    visibleStop.color,
-    visibleStop.opacity,
-  );
+  return [
+    buildBaselineAnchoredGradientDef(
+      getApoBandGradientId(gradientIdBase, 'positive'),
+      visibleStop.color,
+      visibleStop.opacity,
+      'positive',
+    ),
+    buildBaselineAnchoredGradientDef(
+      getApoBandGradientId(gradientIdBase, 'negative'),
+      visibleStop.color,
+      visibleStop.opacity,
+      'negative',
+    ),
+  ].join('');
 }
 
 function buildBaselineAnchoredGradientDef(
   gradientId: string,
-  points: Array<{ frequencyHz: number; totalDb: number }>,
-  geometry: ResponsePlotGeometry,
-  baselineY: number,
   color: string,
   opacity: number,
+  polarity: BandFillPolarity,
 ): string {
-  const strongestPoint = points.reduce<{ totalDb: number } | null>((strongest, point) => {
-    if (!strongest || Math.abs(point.totalDb) > Math.abs(strongest.totalDb)) {
-      return point;
-    }
-
-    return strongest;
-  }, null);
-
-  const dominantDb = strongestPoint?.totalDb ?? 0;
-
   // Use objectBoundingBox so gradient scales with the fill path, avoiding edge artifacts
-  if (dominantDb < 0) {
+  if (polarity === 'negative') {
     return `
-            <linearGradient id="${gradientId}" x1="0" y1="1" x2="0" y2="0" gradientUnits="objectBoundingBox">
+            <linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
               <stop offset="0%" stop-color="${color}" stop-opacity="0" />
               <stop offset="100%" stop-color="${color}" stop-opacity="${opacity.toFixed(3)}" />
             </linearGradient>
@@ -934,10 +958,18 @@ function buildClosedBandFillPath(
   geometry: ResponsePlotGeometry,
   baselineY: number,
 ): string {
+  return buildClosedBandFillSegments(points, geometry, baselineY)[0]?.path ?? '';
+}
+
+function buildClosedBandFillSegments(
+  points: Array<{ frequencyHz: number; totalDb: number }>,
+  geometry: ResponsePlotGeometry,
+  baselineY: number,
+): BandFillSegment[] {
   const ACTIVE_FILL_THRESHOLD_DB = 0.05;
   const firstActiveIndex = points.findIndex((point) => Math.abs(point.totalDb) >= ACTIVE_FILL_THRESHOLD_DB);
   if (firstActiveIndex < 0) {
-    return '';
+    return [];
   }
 
   let lastActiveIndex = firstActiveIndex;
@@ -950,7 +982,97 @@ function buildClosedBandFillPath(
 
   const startIndex = Math.max(0, firstActiveIndex - 1);
   const endIndex = Math.min(points.length - 1, lastActiveIndex + 1);
-  return buildClosedFillPath(points.slice(startIndex, endIndex + 1), geometry, baselineY);
+  const trimmedPoints = points.slice(startIndex, endIndex + 1);
+  const expandedPoints: Array<{ frequencyHz: number; totalDb: number }> = [];
+
+  for (let index = 0; index < trimmedPoints.length; index += 1) {
+    const point = trimmedPoints[index];
+    if (!point) {
+      continue;
+    }
+
+    expandedPoints.push(point);
+
+    const nextPoint = trimmedPoints[index + 1];
+    if (!nextPoint) {
+      continue;
+    }
+
+    const currentDb = point.totalDb;
+    const nextDb = nextPoint.totalDb;
+    if (currentDb === 0 || nextDb === 0 || Math.sign(currentDb) === Math.sign(nextDb)) {
+      continue;
+    }
+
+    const crossingRatio = currentDb / (currentDb - nextDb);
+    const currentLogFrequency = Math.log(point.frequencyHz);
+    const nextLogFrequency = Math.log(nextPoint.frequencyHz);
+    expandedPoints.push({
+      frequencyHz: Math.exp(currentLogFrequency + (nextLogFrequency - currentLogFrequency) * crossingRatio),
+      totalDb: 0,
+    });
+  }
+
+  const fillSegments: BandFillSegment[] = [];
+  let currentPolarity: BandFillPolarity | null = null;
+  let currentSegmentPoints: Array<{ frequencyHz: number; totalDb: number }> = [];
+
+  for (let index = 0; index < expandedPoints.length; index += 1) {
+    const point = expandedPoints[index];
+    if (!point) {
+      continue;
+    }
+
+    const pointPolarity = point.totalDb >= ACTIVE_FILL_THRESHOLD_DB
+      ? 'positive'
+      : point.totalDb <= -ACTIVE_FILL_THRESHOLD_DB
+        ? 'negative'
+        : null;
+
+    if (!pointPolarity) {
+      if (currentPolarity && currentSegmentPoints.length > 0) {
+        currentSegmentPoints.push(point);
+        fillSegments.push({
+          path: buildClosedFillPath(currentSegmentPoints, geometry, baselineY),
+          polarity: currentPolarity,
+        });
+        currentPolarity = null;
+        currentSegmentPoints = [];
+      }
+      continue;
+    }
+
+    if (!currentPolarity) {
+      const previousPoint = expandedPoints[index - 1];
+      currentPolarity = pointPolarity;
+      currentSegmentPoints = previousPoint && Math.abs(previousPoint.totalDb) < ACTIVE_FILL_THRESHOLD_DB
+        ? [previousPoint, point]
+        : [point];
+      continue;
+    }
+
+    if (currentPolarity !== pointPolarity) {
+      fillSegments.push({
+        path: buildClosedFillPath(currentSegmentPoints, geometry, baselineY),
+        polarity: currentPolarity,
+      });
+      const previousPoint = expandedPoints[index - 1];
+      currentPolarity = pointPolarity;
+      currentSegmentPoints = previousPoint ? [previousPoint, point] : [point];
+      continue;
+    }
+
+    currentSegmentPoints.push(point);
+  }
+
+  if (currentPolarity && currentSegmentPoints.length > 0) {
+    fillSegments.push({
+      path: buildClosedFillPath(currentSegmentPoints, geometry, baselineY),
+      polarity: currentPolarity,
+    });
+  }
+
+  return fillSegments;
 }
 
 function buildApoPreviewSampledPoints(
@@ -970,11 +1092,58 @@ function buildApoPreviewSampledPoints(
     totalDb:
       eqMode === 'graphic'
         ? getGraphicEqResponseDb(enabledFilters, frequencyHz)
-        : enabledFilters.reduce(
-            (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz, sampleRate),
-            0,
-          ) * responseMultiplier + preampDb,
+        : getRenderedApoEqValueDb(
+            enabledFilters.reduce(
+              (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz, sampleRate),
+              0,
+            ),
+            eqMode,
+            responseMultiplier,
+            preampDb,
+          ),
   }));
+}
+
+function getRenderedApoEqValueDb(
+  valueDb: number,
+  eqMode: ApoEqMode,
+  responseMultiplier: number,
+  preampDb: number,
+): number {
+  if (eqMode !== 'parametric') {
+    return valueDb;
+  }
+
+  return valueDb * responseMultiplier + preampDb;
+}
+
+function getEditableApoGainDb(
+  displayedDb: number,
+  eqMode: ApoEqMode,
+  responseMultiplier: number,
+  preampDb: number,
+): number {
+  if (eqMode !== 'parametric') {
+    return displayedDb;
+  }
+
+  const normalizedMultiplier = Math.max(Math.abs(responseMultiplier), 1e-6);
+  return (displayedDb - preampDb) / normalizedMultiplier;
+}
+
+function getRenderedApoFilterNodeGainDb(
+  filter: ApoFilter,
+  sampleRate: number,
+  eqMode: ApoEqMode = 'parametric',
+  responseMultiplier = 1,
+  preampDb = 0,
+): number {
+  return getRenderedApoEqValueDb(
+    getApoFilterNodeGainDb(filter, sampleRate),
+    eqMode,
+    responseMultiplier,
+    preampDb,
+  );
 }
 
 function buildParametricEqPreviewSampleFrequencies(filters: ApoFilter[]): number[] {
@@ -1341,6 +1510,7 @@ export function attachApoPlotInteractions(input: {
   lockFrequency: boolean;
   onFilterDrag: ApoPlotDragHandler;
   onDragEnd: () => void;
+  onAddFilter: (frequencyHz: number, gainDb: number) => void;
 }): void {
   const { plotCard } = input;
   const plotCardWithController = plotCard as HTMLElement & {
@@ -1353,10 +1523,11 @@ export function attachApoPlotInteractions(input: {
       lockFrequency: boolean;
       onFilterDrag: ApoPlotDragHandler;
       onDragEnd: () => void;
+      onAddFilter: (frequencyHz: number, gainDb: number) => void;
       draggingFilterId: string | null;
       cleanup: () => void;
+    };
   };
-};
 
   if (plotCardWithController.__apoPlotController) {
     plotCardWithController.__apoPlotController.filters = input.filters;
@@ -1367,8 +1538,18 @@ export function attachApoPlotInteractions(input: {
     plotCardWithController.__apoPlotController.lockFrequency = input.lockFrequency;
     plotCardWithController.__apoPlotController.onFilterDrag = input.onFilterDrag;
     plotCardWithController.__apoPlotController.onDragEnd = input.onDragEnd;
+    plotCardWithController.__apoPlotController.onAddFilter = input.onAddFilter;
     return;
   }
+
+  const resetHoverState = () => {
+    const hoverLine = plotCard.querySelector<SVGLineElement>('#apoPlotHoverLine');
+    const hoverLabel = plotCard.querySelector<HTMLDivElement>('#apoPlotHover');
+    hoverLine?.setAttribute('opacity', '0');
+    if (hoverLabel) {
+      hoverLabel.textContent = 'Hover: --';
+    }
+  };
 
   const getGeometryFromSvg = (filters: ApoFilter[]): ResponsePlotGeometry | null => {
     const svg = plotCard.querySelector('svg');
@@ -1396,9 +1577,12 @@ export function attachApoPlotInteractions(input: {
           filter,
           points: sampledPoints.map((point) => ({
             frequencyHz: point.frequencyHz,
-            totalDb:
-              getApoFilterResponseDb(filter, point.frequencyHz, sampleRate) *
-              (plotCardWithController.__apoPlotController?.responseMultiplier ?? 1),
+            totalDb: getRenderedApoEqValueDb(
+              getApoFilterResponseDb(filter, point.frequencyHz, sampleRate),
+              plotCardWithController.__apoPlotController?.eqMode ?? 'parametric',
+              plotCardWithController.__apoPlotController?.responseMultiplier ?? 1,
+              plotCardWithController.__apoPlotController?.preampDb ?? 0,
+            ),
           })),
         }));
 
@@ -1410,10 +1594,50 @@ export function attachApoPlotInteractions(input: {
       individualPointSets,
       width,
       sampleRate,
+      plotCardWithController.__apoPlotController?.eqMode ?? 'parametric',
+      plotCardWithController.__apoPlotController?.responseMultiplier ?? 1,
+      plotCardWithController.__apoPlotController?.preampDb ?? 0,
       labelSizing,
       'EQ Gain (dB)',
     );
     return { ...geometry, width, height };
+  };
+
+  const updateHover = (clientX: number) => {
+    const controller = plotCardWithController.__apoPlotController;
+    if (!controller?.filters.length || controller.draggingFilterId) {
+      return;
+    }
+
+    const svg = plotCard.querySelector<SVGSVGElement>('svg');
+    const hoverLine = plotCard.querySelector<SVGLineElement>('#apoPlotHoverLine');
+    const hoverLabel = plotCard.querySelector<HTMLDivElement>('#apoPlotHover');
+    if (!svg || !hoverLine || !hoverLabel) {
+      return;
+    }
+
+    const geometry = getGeometryFromSvg(controller.filters);
+    if (!geometry) {
+      return;
+    }
+
+    const bounds = svg.getBoundingClientRect();
+    const plotX = ((clientX - bounds.left) / bounds.width) * geometry.width;
+    const hoveredFrequency = clamp(getFrequencyForPlotX(plotX, geometry), DEFAULT_START_FREQUENCY, DEFAULT_END_FREQUENCY);
+    const sampledPoints = buildApoPreviewSampledPoints(
+      controller.filters.filter((filter) => filter.enabled),
+      controller.eqMode,
+      controller.sampleRate,
+      controller.responseMultiplier,
+      controller.preampDb,
+    );
+    const closestPoint = findClosestPoint(sampledPoints, hoveredFrequency);
+    const hoverLineX = getPlotX(closestPoint.frequencyHz, geometry);
+
+    hoverLine.setAttribute('x1', hoverLineX.toFixed(1));
+    hoverLine.setAttribute('x2', hoverLineX.toFixed(1));
+    hoverLine.setAttribute('opacity', '1');
+    hoverLabel.textContent = `Hover: ${formatFrequencyDetailed(closestPoint.frequencyHz)} | ${closestPoint.totalDb.toFixed(1)} dB`;
   };
 
   const getTooltipScreenPosition = (svg: SVGSVGElement, nodeX: number, nodeY: number) => {
@@ -1476,7 +1700,16 @@ export function attachApoPlotInteractions(input: {
 
     // Position using the filter's graph coordinates so it still works when many nodes are hidden.
     const nodeCx = getPlotX(filter.frequencyHz, geometry);
-    const nodeCy = getPlotY(getApoFilterNodeGainDb(filter, controller.sampleRate), geometry);
+    const nodeCy = getPlotY(
+      getRenderedApoFilterNodeGainDb(
+        filter,
+        controller.sampleRate,
+        controller.eqMode,
+        controller.responseMultiplier,
+        controller.preampDb,
+      ),
+      geometry,
+    );
     const screenPosition = getTooltipScreenPosition(svg, nodeCx, nodeCy);
     if (screenPosition) {
       tooltip.style.left = `${screenPosition.x}px`;
@@ -1528,7 +1761,12 @@ export function attachApoPlotInteractions(input: {
           20000,
         );
     const gainDb = clamp(
-      getDbForPlotY(transformedPoint.y, geometry),
+      getEditableApoGainDb(
+        getDbForPlotY(transformedPoint.y, geometry),
+        controller.eqMode,
+        controller.responseMultiplier,
+        controller.preampDb,
+      ),
       -24,
       24,
     );
@@ -1557,7 +1795,15 @@ export function attachApoPlotInteractions(input: {
       tooltip.textContent = `${frequencyHz.toFixed(0)} Hz, ${displayedGainDb.toFixed(1)} dB`;
 
       const nodeX = getPlotX(frequencyHz, geometry);
-      const nodeY = getPlotY(displayedGainDb, geometry);
+      const nodeY = getPlotY(
+        getRenderedApoEqValueDb(
+          displayedGainDb,
+          controller.eqMode,
+          controller.responseMultiplier,
+          controller.preampDb,
+        ),
+        geometry,
+      );
       const screenPosition = getTooltipScreenPosition(svg, nodeX, nodeY);
       if (screenPosition) {
         tooltip.style.left = `${screenPosition.x}px`;
@@ -1566,6 +1812,65 @@ export function attachApoPlotInteractions(input: {
     }
 
     controller.onFilterDrag(controller.draggingFilterId, frequencyHz, gainDb, axis);
+  };
+
+  const handlePointerMove = (event: PointerEvent) => {
+    updateHover(event.clientX);
+  };
+
+  const handlePointerLeave = () => {
+    resetHoverState();
+  };
+
+  const handleDoubleClick = (event: MouseEvent) => {
+    const controller = plotCardWithController.__apoPlotController;
+    if (!controller || controller.draggingFilterId) {
+      return;
+    }
+
+    const svg = plotCard.querySelector('svg');
+    if (!(svg instanceof SVGSVGElement)) {
+      return;
+    }
+
+    const geometry = getGeometryFromSvg(controller.filters);
+    if (!geometry) {
+      return;
+    }
+
+    const svgPoint = svg.createSVGPoint();
+    svgPoint.x = event.clientX;
+    svgPoint.y = event.clientY;
+
+    const screenMatrix = svg.getScreenCTM();
+    if (!screenMatrix) {
+      return;
+    }
+
+    const transformedPoint = svgPoint.matrixTransform(screenMatrix.inverse());
+    if (
+      transformedPoint.x < geometry.left ||
+      transformedPoint.x > geometry.width - geometry.right ||
+      transformedPoint.y < geometry.top ||
+      transformedPoint.y > geometry.height - geometry.bottom
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    controller.onAddFilter(
+      clamp(getFrequencyForPlotX(transformedPoint.x, geometry), 20, 20000),
+      clamp(
+        getEditableApoGainDb(
+          getDbForPlotY(transformedPoint.y, geometry),
+          controller.eqMode,
+          controller.responseMultiplier,
+          controller.preampDb,
+        ),
+        -24,
+        24,
+      ),
+    );
   };
 
   const handleMouseUp = () => {
@@ -1589,10 +1894,14 @@ export function attachApoPlotInteractions(input: {
 
     controller.draggingFilterId = null;
     controller.onDragEnd();
+    resetHoverState();
   };
 
   const cleanup = () => {
     plotCard.removeEventListener('mousedown', handleMouseDown);
+    plotCard.removeEventListener('dblclick', handleDoubleClick);
+    plotCard.removeEventListener('pointermove', handlePointerMove);
+    plotCard.removeEventListener('pointerleave', handlePointerLeave);
     window.removeEventListener('mousemove', handleMouseMove);
     window.removeEventListener('mouseup', handleMouseUp);
 
@@ -1604,18 +1913,22 @@ export function attachApoPlotInteractions(input: {
   };
 
   plotCard.addEventListener('mousedown', handleMouseDown);
+  plotCard.addEventListener('dblclick', handleDoubleClick);
+  plotCard.addEventListener('pointermove', handlePointerMove);
+  plotCard.addEventListener('pointerleave', handlePointerLeave);
   window.addEventListener('mousemove', handleMouseMove);
   window.addEventListener('mouseup', handleMouseUp);
 
   plotCardWithController.__apoPlotController = {
-      filters: input.filters,
-      eqMode: input.eqMode,
-      sampleRate: input.sampleRate,
-      responseMultiplier: input.responseMultiplier,
-      preampDb: input.preampDb,
-      lockFrequency: input.lockFrequency,
+    filters: input.filters,
+    eqMode: input.eqMode,
+    sampleRate: input.sampleRate,
+    responseMultiplier: input.responseMultiplier,
+    preampDb: input.preampDb,
+    lockFrequency: input.lockFrequency,
     onFilterDrag: input.onFilterDrag,
     onDragEnd: input.onDragEnd,
+    onAddFilter: input.onAddFilter,
     draggingFilterId: null,
     cleanup,
   };

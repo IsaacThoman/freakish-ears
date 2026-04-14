@@ -6,6 +6,8 @@ export const IPC_CHANNELS = {
   showItemInFolder: 'files:showItemInFolder',
   runSoxMeasurement: 'measurement:runSoxMeasurement',
   getEqualizerApoStatus: 'equalizerApo:getStatus',
+  listPeacePresets: 'equalizerApo:listPeacePresets',
+  readPeacePreset: 'equalizerApo:readPeacePreset',
   applyEqualizerApoConfig: 'equalizerApo:applyConfig',
   disablePeace: 'equalizerApo:disablePeace',
 } as const;
@@ -78,6 +80,17 @@ export type EqualizerApoStatus = {
   freakishEarsIncludedInConfig: boolean;
 };
 
+export type PeacePresetSummary = {
+  fileName: string;
+  displayName: string;
+  filePath: string;
+};
+
+export type ReadPeacePresetResult = {
+  fileName: string;
+  contents: string;
+};
+
 export type ApplyEqualizerApoConfigPayload = {
   configText: string;
 };
@@ -104,6 +117,8 @@ export type FreakishEarsApi = {
     payload: RunSoxMeasurementPayload,
   ) => Promise<RunSoxMeasurementResult>;
   getEqualizerApoStatus: () => Promise<EqualizerApoStatus>;
+  listPeacePresets: () => Promise<PeacePresetSummary[]>;
+  readPeacePreset: (fileName: string) => Promise<ReadPeacePresetResult>;
   applyEqualizerApoConfig: (
     payload: ApplyEqualizerApoConfigPayload,
   ) => Promise<ApplyEqualizerApoConfigResult>;

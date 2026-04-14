@@ -1,4 +1,4 @@
-import type { EqualizerApoStatus } from '../shared/ipc';
+import type { EqualizerApoStatus, PeacePresetSummary } from '../shared/ipc';
 
 export type ToastState = {
   message: string;
@@ -187,6 +187,8 @@ export type AppState = {
   latestStatusMessage: string;
   latestStatusTone: StatusTone;
   equalizerApoStatus: EqualizerApoStatus | null;
+  peacePresets: PeacePresetSummary[];
+  apoPresetMenuOpen: boolean;
   toast: ToastState | null;
   toastTimeoutId: number;
 };

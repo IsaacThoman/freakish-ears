@@ -458,9 +458,12 @@ input {
   grid-area: apo-plot;
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   gap: 8px;
+  min-height: 0;
   min-width: 0;
   width: 100%;
+  height: 100%;
   padding: 12px;
   background: var(--input-bg);
   border: 1px solid var(--input-border);
@@ -477,7 +480,9 @@ input {
 }
 
 .apo-config-preview-field {
+  flex: 1 1 auto;
   gap: 8px;
+  min-height: 0;
 }
 
 .apo-preview-divider {
@@ -929,6 +934,55 @@ input {
   flex-wrap: wrap;
 }
 
+.apo-preset-menu-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.apo-preset-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 48px));
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+}
+
+.apo-preset-menu[hidden] {
+  display: none;
+}
+
+.apo-preset-menu-item {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.apo-preset-menu-item:hover,
+.apo-preset-menu-item:focus-visible {
+  outline: none;
+  background: var(--input-bg);
+}
+
+.apo-preset-menu-empty {
+  padding: 8px 10px;
+  color: var(--text-muted);
+}
+
 .apo-apply-anchor {
   position: relative;
   display: inline-flex;
@@ -1075,8 +1129,10 @@ input {
 }
 
 .apo-config-preview {
+  flex: 1 1 auto;
   min-height: 132px;
-  resize: vertical;
+  min-width: 0;
+  resize: none;
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 13px;
   line-height: 1.4;
