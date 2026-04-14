@@ -283,9 +283,23 @@ export function renderResponsePlot(input: {
     xAxisY,
   );
 
+  const starredMeasurements = plottedMeasurements.filter(({ measurement }) => measurement.starred);
+  const graphIdBase = `response-plot-${Date.now()}`;
+  const starredGradientDefs = starredMeasurements.map(({ measurement, points }) => {
+    const gradientId = `${graphIdBase}-starred-gradient-${measurement.id}`;
+    const starredStyle: ApoBandVisualStyle = {
+      nodeFill: '#f8a145',
+      strokeSoft: '#f8a145',
+      fillTop: 'rgba(248,161,69,0.35)',
+      fillBottom: 'rgba(248,161,69,0.02)',
+    };
+    return buildApoBandGradientDef(gradientId, points.map((p) => ({ frequencyHz: p.frequencyHz, totalDb: p.smoothedMagnitudeDbRelative })), geometry, xAxisY, starredStyle);
+  }).join('');
+
   return `
     <div class="plot-hover" id="plotHover">Hover: --</div>
       <svg id="responsePlot" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response overlay with logarithmic frequency axis">
+      ${starredGradientDefs.length > 0 ? `<defs>${starredGradientDefs}</defs>` : ''}
       <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
       ${yTicks
         .map((value) => {
@@ -329,7 +343,20 @@ export function renderResponsePlot(input: {
             })
             .join(' ');
 
-          return `<polyline points="${path}" fill="none" stroke="${measurement.color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>`;
+          const isStarred = measurement.starred;
+          const strokeColor = isStarred ? '#f8a145' : measurement.color;
+          const strokeWidth = isStarred ? '3.45' : '3';
+
+          if (isStarred) {
+            const gradientId = `${graphIdBase}-starred-gradient-${measurement.id}`;
+            const fillPath = buildClosedBandFillPath(points.map((p) => ({ frequencyHz: p.frequencyHz, totalDb: p.smoothedMagnitudeDbRelative })), geometry, xAxisY);
+            const fillMarkup = fillPath.length > 0
+              ? `<path d="${fillPath}" fill="url(#${gradientId})" stroke="none"></path>`
+              : '';
+            return `${fillMarkup}<polyline points="${path}" fill="none" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>`;
+          }
+
+          return `<polyline points="${path}" fill="none" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>`;
         })
         .join('')}
       <line id="plotHoverLine" x1="0" y1="${geometry.top}" x2="0" y2="${xAxisY}" stroke="#f8a145" stroke-width="1" opacity="0" vector-effect="non-scaling-stroke"></line>
