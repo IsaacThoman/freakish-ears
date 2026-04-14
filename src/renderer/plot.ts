@@ -65,14 +65,20 @@ type ResponseToleranceOverlay = {
 
 export const DEFAULT_PLOT_WIDTH = 960;
 export const DEFAULT_PLOT_HEIGHT = 480;
-const DEFAULT_PLOT_LEFT = 84;
 const DEFAULT_PLOT_RIGHT = 24;
 const DEFAULT_PLOT_TOP = 18;
 const DEFAULT_PLOT_BOTTOM = 94;
-const MIN_PLOT_LEFT = 84;
-const Y_TICK_LABEL_OFFSET = 10;
-const X_TICK_BASELINE_Y_OFFSET = 42;
-const X_AXIS_LABEL_BASELINE_Y_OFFSET = 12;
+const PLOT_TEXT_SIZE_PX = 11;
+const PLOT_LABEL_SIZE_PX = 11;
+const PLOT_OUTER_HORIZONTAL_PADDING = 12;
+const PLOT_OUTER_TOP_PADDING = 18;
+const PLOT_OUTER_BOTTOM_PADDING = 12;
+const PLOT_Y_TICK_GAP = 10;
+const PLOT_X_TICK_GAP = 10;
+const PLOT_AXIS_LABEL_GAP = 8;
+const PLOT_DRAW_AREA_ASPECT_RATIO =
+  (DEFAULT_PLOT_HEIGHT - DEFAULT_PLOT_TOP - DEFAULT_PLOT_BOTTOM) /
+  (DEFAULT_PLOT_WIDTH - 84 - DEFAULT_PLOT_RIGHT);
 const APO_PARAMETRIC_BAND_COLORS = [
   '#ffb74f',
   '#ffd95e',
@@ -107,23 +113,68 @@ type TextMetricsSummary = {
   height: number;
 };
 
-function scaleGeometry(
+function getWidestTextWidth(texts: string[], fontSize: number): number {
+  return texts.reduce((widest, text) => Math.max(widest, measureSvgText(text, fontSize).width), 0);
+}
+
+function getTallestTextMetrics(texts: string[], fontSize: number): TextMetricsSummary {
+  return texts.reduce<TextMetricsSummary>((tallest, text) => {
+    const metrics = measureSvgText(text, fontSize);
+    return metrics.height > tallest.height ? metrics : tallest;
+  }, measureSvgText(texts[0] ?? '', fontSize));
+}
+
+function buildPlotFrame(
   containerWidth: number,
-  baseWidth: number,
-  baseHeight: number,
-  baseLeft: number,
-  baseRight: number,
-  baseTop: number,
-  baseBottom: number,
+  yTicks: number[],
+  xTicks: number[],
+  yAxisLabelText: string,
+  labelSizing: PlotLabelSizing,
 ): { width: number; height: number; left: number; right: number; top: number; bottom: number } {
-  const scale = containerWidth / baseWidth;
+  const yTickWidth = getWidestTextWidth(
+    yTicks.map((value) => formatDbLabel(value)),
+    labelSizing.axisTextSize,
+  );
+  const xTickMetrics = getTallestTextMetrics(
+    xTicks.map((frequency) => formatFrequencyLabel(frequency)),
+    labelSizing.axisTextSize,
+  );
+  const yTickMetrics = getTallestTextMetrics(
+    yTicks.map((value) => formatDbLabel(value)),
+    labelSizing.axisTextSize,
+  );
+  const xAxisLabelMetrics = measureSvgText('Frequency (Hz, log)', labelSizing.axisLabelSize);
+  const yAxisLabelMetrics = measureSvgText(yAxisLabelText, labelSizing.axisLabelSize);
+  const left = Math.ceil(
+    PLOT_OUTER_HORIZONTAL_PADDING +
+    yAxisLabelMetrics.height +
+    PLOT_AXIS_LABEL_GAP +
+    yTickWidth +
+    PLOT_Y_TICK_GAP,
+  );
+  const right = Math.ceil(
+    Math.max(
+      PLOT_OUTER_HORIZONTAL_PADDING,
+      getWidestTextWidth([formatFrequencyLabel(xTicks[xTicks.length - 1] ?? DEFAULT_END_FREQUENCY)], labelSizing.axisTextSize) / 2,
+    ),
+  );
+  const top = Math.ceil(PLOT_OUTER_TOP_PADDING + yTickMetrics.height / 2);
+  const bottom = Math.ceil(
+    PLOT_OUTER_BOTTOM_PADDING +
+    PLOT_X_TICK_GAP +
+    xTickMetrics.height +
+    PLOT_AXIS_LABEL_GAP +
+    xAxisLabelMetrics.height,
+  );
+  const drawableWidth = Math.max(containerWidth - left - right, 1);
+
   return {
     width: containerWidth,
-    height: baseHeight * scale,
-    left: Math.max(MIN_PLOT_LEFT, baseLeft * scale),
-    right: baseRight * scale,
-    top: baseTop * scale,
-    bottom: baseBottom * scale,
+    height: Math.ceil(top + drawableWidth * PLOT_DRAW_AREA_ASPECT_RATIO + bottom),
+    left,
+    right,
+    top,
+    bottom,
   };
 }
 
@@ -167,32 +218,28 @@ function measureSvgText(text: string, fontSize: number): TextMetricsSummary {
   };
 }
 
-function getAxisLabelGap(labelSizing: PlotLabelSizing): number {
-  const tickMetrics = measureSvgText('0 dB', labelSizing.axisTextSize);
-  const labelMetrics = measureSvgText('Frequency (Hz, log)', labelSizing.axisLabelSize);
-  return Math.max(
-    4,
-    X_TICK_BASELINE_Y_OFFSET -
-      X_AXIS_LABEL_BASELINE_Y_OFFSET -
-      tickMetrics.descent -
-      labelMetrics.ascent,
-  );
-}
-
 function getYAxisLabelX(
   left: number,
   yTicks: number[],
   labelText: string,
   labelSizing: PlotLabelSizing,
 ): number {
-  const widestTickLabelWidth = yTicks.reduce((widest, value) => {
-    const metrics = measureSvgText(formatDbLabel(value), labelSizing.axisTextSize);
-    return Math.max(widest, metrics.width);
-  }, 0);
-  const axisLabelGap = getAxisLabelGap(labelSizing);
+  const widestTickLabelWidth = getWidestTextWidth(
+    yTicks.map((value) => formatDbLabel(value)),
+    labelSizing.axisTextSize,
+  );
   const labelMetrics = measureSvgText(labelText, labelSizing.axisLabelSize);
-  const tickLabelLeftEdge = left - Y_TICK_LABEL_OFFSET - widestTickLabelWidth;
-  return tickLabelLeftEdge - axisLabelGap - labelMetrics.descent;
+  const tickLabelLeftEdge = left - PLOT_Y_TICK_GAP - widestTickLabelWidth;
+  return tickLabelLeftEdge - PLOT_AXIS_LABEL_GAP - labelMetrics.height / 2;
+}
+
+function getXAxisTickY(geometry: ResponsePlotGeometry): number {
+  return geometry.height - geometry.bottom + PLOT_X_TICK_GAP;
+}
+
+function getXAxisLabelY(geometry: ResponsePlotGeometry, labelSizing: PlotLabelSizing): number {
+  const tickMetrics = getTallestTextMetrics(['20k'], labelSizing.axisTextSize);
+  return getXAxisTickY(geometry) + tickMetrics.height + PLOT_AXIS_LABEL_GAP;
 }
 
 export function renderResponsePlot(input: {
@@ -257,11 +304,14 @@ export function renderResponsePlot(input: {
         referenceNormalizationDb,
       ),
   }));
+  const labelSizing = getPlotLabelSizing(input.compact);
+  const yAxisLabelText = input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)';
   const geometry = getResponsePlotGeometry(
     [...plottedMeasurements.map((entry) => entry.points), ...plottedReferenceCurves.map((entry) => entry.points)],
     input.containerWidth,
+    labelSizing,
+    yAxisLabelText,
   );
-  const labelSizing = getPlotLabelSizing(input.compact);
   const xTicks = labelSizing.xTicks.filter(
     (frequency) =>
       frequency >= geometry.minFrequency && frequency <= geometry.maxFrequency,
@@ -270,8 +320,9 @@ export function renderResponsePlot(input: {
     const ratio = index / (labelSizing.yTickCount - 1);
     return geometry.maxDb - (geometry.maxDb - geometry.minDb) * ratio;
   });
-  const yAxisLabelText = input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)';
   const yAxisLabelX = getYAxisLabelX(geometry.left, yTicks, yAxisLabelText, labelSizing);
+  const xAxisTickY = getXAxisTickY(geometry);
+  const xAxisLabelY = getXAxisLabelY(geometry, labelSizing);
 
   const xAxisY = geometry.height - geometry.bottom;
   const yAxisX = geometry.left;
@@ -298,7 +349,7 @@ export function renderResponsePlot(input: {
 
   return `
     <div class="plot-hover" id="plotHover">Hover: --</div>
-      <svg id="responsePlot" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response overlay with logarithmic frequency axis">
+      <svg id="responsePlot" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response overlay with logarithmic frequency axis">
       ${starredGradientDefs.length > 0 ? `<defs>${starredGradientDefs}</defs>` : ''}
       <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
       ${yTicks
@@ -363,23 +414,23 @@ export function renderResponsePlot(input: {
       ${input.visibleMeasurements
         .map(
           (measurement, index) =>
-            `<circle class="plot-hover-dot" data-hover-index="${index}" cx="0" cy="0" r="4" fill="${measurement.color}" stroke="#0d0d0f" stroke-width="1.5" opacity="0" vector-effect="non-scaling-stroke"></circle>`,
+            `<circle class="plot-hover-dot" data-hover-index="${index}" cx="0" cy="0" r="4" fill="${measurement.starred ? '#f8a145' : measurement.color}" stroke="#0d0d0f" stroke-width="1.5" opacity="0" vector-effect="non-scaling-stroke"></circle>`,
         )
         .join('')}
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
-            return `<text x="${geometry.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="plot-axis-text">${formatDbLabel(value)}</text>`;
-          })
-          .join('')}
+            return `<text x="${(geometry.left - PLOT_Y_TICK_GAP).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" class="plot-axis-text">${formatDbLabel(value)}</text>`;
+           })
+           .join('')}
       ${xTicks
         .map((frequency) => {
           const x = getPlotX(frequency, geometry);
-          return `<text x="${x.toFixed(1)}" y="${geometry.height - X_TICK_BASELINE_Y_OFFSET}" text-anchor="middle" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
+          return `<text x="${x.toFixed(1)}" y="${xAxisTickY.toFixed(1)}" text-anchor="middle" dominant-baseline="hanging" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
          })
          .join('')}
-      <text x="${(geometry.left + (geometry.width - geometry.right)) / 2}" y="${geometry.height - X_AXIS_LABEL_BASELINE_Y_OFFSET}" text-anchor="middle" class="plot-axis-label">Frequency (Hz, log)</text>
-      <text x="${yAxisLabelX}" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 ${yAxisLabelX} ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">${yAxisLabelText}</text>
+      <text x="${((geometry.left + (geometry.width - geometry.right)) / 2).toFixed(1)}" y="${xAxisLabelY.toFixed(1)}" text-anchor="middle" dominant-baseline="hanging" class="plot-axis-label">Frequency (Hz, log)</text>
+      <text x="${yAxisLabelX.toFixed(1)}" y="${((geometry.top + (geometry.height - geometry.bottom)) / 2).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 ${yAxisLabelX.toFixed(1)} ${((geometry.top + (geometry.height - geometry.bottom)) / 2).toFixed(1)})" class="plot-axis-label">${yAxisLabelText}</text>
     </svg>
     ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.measurementKeepCount, input.busy, input.outputFolder)}
   `;
@@ -439,6 +490,9 @@ export function attachPlotInteractions(input: {
           : null,
       ),
   }));
+  const compact = viewBoxWidth < 560;
+  const labelSizing = getPlotLabelSizing(compact);
+  const yAxisLabelText = input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)';
   const geometry = getResponsePlotGeometry(
     [
       ...plottedMeasurements.map((entry) => entry.points),
@@ -454,6 +508,8 @@ export function attachPlotInteractions(input: {
       ),
     ],
     viewBoxWidth,
+    labelSizing,
+    yAxisLabelText,
   );
 
   const updateHover = (clientX: number) => {
@@ -472,7 +528,7 @@ export function attachPlotInteractions(input: {
       hoverDots[index]?.setAttribute('cy', y.toFixed(1));
       hoverDots[index]?.setAttribute('opacity', '1');
       const valueText = `${closestPoint.smoothedMagnitudeDbRelative.toFixed(1)} ${input.normalizePlot ? 'dB rel' : 'dB'}`;
-      hoverDetails.push(`<span style="color:${measurement.color}">${valueText}</span>`);
+      hoverDetails.push(`<span style="color:${measurement.starred ? '#f8a145' : measurement.color}">${valueText}</span>`);
     });
 
     hoverLine.setAttribute('x1', hoverLineX.toFixed(1));
@@ -534,20 +590,24 @@ export function renderApoEqPlot(input: {
             input.responseMultiplier,
         })),
       }));
+  const labelSizing = getPlotLabelSizing(input.compact);
+  const yAxisLabelText = 'EQ Gain (dB)';
   const geometry = getApoEqPlotGeometry(
     enabledFilters,
     sampledPoints,
     individualPointSets,
     input.containerWidth,
     input.sampleRate,
+    labelSizing,
+    yAxisLabelText,
   );
-  const labelSizing = getPlotLabelSizing(input.compact);
   const yTicks = Array.from({ length: labelSizing.yTickCount }, (_unused, index) => {
     const ratio = index / (labelSizing.yTickCount - 1);
     return geometry.maxDb - (geometry.maxDb - geometry.minDb) * ratio;
   });
-  const yAxisLabelText = 'EQ Gain (dB)';
   const yAxisLabelX = getYAxisLabelX(geometry.left, yTicks, yAxisLabelText, labelSizing);
+  const xAxisTickY = getXAxisTickY(geometry);
+  const xAxisLabelY = getXAxisLabelY(geometry, labelSizing);
   const xAxisY = getPlotY(0, geometry);
   const yAxisX = geometry.left;
   const isParametricMode = input.eqMode === 'parametric';
@@ -582,7 +642,7 @@ export function renderApoEqPlot(input: {
 
   return `
     <div class="plot-hover">EQ Graph: ${escapeHtml(input.measurementName ?? 'No measurement')} -> ${escapeHtml(input.targetName ?? 'No target')}</div>
-    <svg class="apo-eq-svg${isParametricMode ? ' apo-eq-svg-parametric' : ' apo-eq-svg-graphic'}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Equalizer APO frequency response graph">
+    <svg class="apo-eq-svg${isParametricMode ? ' apo-eq-svg-parametric' : ' apo-eq-svg-graphic'}" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Equalizer APO frequency response graph">
       ${svgDefs}
       <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
       ${yTicks
@@ -653,15 +713,15 @@ export function renderApoEqPlot(input: {
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
-          return `<text x="${geometry.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="plot-axis-text">${formatDbLabel(value)}</text>`;
+          return `<text x="${(geometry.left - PLOT_Y_TICK_GAP).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" class="plot-axis-text">${formatDbLabel(value)}</text>`;
         })
         .join('')}
       ${labelSizing.xTicks.map((frequency) => {
         const x = getPlotX(frequency, geometry);
-        return `<text x="${x.toFixed(1)}" y="${geometry.height - X_TICK_BASELINE_Y_OFFSET}" text-anchor="middle" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
+        return `<text x="${x.toFixed(1)}" y="${xAxisTickY.toFixed(1)}" text-anchor="middle" dominant-baseline="hanging" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
       }).join('')}
-      <text x="${(geometry.left + (geometry.width - geometry.right)) / 2}" y="${geometry.height - X_AXIS_LABEL_BASELINE_Y_OFFSET}" text-anchor="middle" class="plot-axis-label">Frequency (Hz, log)</text>
-      <text x="${yAxisLabelX}" y="${(geometry.top + (geometry.height - geometry.bottom)) / 2}" text-anchor="middle" transform="rotate(-90 ${yAxisLabelX} ${(geometry.top + (geometry.height - geometry.bottom)) / 2})" class="plot-axis-label">${yAxisLabelText}</text>
+      <text x="${((geometry.left + (geometry.width - geometry.right)) / 2).toFixed(1)}" y="${xAxisLabelY.toFixed(1)}" text-anchor="middle" dominant-baseline="hanging" class="plot-axis-label">Frequency (Hz, log)</text>
+      <text x="${yAxisLabelX.toFixed(1)}" y="${((geometry.top + (geometry.height - geometry.bottom)) / 2).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 ${yAxisLabelX.toFixed(1)} ${((geometry.top + (geometry.height - geometry.bottom)) / 2).toFixed(1)})" class="plot-axis-label">${yAxisLabelText}</text>
     </svg>
   `;
 }
@@ -669,18 +729,18 @@ export function renderApoEqPlot(input: {
 function getPlotLabelSizing(compact: boolean): PlotLabelSizing {
   if (compact) {
     return {
-      axisTextSize: 12,
-      axisLabelSize: 12,
+      axisTextSize: PLOT_TEXT_SIZE_PX,
+      axisLabelSize: PLOT_LABEL_SIZE_PX,
       yTickCount: 4,
       xTicks: COMPACT_GRAPH_FREQUENCIES,
     };
   }
 
   return {
-    axisTextSize: 12,
-    axisLabelSize: 12,
-      yTickCount: 5,
-      xTicks: EQ_GRAPH_FREQUENCIES,
+    axisTextSize: PLOT_TEXT_SIZE_PX,
+    axisLabelSize: PLOT_LABEL_SIZE_PX,
+    yTickCount: 5,
+    xTicks: EQ_GRAPH_FREQUENCIES,
   };
 }
 
@@ -693,6 +753,8 @@ function getApoEqPlotGeometry(
   }>,
   containerWidth: number,
   sampleRate: number,
+  labelSizing: PlotLabelSizing,
+  yAxisLabelText: string,
 ): ResponsePlotGeometry {
   const allValues = [
     ...sampledPoints.map((point) => point.totalDb),
@@ -702,24 +764,25 @@ function getApoEqPlotGeometry(
   ];
   const minDb = Math.min(-12, Math.floor((Math.min(...allValues) - 1) / 3) * 3);
   const maxDb = Math.max(12, Math.ceil((Math.max(...allValues) + 1) / 3) * 3);
-
-  const scaled = scaleGeometry(
+  const yTicks = Array.from({ length: labelSizing.yTickCount }, (_unused, index) => {
+    const ratio = index / (labelSizing.yTickCount - 1);
+    return maxDb - (maxDb - minDb) * ratio;
+  });
+  const frame = buildPlotFrame(
     containerWidth,
-    DEFAULT_PLOT_WIDTH,
-    DEFAULT_PLOT_HEIGHT,
-    DEFAULT_PLOT_LEFT,
-    DEFAULT_PLOT_RIGHT,
-    DEFAULT_PLOT_TOP,
-    DEFAULT_PLOT_BOTTOM,
+    yTicks,
+    labelSizing.xTicks,
+    yAxisLabelText,
+    labelSizing,
   );
 
   return {
-    width: scaled.width,
-    height: scaled.height,
-    left: scaled.left,
-    right: scaled.right,
-    top: scaled.top,
-    bottom: scaled.bottom,
+    width: frame.width,
+    height: frame.height,
+    left: frame.left,
+    right: frame.right,
+    top: frame.top,
+    bottom: frame.bottom,
     minFrequency: DEFAULT_START_FREQUENCY,
     maxFrequency: DEFAULT_END_FREQUENCY,
     minDb,
@@ -1133,6 +1196,8 @@ function renderMeasurementList(
 function getResponsePlotGeometry(
   measurementPointSets: MeasurementPoint[][],
   containerWidth: number,
+  labelSizing: PlotLabelSizing,
+  yAxisLabelText: string,
 ): ResponsePlotGeometry {
   const points = measurementPointSets.flatMap((measurement) => measurement);
   const frequencies = points.map((point) => point.frequencyHz);
@@ -1141,24 +1206,25 @@ function getResponsePlotGeometry(
   const measuredBottom = Math.min(...smoothedValues) - 3;
   const minDb = measuredBottom;
   const maxDb = measuredBottom + Math.max(24, measuredTop - measuredBottom);
-
-  const scaled = scaleGeometry(
+  const yTicks = Array.from({ length: labelSizing.yTickCount }, (_unused, index) => {
+    const ratio = index / (labelSizing.yTickCount - 1);
+    return maxDb - (maxDb - minDb) * ratio;
+  });
+  const frame = buildPlotFrame(
     containerWidth,
-    DEFAULT_PLOT_WIDTH,
-    DEFAULT_PLOT_HEIGHT,
-    DEFAULT_PLOT_LEFT,
-    DEFAULT_PLOT_RIGHT,
-    DEFAULT_PLOT_TOP,
-    DEFAULT_PLOT_BOTTOM,
+    yTicks,
+    labelSizing.xTicks,
+    yAxisLabelText,
+    labelSizing,
   );
 
   return {
-    width: scaled.width,
-    height: scaled.height,
-    left: scaled.left,
-    right: scaled.right,
-    top: scaled.top,
-    bottom: scaled.bottom,
+    width: frame.width,
+    height: frame.height,
+    left: frame.left,
+    right: frame.right,
+    top: frame.top,
+    bottom: frame.bottom,
     minFrequency:
       frequencies.length > 0 ? Math.min(...frequencies) : DEFAULT_START_FREQUENCY,
     maxFrequency:
@@ -1336,7 +1402,17 @@ export function attachApoPlotInteractions(input: {
           })),
         }));
 
-    const geometry = getApoEqPlotGeometry(enabledFilters, sampledPoints, individualPointSets, width, sampleRate);
+    const compact = width < 560;
+    const labelSizing = getPlotLabelSizing(compact);
+    const geometry = getApoEqPlotGeometry(
+      enabledFilters,
+      sampledPoints,
+      individualPointSets,
+      width,
+      sampleRate,
+      labelSizing,
+      'EQ Gain (dB)',
+    );
     return { ...geometry, width, height };
   };
 
