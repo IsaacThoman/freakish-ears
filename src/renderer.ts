@@ -4143,6 +4143,12 @@ function addApoFilter(partial: Partial<ApoFilter> = {}): void {
     return;
   }
 
+  if (state.parametricApoFilters.length >= MAX_PARAMETRIC_APO_FILTERS) {
+    appendLog(`Parametric APO filters are limited to ${MAX_PARAMETRIC_APO_FILTERS}.`, 'neutral');
+    renderApoSection();
+    return;
+  }
+
   const nextFrequencyHz = partial.frequencyHz ?? findNextParametricFilterFrequency();
 
   setActiveApoFilters([

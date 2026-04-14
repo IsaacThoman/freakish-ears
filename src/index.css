@@ -1061,16 +1061,16 @@ input {
 .apo-node-tooltip {
   position: fixed;
   padding: 6px 10px;
-  border: 1px solid rgba(248, 161, 69, 0.5);
-  border-radius: 4px;
-  background: rgba(77, 43, 11, 0.96);
-  color: #ffd4a6;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(15, 17, 22, 0.94);
+  color: rgba(246, 241, 229, 0.96);
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, monospace;
   pointer-events: none;
   z-index: 10000;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
   transform: translate(-50%, calc(-100% - 8px));
 }
 

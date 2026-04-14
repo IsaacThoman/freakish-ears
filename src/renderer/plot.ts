@@ -39,6 +39,18 @@ type PlotLabelSizing = {
   xTicks: number[];
 };
 
+type ApoBandVisualStyle = {
+  nodeFill: string;
+  strokeSoft: string;
+  fillTop: string;
+  fillBottom: string;
+};
+
+type SvgGradientStop = {
+  color: string;
+  opacity: number;
+};
+
 type ResponseToleranceOverlay = {
   measurementId: string;
   referenceCurve: ReferenceCurve;
@@ -61,6 +73,32 @@ const MIN_PLOT_LEFT = 84;
 const Y_TICK_LABEL_OFFSET = 10;
 const X_TICK_BASELINE_Y_OFFSET = 42;
 const X_AXIS_LABEL_BASELINE_Y_OFFSET = 12;
+const APO_PARAMETRIC_BAND_COLORS = [
+  '#ffb74f',
+  '#ffd95e',
+  '#c3f05e',
+  '#55e0a3',
+  '#49d7e8',
+  '#57a7ff',
+  '#9d7cff',
+  '#e76fff',
+  '#ff6ba4',
+  '#ff7d5c',
+  '#ff9b7a',
+  '#ffb36b',
+  '#f7d65a',
+  '#d7ef63',
+  '#96ef68',
+  '#5de58d',
+  '#48dfc1',
+  '#51d3f2',
+  '#6ab8ff',
+  '#7d97ff',
+  '#ad83ff',
+  '#d578ff',
+  '#f06fd7',
+  '#ff7497',
+];
 
 type TextMetricsSummary = {
   width: number;
@@ -485,32 +523,59 @@ export function renderApoEqPlot(input: {
   const yAxisLabelX = getYAxisLabelX(geometry.left, yTicks, yAxisLabelText, labelSizing);
   const xAxisY = getPlotY(0, geometry);
   const yAxisX = geometry.left;
+  const isParametricMode = input.eqMode === 'parametric';
   const graphicNodeProfile = getGraphicEqNodeRenderProfile(enabledFilters, geometry);
-  const combinedPath = sampledPoints
-    .map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`)
-    .join(' ');
+  const combinedStrokePath = buildPolylinePath(sampledPoints, geometry);
+  const graphIdBase = `apo-eq-${getSvgSafeId(`${input.eqMode}-${input.measurementName ?? 'measurement'}-${input.targetName ?? 'target'}`)}`;
+  const bandVisuals = individualPointSets.map(({ filter, points }, index) => ({
+    filter,
+    points,
+    style: getApoBandVisualStyle(index),
+    gradientId: `${graphIdBase}-band-gradient-${index}`,
+  }));
+  const combinedGradientId = `${graphIdBase}-combined-gradient`;
+  const combinedVisualStyle: ApoBandVisualStyle = {
+    nodeFill: '#f8a145',
+    strokeSoft: '#f8a145',
+    fillTop: 'rgba(248,161,69,0.35)',
+    fillBottom: 'rgba(248,161,69,0.02)',
+  };
+  const svgDefs = isParametricMode
+    ? `
+      <defs>
+        ${buildApoBandGradientDef(combinedGradientId, sampledPoints, geometry, xAxisY, combinedVisualStyle)}
+        ${bandVisuals
+          .map(({ style, gradientId, points }) => buildApoBandGradientDef(gradientId, points, geometry, xAxisY, style))
+          .join('')}
+      </defs>`
+    : `
+      <defs>
+        ${buildApoBandGradientDef(combinedGradientId, sampledPoints, geometry, xAxisY, combinedVisualStyle)}
+      </defs>`;
 
   return `
     <div class="plot-hover">EQ Graph: ${escapeHtml(input.measurementName ?? 'No measurement')} -> ${escapeHtml(input.targetName ?? 'No target')}</div>
-    <svg viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Equalizer APO frequency response graph">
+    <svg class="apo-eq-svg${isParametricMode ? ' apo-eq-svg-parametric' : ' apo-eq-svg-graphic'}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Equalizer APO frequency response graph">
+      ${svgDefs}
       <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
-          return `<line x1="${geometry.left}" y1="${y.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.07)" vector-effect="non-scaling-stroke" />`;
+          return `<line x1="${geometry.left}" y1="${y.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${y.toFixed(1)}" stroke="${isParametricMode ? (Math.abs(value) < 0.01 ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.06)') : 'rgba(255,255,255,0.07)'}" vector-effect="non-scaling-stroke" />`;
         })
         .join('')}
       ${labelSizing.xTicks.map((frequency) => {
         const x = getPlotX(frequency, geometry);
-        return `<line x1="${x.toFixed(1)}" y1="${geometry.top}" x2="${x.toFixed(1)}" y2="${geometry.height - geometry.bottom}" stroke="rgba(255,255,255,0.06)" vector-effect="non-scaling-stroke" />`;
+        return `<line x1="${x.toFixed(1)}" y1="${geometry.top}" x2="${x.toFixed(1)}" y2="${geometry.height - geometry.bottom}" stroke="${isParametricMode ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.06)'}" vector-effect="non-scaling-stroke" />`;
       }).join('')}
-      <line x1="${yAxisX}" y1="${xAxisY.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${xAxisY.toFixed(1)}" stroke="rgba(248,161,69,0.3)" vector-effect="non-scaling-stroke" />
-      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${geometry.height - geometry.bottom}" stroke="rgba(248,161,69,0.24)" vector-effect="non-scaling-stroke" />
+      <line x1="${yAxisX}" y1="${xAxisY.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${xAxisY.toFixed(1)}" stroke="${isParametricMode ? 'rgba(255,255,255,0.24)' : 'rgba(248,161,69,0.3)'}" vector-effect="non-scaling-stroke" />
+      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${geometry.height - geometry.bottom}" stroke="${isParametricMode ? 'rgba(255,255,255,0.12)' : 'rgba(248,161,69,0.24)'}" vector-effect="non-scaling-stroke" />
       ${individualPointSets
-        .map(({ filter, points }) => {
-          const path = points
-            .map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`)
-            .join(' ');
+        .map(({ filter, points }, index) => {
+          const linePath = buildPolylinePath(points, geometry);
+          const fillPath = buildClosedBandFillPath(points, geometry, xAxisY);
+          const visualStyle = bandVisuals[index]?.style ?? getApoBandVisualStyle(index);
+          const gradientId = bandVisuals[index]?.gradientId ?? `${graphIdBase}-band-gradient-${index}`;
 
           const filterSummary = apoFilterKindUsesGain(filter.kind)
             ? `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB`
@@ -519,25 +584,43 @@ export function renderApoEqPlot(input: {
             filter.kind === 'LPBW' || filter.kind === 'HPBW' || filter.kind === 'LPLR' || filter.kind === 'HPLR'
               ? ` ${getApoFilterShapeLabel(filter.kind)} ${filter.order ?? 4}`
               : filter.kind === 'LSC_DB' || filter.kind === 'HSC_DB'
-                ? ` ${getApoFilterShapeLabel(filter.kind)} ${filter.slopeDbPerOct?.toFixed(1) ?? '6.0'} dB/oct`
-                : filter.kind === 'LS' || filter.kind === 'HS'
-                  ? ''
-                  : ` ${getApoFilterShapeLabel(filter.kind)} ${filter.q.toFixed(2)}`;
+              ? ` ${getApoFilterShapeLabel(filter.kind)} ${filter.slopeDbPerOct?.toFixed(1) ?? '6.0'} dB/oct`
+              : filter.kind === 'LS' || filter.kind === 'HS'
+                ? ''
+                : ` ${getApoFilterShapeLabel(filter.kind)} ${filter.q.toFixed(2)}`;
 
-          return `<polyline points="${path}" fill="none" stroke="rgba(125,125,125,0.65)" stroke-width="1.5" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"><title>${escapeHtml(input.eqMode === 'graphic' ? `GEQ ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}` : `${filterSummary}${shapeSummary}`)}</title></polyline>`;
+          if (!isParametricMode) {
+            return `<polyline points="${points.map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`).join(' ')}" fill="none" stroke="rgba(125,125,125,0.65)" stroke-width="1.5" stroke-dasharray="6 6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"><title>${escapeHtml(input.eqMode === 'graphic' ? `GEQ ${filter.frequencyHz.toFixed(0)} Hz ${filter.gainDb.toFixed(1)} dB Q ${filter.q.toFixed(2)}` : `${filterSummary}${shapeSummary}`)}</title></polyline>`;
+          }
+
+          const fillMarkup = fillPath.length > 0
+            ? `<path d="${fillPath}" fill="url(#${gradientId})" stroke="none"></path>`
+            : '';
+          return `<g class="apo-parametric-band-visual" data-apo-filter-id="${escapeHtml(filter.id)}">${fillMarkup}<path d="${linePath}" fill="none" stroke="${visualStyle.strokeSoft}" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"><title>${escapeHtml(`${filterSummary}${shapeSummary}`)}</title></path></g>`;
         })
         .join('')}
-      <polyline points="${combinedPath}" fill="none" stroke="#f8a145" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
+      ${(() => {
+        const combinedFillPath = buildClosedBandFillPath(sampledPoints, geometry, xAxisY);
+        const combinedFillMarkup = combinedFillPath.length > 0
+          ? `<path d="${combinedFillPath}" fill="url(#${combinedGradientId})" stroke="none"></path>`
+          : '';
+        return isParametricMode
+          ? `${combinedFillMarkup}<path d="${combinedStrokePath}" fill="none" stroke="#f8a145" stroke-width="3.45" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>`
+          : `${combinedFillMarkup}<polyline points="${sampledPoints.map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`).join(' ')}" fill="none" stroke="#f8a145" stroke-width="3.45" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>`;
+      })()}
       ${enabledFilters
         .filter((filter, index) => shouldRenderGraphicEqNode(index, enabledFilters.length, input.eqMode, graphicNodeProfile))
-        .map((filter) => {
+        .map((filter, index) => {
           const x = getPlotX(filter.frequencyHz, geometry);
           const nodeGainDb = getApoFilterNodeGainDb(filter, input.sampleRate);
           const y = getPlotY(nodeGainDb, geometry);
+          const visualStyle = isParametricMode
+            ? (bandVisuals[index]?.style ?? getApoBandVisualStyle(index))
+            : null;
           const nodeSummary = apoFilterKindUsesGain(filter.kind)
             ? `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz, ${filter.gainDb.toFixed(1)} dB`
             : `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz`;
-          return `<circle class="apo-filter-node" data-apo-filter-id="${escapeHtml(filter.id)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${graphicNodeProfile.radius.toFixed(1)}" fill="#f8a145" stroke="#4d2b0b" stroke-width="${graphicNodeProfile.strokeWidth.toFixed(2)}" cursor="grab" vector-effect="non-scaling-stroke"><title>${escapeHtml(nodeSummary)}</title></circle>`;
+          return `<circle class="apo-filter-node" data-apo-filter-id="${escapeHtml(filter.id)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${graphicNodeProfile.radius.toFixed(1)}" fill="${visualStyle?.nodeFill ?? '#f8a145'}" stroke="#4d2b0b" stroke-width="${graphicNodeProfile.strokeWidth.toFixed(2)}" cursor="grab" vector-effect="non-scaling-stroke"><title>${escapeHtml(nodeSummary)}</title></circle>`;
         })
         .join('')}
       ${yTicks
@@ -617,6 +700,169 @@ function getApoEqPlotGeometry(
   };
 }
 
+function getApoBandVisualStyle(index: number): ApoBandVisualStyle {
+  const color = APO_PARAMETRIC_BAND_COLORS[index % APO_PARAMETRIC_BAND_COLORS.length];
+  return {
+    nodeFill: color,
+    strokeSoft: withAlpha(color, 0.45),
+    fillTop: withAlpha(color, 0.28),
+    fillBottom: withAlpha(color, 0.02),
+  };
+}
+
+function withAlpha(hexColor: string, alpha: number): string {
+  const normalized = hexColor.replace('#', '');
+  const expanded = normalized.length === 3
+    ? normalized.split('').map((char) => `${char}${char}`).join('')
+    : normalized;
+
+  if (expanded.length !== 6) {
+    return hexColor;
+  }
+
+  const red = Number.parseInt(expanded.slice(0, 2), 16);
+  const green = Number.parseInt(expanded.slice(2, 4), 16);
+  const blue = Number.parseInt(expanded.slice(4, 6), 16);
+  return `rgba(${red},${green},${blue},${alpha})`;
+}
+
+function getSvgGradientStop(color: string): SvgGradientStop {
+  const rgbaMatch = color.match(/^rgba\((\d+),(\d+),(\d+),([+-]?\d*\.?\d+)\)$/u);
+  if (rgbaMatch) {
+    const red = clamp(Number(rgbaMatch[1]), 0, 255);
+    const green = clamp(Number(rgbaMatch[2]), 0, 255);
+    const blue = clamp(Number(rgbaMatch[3]), 0, 255);
+    const opacity = clamp(Number(rgbaMatch[4]), 0, 1);
+    return {
+      color: `rgb(${red},${green},${blue})`,
+      opacity,
+    };
+  }
+
+  return {
+    color,
+    opacity: 1,
+  };
+}
+
+function buildApoBandGradientDef(
+  gradientId: string,
+  points: Array<{ frequencyHz: number; totalDb: number }>,
+  geometry: ResponsePlotGeometry,
+  baselineY: number,
+  style: ApoBandVisualStyle,
+): string {
+  const visibleStop = getSvgGradientStop(style.fillTop);
+
+  return buildBaselineAnchoredGradientDef(
+    gradientId,
+    points,
+    geometry,
+    baselineY,
+    visibleStop.color,
+    visibleStop.opacity,
+  );
+}
+
+function buildBaselineAnchoredGradientDef(
+  gradientId: string,
+  points: Array<{ frequencyHz: number; totalDb: number }>,
+  geometry: ResponsePlotGeometry,
+  baselineY: number,
+  color: string,
+  opacity: number,
+): string {
+  const strongestPoint = points.reduce<{ totalDb: number } | null>((strongest, point) => {
+    if (!strongest || Math.abs(point.totalDb) > Math.abs(strongest.totalDb)) {
+      return point;
+    }
+
+    return strongest;
+  }, null);
+
+  const dominantDb = strongestPoint?.totalDb ?? 0;
+
+  // Use objectBoundingBox so gradient scales with the fill path, avoiding edge artifacts
+  if (dominantDb < 0) {
+    return `
+            <linearGradient id="${gradientId}" x1="0" y1="1" x2="0" y2="0" gradientUnits="objectBoundingBox">
+              <stop offset="0%" stop-color="${color}" stop-opacity="0" />
+              <stop offset="100%" stop-color="${color}" stop-opacity="${opacity.toFixed(3)}" />
+            </linearGradient>
+            `;
+  }
+
+  return `
+            <linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+              <stop offset="0%" stop-color="${color}" stop-opacity="${opacity.toFixed(3)}" />
+              <stop offset="100%" stop-color="${color}" stop-opacity="0" />
+            </linearGradient>
+            `;
+}
+
+function getSvgSafeId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function buildPolylinePath(
+  points: Array<{ frequencyHz: number; totalDb: number }>,
+  geometry: ResponsePlotGeometry,
+): string {
+  return points
+    .map((point, index) => {
+      const command = index === 0 ? 'M' : 'L';
+      return `${command} ${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`;
+    })
+    .join(' ');
+}
+
+function buildClosedFillPath(
+  points: Array<{ frequencyHz: number; totalDb: number }>,
+  geometry: ResponsePlotGeometry,
+  baselineY: number,
+): string {
+  if (points.length === 0) {
+    return '';
+  }
+
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+  if (!firstPoint || !lastPoint) {
+    return '';
+  }
+
+  const firstX = getPlotX(firstPoint.frequencyHz, geometry).toFixed(1);
+  const lastX = getPlotX(lastPoint.frequencyHz, geometry).toFixed(1);
+  const curveCommands = points
+    .map((point) => `L ${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`)
+    .join(' ');
+  return `M ${firstX},${baselineY.toFixed(1)} ${curveCommands} L ${lastX},${baselineY.toFixed(1)} Z`;
+}
+
+function buildClosedBandFillPath(
+  points: Array<{ frequencyHz: number; totalDb: number }>,
+  geometry: ResponsePlotGeometry,
+  baselineY: number,
+): string {
+  const ACTIVE_FILL_THRESHOLD_DB = 0.05;
+  const firstActiveIndex = points.findIndex((point) => Math.abs(point.totalDb) >= ACTIVE_FILL_THRESHOLD_DB);
+  if (firstActiveIndex < 0) {
+    return '';
+  }
+
+  let lastActiveIndex = firstActiveIndex;
+  for (let index = points.length - 1; index >= firstActiveIndex; index -= 1) {
+    if (Math.abs(points[index].totalDb) >= ACTIVE_FILL_THRESHOLD_DB) {
+      lastActiveIndex = index;
+      break;
+    }
+  }
+
+  const startIndex = Math.max(0, firstActiveIndex - 1);
+  const endIndex = Math.min(points.length - 1, lastActiveIndex + 1);
+  return buildClosedFillPath(points.slice(startIndex, endIndex + 1), geometry, baselineY);
+}
+
 function buildApoPreviewSampledPoints(
   enabledFilters: ApoFilter[],
   eqMode: ApoEqMode,
@@ -627,13 +873,7 @@ function buildApoPreviewSampledPoints(
   const sampleFrequencies =
     eqMode === 'graphic'
       ? buildGraphicEqPreviewSampleFrequencies(enabledFilters)
-      : Array.from({ length: 256 }, (_unused, index) => {
-          const ratio = index / 255;
-          return (
-            DEFAULT_START_FREQUENCY *
-            Math.pow(DEFAULT_END_FREQUENCY / DEFAULT_START_FREQUENCY, ratio)
-          );
-        });
+      : buildParametricEqPreviewSampleFrequencies(enabledFilters);
 
   return sampleFrequencies.map((frequencyHz) => ({
     frequencyHz,
@@ -645,6 +885,41 @@ function buildApoPreviewSampledPoints(
             0,
           ) * responseMultiplier + preampDb,
   }));
+}
+
+function buildParametricEqPreviewSampleFrequencies(filters: ApoFilter[]): number[] {
+  const logStart = Math.log(DEFAULT_START_FREQUENCY);
+  const logEnd = Math.log(DEFAULT_END_FREQUENCY);
+  const baselineSampleCount = Math.max(512, filters.length * 64);
+  const sampledFrequencies = new Set<number>();
+
+  for (let index = 0; index < baselineSampleCount; index += 1) {
+    const ratio = baselineSampleCount <= 1 ? 0 : index / (baselineSampleCount - 1);
+    sampledFrequencies.add(Number(
+      (
+        DEFAULT_START_FREQUENCY *
+        Math.exp((logEnd - logStart) * ratio)
+      ).toFixed(4),
+    ));
+  }
+
+  for (const filter of filters) {
+    const centerHz = clamp(filter.frequencyHz, DEFAULT_START_FREQUENCY, DEFAULT_END_FREQUENCY);
+    sampledFrequencies.add(Number(centerHz.toFixed(4)));
+
+    const q = Math.max(filter.q, 0.1);
+    const spreadOctaves = clamp(0.5 / q, 0.08, 0.75);
+    for (const direction of [-1, -0.5, 0.5, 1]) {
+      const nearbyFrequencyHz = clamp(
+        centerHz * Math.pow(2, spreadOctaves * direction),
+        DEFAULT_START_FREQUENCY,
+        DEFAULT_END_FREQUENCY,
+      );
+      sampledFrequencies.add(Number(nearbyFrequencyHz.toFixed(4)));
+    }
+  }
+
+  return Array.from(sampledFrequencies).sort((left, right) => left - right);
 }
 
 function buildGraphicEqPreviewSampleFrequencies(filters: ApoFilter[]): number[] {
@@ -1176,7 +1451,7 @@ export function attachApoPlotInteractions(input: {
             },
             controller.sampleRate,
           );
-      tooltip.textContent = `${frequencyHz.toFixed(0)} Hz, ${gainDb.toFixed(1)} dB`;
+      tooltip.textContent = `${frequencyHz.toFixed(0)} Hz, ${displayedGainDb.toFixed(1)} dB`;
 
       const nodeX = getPlotX(frequencyHz, geometry);
       const nodeY = getPlotY(displayedGainDb, geometry);
