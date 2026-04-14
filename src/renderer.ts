@@ -2384,7 +2384,7 @@ function initializeMeasurementConfigFromStorage(): void {
   const persistedConfig = readPersistedActiveConfiguration();
 
   if (persistedConfig) {
-    applyImportedConfiguration(persistedConfig, false);
+    applyImportedConfiguration(persistedConfig, { persist: false });
     return;
   }
 
@@ -2586,14 +2586,8 @@ async function saveConfiguration(): Promise<void> {
       inputDeviceLabel: microphoneSelect.selectedOptions[0]?.textContent ?? null,
       outputDeviceId: outputSelect.value,
       outputDeviceLabel: outputSelect.selectedOptions[0]?.textContent ?? null,
-      startFrequency: Number(startFrequencyInput.value),
-      endFrequency: Number(endFrequencyInput.value),
-      durationSeconds: Number(durationInput.value),
-      sweepLevelDb: Number(volumeInput.value),
-      splOffsetDb: state.splOffsetDb,
       smoothingMode: getSelectedSmoothingMode(),
       normalizePlot: normalizePlotToggle.checked,
-      apoEqMode: state.apoEqMode,
       automationAlgorithm: state.automationAlgorithm,
       automationDelaySeconds: state.automationDelaySeconds,
       proportionalP: state.proportionalP,
@@ -2602,18 +2596,6 @@ async function saveConfiguration(): Promise<void> {
       automationBandTolerances: state.automationBandTolerances,
       automationToleranceMaxAcceptableErrorWidthHz: state.automationToleranceMaxAcceptableErrorWidthHz,
       automationRegressionLimit: state.automationRegressionLimit,
-      apoSelectedMeasurementId: state.apoSelectedMeasurementId,
-      apoSelectedReferenceId: state.apoSelectedReferenceId,
-      parametricApoMaxFilters: state.parametricApoMaxFilters,
-      graphicApoMaxFilters: state.graphicApoMaxFilters,
-      parametricApoImportedPreampDb: state.parametricApoImportedPreampDb,
-      graphicApoImportedPreampDb: state.graphicApoImportedPreampDb,
-      parametricApoImportedBlockRepeatCount: state.parametricApoImportedBlockRepeatCount,
-      graphicApoImportedBlockRepeatCount: state.graphicApoImportedBlockRepeatCount,
-      apoMaxBoostDb: state.apoMaxBoostDb,
-      apoMaxCutDb: state.apoMaxCutDb,
-      parametricApoFilters: state.parametricApoFilters,
-      graphicApoFilters: state.graphicApoFilters,
     };
 
     const saveResult = await window.freakishEars.saveFileAs({
@@ -2654,7 +2636,11 @@ async function importConfiguration(file: File): Promise<void> {
     setStatus('Importing configuration...', 'working');
 
     const parsed = JSON.parse(await file.text()) as Record<string, unknown>;
-    applyImportedConfiguration(parsed);
+    applyImportedConfiguration(parsed, {
+      persist: true,
+      includeMeasurementSweepSettings: false,
+      includeApoState: false,
+    });
 
     setStatus('Configuration imported.', 'success');
     appendLog(`Imported configuration from ${file.name}.`, 'success');
@@ -2667,7 +2653,19 @@ async function importConfiguration(file: File): Promise<void> {
   }
 }
 
-function applyImportedConfiguration(config: Record<string, unknown>, persist = true): void {
+type ImportedConfigurationOptions = {
+  persist?: boolean;
+  includeMeasurementSweepSettings?: boolean;
+  includeApoState?: boolean;
+};
+
+function applyImportedConfiguration(
+  config: Record<string, unknown>,
+  options: ImportedConfigurationOptions = {},
+): void {
+  const persist = options.persist ?? true;
+  const includeMeasurementSweepSettings = options.includeMeasurementSweepSettings ?? true;
+  const includeApoState = options.includeApoState ?? true;
   const backend = config.backend === 'sox' ? 'sox' : 'web-audio';
   measurementBackendSelect.value = backend;
   state.measurementBackend = backend;
@@ -2702,16 +2700,18 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   localStorage.setItem(INPUT_DEVICE_STORAGE_KEY, importedInputDeviceId);
   localStorage.setItem(OUTPUT_DEVICE_STORAGE_KEY, importedOutputDeviceId);
 
-  setNumericInputValue(startFrequencyInput, config.startFrequency);
-  setNumericInputValue(endFrequencyInput, config.endFrequency);
-  setNumericInputValue(durationInput, config.durationSeconds);
-  setNumericInputValue(volumeInput, config.sweepLevelDb);
-  setNumericInputValue(volumeNumberInput, config.sweepLevelDb);
-  localStorage.setItem(START_FREQUENCY_STORAGE_KEY, startFrequencyInput.value);
-  localStorage.setItem(END_FREQUENCY_STORAGE_KEY, endFrequencyInput.value);
-  localStorage.setItem(DURATION_STORAGE_KEY, durationInput.value);
-  localStorage.setItem(SWEEP_LEVEL_STORAGE_KEY, volumeInput.value);
-  state.splOffsetDb = 0;
+  if (includeMeasurementSweepSettings) {
+    setNumericInputValue(startFrequencyInput, config.startFrequency);
+    setNumericInputValue(endFrequencyInput, config.endFrequency);
+    setNumericInputValue(durationInput, config.durationSeconds);
+    setNumericInputValue(volumeInput, config.sweepLevelDb);
+    setNumericInputValue(volumeNumberInput, config.sweepLevelDb);
+    localStorage.setItem(START_FREQUENCY_STORAGE_KEY, startFrequencyInput.value);
+    localStorage.setItem(END_FREQUENCY_STORAGE_KEY, endFrequencyInput.value);
+    localStorage.setItem(DURATION_STORAGE_KEY, durationInput.value);
+    localStorage.setItem(SWEEP_LEVEL_STORAGE_KEY, volumeInput.value);
+    state.splOffsetDb = 0;
+  }
 
   smoothingModeSelect.value = isSmoothingMode(String(config.smoothingMode ?? ''))
     ? String(config.smoothingMode)
@@ -2723,7 +2723,6 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
   normalizePlotToggle.checked = state.normalizePlot;
   localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(state.normalizePlot));
 
-  state.apoEqMode = isApoEqMode(config.apoEqMode) ? config.apoEqMode : DEFAULT_APO_EQ_MODE;
   state.automationAlgorithm = isAutomationAlgorithm(config.automationAlgorithm)
     ? config.automationAlgorithm
     : DEFAULT_AUTOMATION_ALGORITHM;
@@ -2765,20 +2764,69 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
     0,
     20,
   );
-  const importedApoFilters = normalizeImportedApoFilterSets(config, state.apoEqMode);
-  state.parametricApoFilters = importedApoFilters.parametric;
-  state.graphicApoFilters = importedApoFilters.graphic;
-  state.apoSelectedMeasurementId = toOptionalString(config.apoSelectedMeasurementId);
-  state.apoSelectedReferenceId = toOptionalString(config.apoSelectedReferenceId);
-  const importedApoMaxFilters = normalizeImportedApoMaxFilterCounts(config);
-  state.parametricApoMaxFilters = importedApoMaxFilters.parametric;
-  state.graphicApoMaxFilters = importedApoMaxFilters.graphic;
-  state.parametricApoImportedPreampDb = normalizeImportedApoPreamp(config.parametricApoImportedPreampDb);
-  state.graphicApoImportedPreampDb = normalizeImportedApoPreamp(config.graphicApoImportedPreampDb);
-  state.parametricApoImportedBlockRepeatCount = normalizeImportedApoBlockRepeatCount(config.parametricApoImportedBlockRepeatCount);
-  state.graphicApoImportedBlockRepeatCount = normalizeImportedApoBlockRepeatCount(config.graphicApoImportedBlockRepeatCount);
-  if (state.parametricApoFilters.length > 0 || state.parametricApoMaxFilters === 0) {
-    syncParametricApoFilterCountToFilters();
+  if (includeApoState) {
+    const hasImportedApoEqMode = hasOwnConfigProperty(config, 'apoEqMode');
+    const hasImportedParametricApoFilters =
+      hasOwnConfigProperty(config, 'parametricApoFilters') || hasOwnConfigProperty(config, 'parametric');
+    const hasImportedGraphicApoFilters =
+      hasOwnConfigProperty(config, 'graphicApoFilters') || hasOwnConfigProperty(config, 'graphic');
+    const hasImportedParametricApoMaxFilters = hasOwnConfigProperty(config, 'parametricApoMaxFilters');
+    const hasImportedGraphicApoMaxFilters = hasOwnConfigProperty(config, 'graphicApoMaxFilters');
+    const hasImportedApoSelectedMeasurementId = hasOwnConfigProperty(config, 'apoSelectedMeasurementId');
+    const hasImportedApoSelectedReferenceId = hasOwnConfigProperty(config, 'apoSelectedReferenceId');
+    const hasImportedParametricApoPreampDb = hasOwnConfigProperty(config, 'parametricApoImportedPreampDb');
+    const hasImportedGraphicApoPreampDb = hasOwnConfigProperty(config, 'graphicApoImportedPreampDb');
+    const hasImportedParametricApoBlockRepeatCount = hasOwnConfigProperty(
+      config,
+      'parametricApoImportedBlockRepeatCount',
+    );
+    const hasImportedGraphicApoBlockRepeatCount = hasOwnConfigProperty(
+      config,
+      'graphicApoImportedBlockRepeatCount',
+    );
+
+    if (hasImportedApoEqMode && isApoEqMode(config.apoEqMode)) {
+      state.apoEqMode = config.apoEqMode;
+    }
+
+    const importedApoFilters = normalizeImportedApoFilterSets(config, state.apoEqMode);
+    if (hasImportedParametricApoFilters) {
+      state.parametricApoFilters = importedApoFilters.parametric;
+    }
+    if (hasImportedGraphicApoFilters) {
+      state.graphicApoFilters = importedApoFilters.graphic;
+    }
+    if (hasImportedApoSelectedMeasurementId) {
+      state.apoSelectedMeasurementId = toOptionalString(config.apoSelectedMeasurementId);
+    }
+    if (hasImportedApoSelectedReferenceId) {
+      state.apoSelectedReferenceId = toOptionalString(config.apoSelectedReferenceId);
+    }
+    const importedApoMaxFilters = normalizeImportedApoMaxFilterCounts(config);
+    if (hasImportedParametricApoMaxFilters) {
+      state.parametricApoMaxFilters = importedApoMaxFilters.parametric;
+    }
+    if (hasImportedGraphicApoMaxFilters) {
+      state.graphicApoMaxFilters = importedApoMaxFilters.graphic;
+    }
+    if (hasImportedParametricApoPreampDb) {
+      state.parametricApoImportedPreampDb = normalizeImportedApoPreamp(config.parametricApoImportedPreampDb);
+    }
+    if (hasImportedGraphicApoPreampDb) {
+      state.graphicApoImportedPreampDb = normalizeImportedApoPreamp(config.graphicApoImportedPreampDb);
+    }
+    if (hasImportedParametricApoBlockRepeatCount) {
+      state.parametricApoImportedBlockRepeatCount = normalizeImportedApoBlockRepeatCount(config.parametricApoImportedBlockRepeatCount);
+    }
+    if (hasImportedGraphicApoBlockRepeatCount) {
+      state.graphicApoImportedBlockRepeatCount = normalizeImportedApoBlockRepeatCount(config.graphicApoImportedBlockRepeatCount);
+    }
+    if (
+      (hasImportedParametricApoFilters || hasImportedParametricApoMaxFilters) &&
+      (state.parametricApoFilters.length > 0 || state.parametricApoMaxFilters === 0)
+    ) {
+      syncParametricApoFilterCountToFilters();
+    }
   }
   state.apoMaxBoostDb = DEFAULT_APO_MAX_BOOST_DB;
   state.apoMaxCutDb = DEFAULT_APO_MAX_CUT_DB;
@@ -2809,6 +2857,10 @@ function applyImportedConfiguration(config: Record<string, unknown>, persist = t
     appendMeasurementPruneLog(prunedMeasurements);
   }
   renderMeasurements();
+}
+
+function hasOwnConfigProperty(config: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(config, key);
 }
 
 function pruneMeasurementsToKeepCount(): LoadedMeasurement[] {
