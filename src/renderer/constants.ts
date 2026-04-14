@@ -43,6 +43,7 @@ export const DEFAULT_APO_MAX_FILTERS = 1;
 export const DEFAULT_GRAPHIC_APO_MAX_FILTERS = 16;
 export const MAX_PARAMETRIC_APO_FILTERS = 64;
 export const MAX_GRAPHIC_APO_FILTERS = 512;
+export const APO_FILTER_LIST_PAGE_SIZE = 12;
 export const DEFAULT_APO_MAX_BOOST_DB = 24;
 export const DEFAULT_APO_MAX_CUT_DB = 24;
 export const DEFAULT_APO_EQ_MODE = 'parametric';

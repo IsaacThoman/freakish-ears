@@ -26,6 +26,7 @@ import {
   DEFAULT_APO_MAX_FILTERS,
   MAX_GRAPHIC_APO_FILTERS,
   MAX_PARAMETRIC_APO_FILTERS,
+  APO_FILTER_LIST_PAGE_SIZE,
   DEFAULT_AUTOMATION_ALGORITHM,
   DEFAULT_AUTOMATION_DELAY_SECONDS,
   DEFAULT_AUTOMATION_REGRESSION_LIMIT,
@@ -667,6 +668,8 @@ const state: AppState = {
   apoMaxBoostDb: DEFAULT_APO_MAX_BOOST_DB,
   apoMaxCutDb: DEFAULT_APO_MAX_CUT_DB,
   nextApoFilterIndex: 1,
+  apoFilterListPage: 1,
+  apoFilterListPageSize: APO_FILTER_LIST_PAGE_SIZE,
   latestStatusMessage: 'Ready',
   latestStatusTone: 'idle',
   equalizerApoStatus: null,
@@ -1217,6 +1220,64 @@ apoFilterList.addEventListener('click', (event) => {
 
   if (filterId) {
     removeApoFilter(filterId);
+    return;
+  }
+
+  const pageButton = target.closest<HTMLButtonElement>('[data-apo-filter-page]');
+  const pageAction = pageButton?.dataset.apoFilterPage;
+
+  if (pageAction && !state.busy) {
+    if (pageAction === 'jump') {
+      const pageInput = apoFilterList.querySelector<HTMLInputElement>('[data-apo-filter-page-input]');
+      if (pageInput) {
+        handleApoFilterPageJump(pageInput);
+      }
+    } else {
+      handleApoFilterPageChange(pageAction);
+    }
+  }
+});
+
+apoFilterList.addEventListener('keydown', (event) => {
+  const target = event.target;
+
+  if (target instanceof HTMLSelectElement && target.dataset.apoFilterPageSize) {
+    return;
+  }
+
+  // Handle page jump input Enter key
+  if (target instanceof HTMLInputElement && target.dataset.apoFilterPageInput) {
+    if (event.key === 'Enter' && !state.busy) {
+      event.preventDefault();
+      handleApoFilterPageJump(target);
+    }
+    return;
+  }
+
+  // Handle arrow key navigation for pagination
+  if (state.busy) {
+    return;
+  }
+
+  const activeApoFilters = getActiveApoFilters();
+  const totalPages = Math.ceil(activeApoFilters.length / state.apoFilterListPageSize);
+
+  if (totalPages <= 1) {
+    return;
+  }
+
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    handleApoFilterPageChange('prev');
+  } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    event.preventDefault();
+    handleApoFilterPageChange('next');
+  } else if (event.key === 'Home') {
+    event.preventDefault();
+    handleApoFilterPageChange('first');
+  } else if (event.key === 'End') {
+    event.preventDefault();
+    handleApoFilterPageChange('last');
   }
 });
 
@@ -3390,7 +3451,27 @@ function renderApoSection(): void {
   );
   apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
   syncApoSelectionOptions();
+
+  // Normalize page number to ensure it's within valid bounds
+  const activeApoFilters = getActiveApoFilters();
+  const totalPages = Math.ceil(activeApoFilters.length / state.apoFilterListPageSize);
+  if (totalPages > 0) {
+    state.apoFilterListPage = Math.max(1, Math.min(state.apoFilterListPage, totalPages));
+  } else {
+    state.apoFilterListPage = 1;
+  }
+
   apoFilterList.innerHTML = renderApoFilterList();
+  const apoFilterPageSizeSelect = apoFilterList.querySelector<HTMLSelectElement>('[data-apo-filter-page-size]');
+  if (apoFilterPageSizeSelect) {
+    apoFilterPageSizeSelect.addEventListener('change', () => {
+      if (state.busy) {
+        return;
+      }
+
+      handleApoFilterPageSizeChange(apoFilterPageSizeSelect);
+    });
+  }
   apoConfigPreview.value = buildApoConfigText();
   apoApplyStatus.textContent = getApoApplyStatusText();
   apoApplyWarning.hidden = !state.equalizerApoStatus?.peaceRunning;
@@ -3498,13 +3579,19 @@ function renderApoFilterList(): string {
     (aFilter, bFilter) => aFilter.frequencyHz - bFilter.frequencyHz,
   );
 
-  return sortedFilters
+  const totalPages = Math.ceil(sortedFilters.length / state.apoFilterListPageSize);
+  const currentPage = Math.max(1, Math.min(state.apoFilterListPage, totalPages));
+  const startIndex = (currentPage - 1) * state.apoFilterListPageSize;
+  const endIndex = Math.min(startIndex + state.apoFilterListPageSize, sortedFilters.length);
+  const pagedFilters = sortedFilters.slice(startIndex, endIndex);
+
+  const filterRows = pagedFilters
     .map(
       (filter, index) => `
         <div class="apo-filter-row${filter.enabled ? '' : ' is-hidden'}">
           <label class="apo-filter-enabled">
             <input type="checkbox" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="enabled" ${filter.enabled ? 'checked' : ''} ${state.busy ? 'disabled' : ''} />
-            <span>F${index + 1}</span>
+            <span>F${startIndex + index + 1}</span>
           </label>
           ${state.apoEqMode === 'graphic'
             ? ''
@@ -3521,6 +3608,119 @@ function renderApoFilterList(): string {
       `,
     )
     .join('');
+
+  if (totalPages <= 1) {
+    return filterRows;
+  }
+
+  const paginationControls = renderApoFilterPagination(currentPage, totalPages);
+  return `${filterRows}${paginationControls}`;
+}
+
+function renderApoFilterPagination(currentPage: number, totalPages: number): string {
+  const prevDisabled = currentPage <= 1 || state.busy ? 'disabled' : '';
+  const nextDisabled = currentPage >= totalPages || state.busy ? 'disabled' : '';
+  const jumpDisabled = state.busy ? 'disabled' : '';
+
+  const visiblePageButtonCount = getApoPaginationVisiblePageButtonCount(totalPages);
+  const pages = buildCompactPagination(currentPage, totalPages, visiblePageButtonCount);
+
+  // Generate page buttons
+  const pageButtons = pages.map((page) => {
+    if (page === '...') {
+      return `<span class="apo-filter-pagination-ellipsis">…</span>`;
+    }
+    const pageNum = page as number;
+    const isActive = pageNum === currentPage;
+    const activeClass = isActive ? ' btn-primary' : ' btn-secondary';
+    const disabledAttr = isActive || state.busy ? 'disabled' : '';
+    return `<button class="btn${activeClass} btn-small" type="button" data-apo-filter-page="${pageNum}" ${disabledAttr}>${pageNum}</button>`;
+  }).join('');
+
+  return `
+    <div class="apo-filter-pagination">
+      <div class="apo-filter-pagination-nav">
+        <button class="btn btn-secondary btn-small" type="button" data-apo-filter-page="first" ${jumpDisabled} title="First page">⏮</button>
+        <button class="btn btn-secondary btn-small" type="button" data-apo-filter-page="prev" ${prevDisabled} title="Previous page">←</button>
+        <div class="apo-filter-page-buttons">${pageButtons}</div>
+        <button class="btn btn-secondary btn-small" type="button" data-apo-filter-page="next" ${nextDisabled} title="Next page">→</button>
+        <button class="btn btn-secondary btn-small" type="button" data-apo-filter-page="last" ${jumpDisabled} title="Last page">⏭</button>
+      </div>
+      <div class="apo-filter-pagination-jump">
+        <span class="apo-filter-page-info">${currentPage} / ${totalPages}</span>
+        <label class="apo-filter-page-size-label">
+          <span>Per page</span>
+          <select class="apo-filter-page-size-select" data-apo-filter-page-size ${jumpDisabled}>
+            ${[12, 24, 48, 96]
+              .map(
+                (pageSize) =>
+                  `<option value="${pageSize}" ${pageSize === state.apoFilterListPageSize ? 'selected' : ''}>${pageSize}</option>`,
+              )
+              .join('')}
+          </select>
+        </label>
+        <label class="apo-filter-page-jump-label">
+          <span>Jump</span>
+        </label>
+        <input type="number" min="1" max="${totalPages}" value="" placeholder="#" class="apo-filter-page-input" data-apo-filter-page-input ${jumpDisabled} />
+        <button class="btn btn-secondary btn-small" type="button" data-apo-filter-page="jump" ${jumpDisabled}>Go</button>
+      </div>
+    </div>
+  `;
+}
+
+function getApoPaginationVisiblePageButtonCount(totalPages: number): number {
+  const containerWidth = Math.max(apoFilterList.clientWidth, apoCard.clientWidth, 0);
+  const pageDigits = String(totalPages).length;
+  const navButtonWidthPx = 40;
+  const ellipsisWidthPx = 32;
+  const pageButtonWidthPx = 30 + pageDigits * 8;
+  const gapWidthPx = 4;
+  const jumpInfoWidthPx = 54;
+  const pageSizeLabelWidthPx = 116;
+  const pageInputWidthPx = 50;
+  const goButtonWidthPx = 40;
+  const reservedWidthPx =
+    navButtonWidthPx * 4 +
+    gapWidthPx * 8 +
+    ellipsisWidthPx +
+    jumpInfoWidthPx +
+    pageSizeLabelWidthPx +
+    pageInputWidthPx +
+    goButtonWidthPx;
+  const availableWidthPx = Math.max(containerWidth - reservedWidthPx, pageButtonWidthPx * 3);
+  const measuredCount = Math.floor((availableWidthPx + gapWidthPx) / (pageButtonWidthPx + gapWidthPx));
+
+  return clamp(measuredCount, 3, totalPages);
+}
+
+function buildCompactPagination(
+  currentPage: number,
+  totalPages: number,
+  maxSlots: number,
+): Array<string | number> {
+  if (totalPages <= maxSlots) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+
+  const windowStart = clamp(
+    currentPage - Math.floor(maxSlots / 2),
+    1,
+    totalPages - maxSlots + 1,
+  );
+  const windowEnd = windowStart + maxSlots - 1;
+  const windowPages = Array.from({ length: maxSlots }, (_unused, index) => windowStart + index);
+
+  if (windowStart === 1) {
+    return [...windowPages, '...'];
+  }
+
+  if (windowEnd === totalPages) {
+    return ['...', ...windowPages];
+  }
+
+  const midpoint = (totalPages + 1) / 2;
+  return currentPage <= midpoint ? [...windowPages, '...'] : ['...', ...windowPages];
 }
 
 function renderApoFilterShapeInput(filter: ApoFilter): string {
@@ -3567,6 +3767,64 @@ function addApoFilter(partial: Partial<ApoFilter> = {}): void {
   state.nextApoFilterIndex += 1;
   persistApoState();
   persistActiveConfiguration();
+  renderApoSection();
+}
+
+function handleApoFilterPageChange(action: string): void {
+  const activeApoFilters = getActiveApoFilters();
+  const totalPages = Math.ceil(activeApoFilters.length / state.apoFilterListPageSize);
+
+  let newPage = state.apoFilterListPage;
+
+  if (action === 'first') {
+    newPage = 1;
+  } else if (action === 'last') {
+    newPage = totalPages;
+  } else if (action === 'prev') {
+    newPage = Math.max(1, state.apoFilterListPage - 1);
+  } else if (action === 'next') {
+    newPage = Math.min(totalPages, state.apoFilterListPage + 1);
+  } else if (action === 'jump') {
+    // Handled separately via the input field
+    return;
+  } else {
+    const parsedPage = Number(action);
+    if (Number.isFinite(parsedPage)) {
+      newPage = Math.max(1, Math.min(totalPages, parsedPage));
+    }
+  }
+
+  if (newPage !== state.apoFilterListPage) {
+    state.apoFilterListPage = newPage;
+    renderApoSection();
+  }
+}
+
+function handleApoFilterPageJump(input: HTMLInputElement): void {
+  const activeApoFilters = getActiveApoFilters();
+  const totalPages = Math.ceil(activeApoFilters.length / state.apoFilterListPageSize);
+
+  const parsedPage = Number(input.value);
+  if (!Number.isFinite(parsedPage)) {
+    return;
+  }
+
+  const newPage = Math.max(1, Math.min(totalPages, Math.round(parsedPage)));
+
+  if (newPage !== state.apoFilterListPage) {
+    state.apoFilterListPage = newPage;
+    renderApoSection();
+  }
+}
+
+function handleApoFilterPageSizeChange(input: HTMLSelectElement): void {
+  const parsedPageSize = Number(input.value);
+  if (!Number.isFinite(parsedPageSize)) {
+    return;
+  }
+
+  state.apoFilterListPageSize = clamp(Math.round(parsedPageSize), 1, MAX_GRAPHIC_APO_FILTERS);
+  state.apoFilterListPage = 1;
   renderApoSection();
 }
 
