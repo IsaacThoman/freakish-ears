@@ -485,6 +485,7 @@ export function renderApoEqPlot(input: {
   const yAxisLabelX = getYAxisLabelX(geometry.left, yTicks, yAxisLabelText, labelSizing);
   const xAxisY = getPlotY(0, geometry);
   const yAxisX = geometry.left;
+  const graphicNodeProfile = getGraphicEqNodeRenderProfile(enabledFilters, geometry);
   const combinedPath = sampledPoints
     .map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`)
     .join(' ');
@@ -528,6 +529,7 @@ export function renderApoEqPlot(input: {
         .join('')}
       <polyline points="${combinedPath}" fill="none" stroke="#f8a145" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
       ${enabledFilters
+        .filter((filter, index) => shouldRenderGraphicEqNode(index, enabledFilters.length, input.eqMode, graphicNodeProfile))
         .map((filter) => {
           const x = getPlotX(filter.frequencyHz, geometry);
           const nodeGainDb = getApoFilterNodeGainDb(filter, input.sampleRate);
@@ -535,7 +537,7 @@ export function renderApoEqPlot(input: {
           const nodeSummary = apoFilterKindUsesGain(filter.kind)
             ? `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz, ${filter.gainDb.toFixed(1)} dB`
             : `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz`;
-          return `<circle class="apo-filter-node" data-apo-filter-id="${escapeHtml(filter.id)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="#f8a145" stroke="#4d2b0b" stroke-width="2" cursor="grab" vector-effect="non-scaling-stroke"><title>${escapeHtml(nodeSummary)}</title></circle>`;
+          return `<circle class="apo-filter-node" data-apo-filter-id="${escapeHtml(filter.id)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${graphicNodeProfile.radius.toFixed(1)}" fill="#f8a145" stroke="#4d2b0b" stroke-width="${graphicNodeProfile.strokeWidth.toFixed(2)}" cursor="grab" vector-effect="non-scaling-stroke"><title>${escapeHtml(nodeSummary)}</title></circle>`;
         })
         .join('')}
       ${yTicks
@@ -622,23 +624,95 @@ function buildApoPreviewSampledPoints(
   responseMultiplier = 1,
   preampDb = 0,
 ): Array<{ frequencyHz: number; totalDb: number }> {
-  return Array.from({ length: 256 }, (_unused, index) => {
-    const ratio = index / 255;
-    const frequencyHz =
-      DEFAULT_START_FREQUENCY *
-      Math.pow(DEFAULT_END_FREQUENCY / DEFAULT_START_FREQUENCY, ratio);
+  const sampleFrequencies =
+    eqMode === 'graphic'
+      ? buildGraphicEqPreviewSampleFrequencies(enabledFilters)
+      : Array.from({ length: 256 }, (_unused, index) => {
+          const ratio = index / 255;
+          return (
+            DEFAULT_START_FREQUENCY *
+            Math.pow(DEFAULT_END_FREQUENCY / DEFAULT_START_FREQUENCY, ratio)
+          );
+        });
 
+  return sampleFrequencies.map((frequencyHz) => ({
+    frequencyHz,
+    totalDb:
+      eqMode === 'graphic'
+        ? getGraphicEqResponseDb(enabledFilters, frequencyHz)
+        : enabledFilters.reduce(
+            (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz, sampleRate),
+            0,
+          ) * responseMultiplier + preampDb,
+  }));
+}
+
+function buildGraphicEqPreviewSampleFrequencies(filters: ApoFilter[]): number[] {
+  const logStart = Math.log(DEFAULT_START_FREQUENCY);
+  const logEnd = Math.log(DEFAULT_END_FREQUENCY);
+  const baselineSampleCount = Math.max(256, filters.length * 4);
+  const sampledFrequencies = new Set<number>();
+
+  for (let index = 0; index < baselineSampleCount; index += 1) {
+    const ratio = baselineSampleCount <= 1 ? 0 : index / (baselineSampleCount - 1);
+    sampledFrequencies.add(Number(
+      (
+        DEFAULT_START_FREQUENCY *
+        Math.exp((logEnd - logStart) * ratio)
+      ).toFixed(4),
+    ));
+  }
+
+  for (let index = 0; index < filters.length; index += 1) {
+    const filter = filters[index];
+    sampledFrequencies.add(Number(filter.frequencyHz.toFixed(4)));
+
+    const nextFilter = filters[index + 1];
+    if (!nextFilter) {
+      continue;
+    }
+
+    const midpointHz = Math.sqrt(filter.frequencyHz * nextFilter.frequencyHz);
+    sampledFrequencies.add(Number(midpointHz.toFixed(4)));
+  }
+
+  return Array.from(sampledFrequencies).sort((left, right) => left - right);
+}
+
+function getGraphicEqNodeRenderProfile(
+  enabledFilters: ApoFilter[],
+  geometry: ResponsePlotGeometry,
+): GraphicEqNodeRenderProfile {
+  if (enabledFilters.length <= 1) {
     return {
-      frequencyHz,
-      totalDb:
-        eqMode === 'graphic'
-          ? getGraphicEqResponseDb(enabledFilters, frequencyHz)
-          : enabledFilters.reduce(
-              (total, filter) => total + getApoFilterResponseDb(filter, frequencyHz, sampleRate),
-              0,
-            ) * responseMultiplier + preampDb,
+      radius: 8,
+      strokeWidth: 2,
+      visibleStride: 1,
     };
-  });
+  }
+
+  const plotWidth = Math.max(geometry.width - geometry.left - geometry.right, 1);
+  const pixelsPerBand = plotWidth / Math.max(enabledFilters.length - 1, 1);
+  const visibleStride = pixelsPerBand >= 10 ? 1 : Math.max(1, Math.ceil(10 / Math.max(pixelsPerBand, 0.5)));
+
+  return {
+    radius: clamp(2 + pixelsPerBand * 0.35, 2, 8),
+    strokeWidth: clamp(1 + pixelsPerBand * 0.06, 1, 2),
+    visibleStride,
+  };
+}
+
+function shouldRenderGraphicEqNode(
+  index: number,
+  filterCount: number,
+  eqMode: ApoEqMode,
+  profile: GraphicEqNodeRenderProfile,
+): boolean {
+  if (eqMode !== 'graphic' || profile.visibleStride <= 1) {
+    return true;
+  }
+
+  return index === 0 || index === filterCount - 1 || index % profile.visibleStride === 0;
 }
 
 function getGraphicEqResponseDb(filters: ApoFilter[], frequencyHz: number): number {
@@ -913,8 +987,8 @@ export function attachApoPlotInteractions(input: {
       onDragEnd: () => void;
       draggingFilterId: string | null;
       cleanup: () => void;
-    };
   };
+};
 
   if (plotCardWithController.__apoPlotController) {
     plotCardWithController.__apoPlotController.filters = input.filters;
@@ -977,24 +1051,41 @@ export function attachApoPlotInteractions(input: {
   };
 
   const handleMouseDown = (event: MouseEvent) => {
-    const target = event.target;
-    if (!(target instanceof SVGCircleElement) || !target.classList.contains('apo-filter-node')) {
-      return;
-    }
-
-    event.preventDefault();
     const controller = plotCardWithController.__apoPlotController;
     if (!controller) {
       return;
     }
 
-    controller.draggingFilterId = target.getAttribute('data-apo-filter-id');
-    target.classList.add('is-dragging');
-    target.setAttribute('cursor', 'grabbing');
+    const svg = plotCard.querySelector('svg');
+    if (!(svg instanceof SVGSVGElement)) {
+      return;
+    }
+
+    const target = event.target;
+    const geometry = getGeometryFromSvg(controller.filters);
+    const filterId =
+      target instanceof SVGCircleElement && target.classList.contains('apo-filter-node')
+        ? target.getAttribute('data-apo-filter-id')
+        : controller.eqMode === 'graphic' && geometry
+          ? getGraphicEqFilterIdForPointer(controller.filters, geometry, svg, event.clientX, event.clientY)
+          : null;
+    if (!filterId || !geometry) {
+      return;
+    }
+
+    event.preventDefault();
 
     // Create tooltip positioned above the node (append to body to survive re-renders)
-    const filterId = target.getAttribute('data-apo-filter-id');
     const filter = controller.filters.find((f) => f.id === filterId);
+    if (!filter) {
+      return;
+    }
+
+    controller.draggingFilterId = filterId;
+    if (target instanceof SVGCircleElement && target.classList.contains('apo-filter-node')) {
+      target.classList.add('is-dragging');
+      target.setAttribute('cursor', 'grabbing');
+    }
 
     const tooltip = document.createElement('div');
     tooltip.className = 'apo-node-tooltip';
@@ -1005,16 +1096,13 @@ export function attachApoPlotInteractions(input: {
     const initialGain = filter ? filter.gainDb.toFixed(1) : '0.0';
     tooltip.textContent = `${initialFreq} Hz, ${initialGain} dB`;
 
-    // Position using the node's screen coordinates
-    const svg = target.ownerSVGElement;
-    if (svg) {
-      const nodeCx = parseFloat(target.getAttribute('cx') || '0');
-      const nodeCy = parseFloat(target.getAttribute('cy') || '0');
-      const screenPosition = getTooltipScreenPosition(svg, nodeCx, nodeCy);
-      if (screenPosition) {
-        tooltip.style.left = `${screenPosition.x}px`;
-        tooltip.style.top = `${screenPosition.y}px`;
-      }
+    // Position using the filter's graph coordinates so it still works when many nodes are hidden.
+    const nodeCx = getPlotX(filter.frequencyHz, geometry);
+    const nodeCy = getPlotY(getApoFilterNodeGainDb(filter, controller.sampleRate), geometry);
+    const screenPosition = getTooltipScreenPosition(svg, nodeCx, nodeCy);
+    if (screenPosition) {
+      tooltip.style.left = `${screenPosition.x}px`;
+      tooltip.style.top = `${screenPosition.y}px`;
     }
 
     document.body.appendChild(tooltip);
@@ -1161,4 +1249,49 @@ function getDbForPlotY(y: number, geometry: ResponsePlotGeometry): number {
     (clampedY - geometry.top) /
     (geometry.height - geometry.top - geometry.bottom);
   return geometry.maxDb - ratio * (geometry.maxDb - geometry.minDb);
+}
+
+function getGraphicEqFilterIdForPointer(
+  filters: ApoFilter[],
+  geometry: ResponsePlotGeometry,
+  svg: SVGSVGElement,
+  clientX: number,
+  clientY: number,
+): string | null {
+  const enabledFilters = filters.filter((filter) => filter.enabled);
+  if (enabledFilters.length === 0) {
+    return null;
+  }
+
+  const svgPoint = svg.createSVGPoint();
+  svgPoint.x = clientX;
+  svgPoint.y = clientY;
+
+  const screenMatrix = svg.getScreenCTM();
+  if (!screenMatrix) {
+    return null;
+  }
+
+  const transformedPoint = svgPoint.matrixTransform(screenMatrix.inverse());
+  if (
+    transformedPoint.x < geometry.left ||
+    transformedPoint.x > geometry.width - geometry.right ||
+    transformedPoint.y < geometry.top ||
+    transformedPoint.y > geometry.height - geometry.bottom
+  ) {
+    return null;
+  }
+
+  let closestFilter: ApoFilter | null = null;
+  let closestDistance = Number.POSITIVE_INFINITY;
+
+  for (const filter of enabledFilters) {
+    const distance = Math.abs(getPlotX(filter.frequencyHz, geometry) - transformedPoint.x);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestFilter = filter;
+    }
+  }
+
+  return closestFilter?.id ?? null;
 }

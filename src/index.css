@@ -326,6 +326,34 @@ input {
   align-self: stretch;
 }
 
+.automation-progress {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.automation-progress-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+}
+
+.automation-progress-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.automation-progress-value {
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .automation-tolerance-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -337,6 +365,10 @@ input {
 }
 
 @media (max-width: 720px) {
+  .automation-progress {
+    grid-template-columns: 1fr;
+  }
+
   .automation-tolerance-grid {
     grid-template-columns: 1fr;
   }
@@ -442,6 +474,24 @@ input {
   border: 0;
   border-radius: 0;
   overflow: visible;
+}
+
+.apo-config-preview-field {
+  gap: 8px;
+}
+
+.apo-preview-divider {
+  height: 1px;
+  background: var(--panel-border);
+  opacity: 0.9;
+}
+
+.apo-config-preview-field label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
 }
 
 .apo-controls-bar {
@@ -1028,6 +1078,8 @@ input {
   min-height: 132px;
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .apo-config-preview:focus,
@@ -1147,7 +1199,7 @@ input {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 120px;
+  max-height: 284px;
   overflow-y: auto;
 }
 

@@ -164,6 +164,10 @@ export type AppState = {
   automationRunning: boolean;
   automationStopRequested: boolean;
   automationPassCount: number;
+  automationDisplayedPassCount: number;
+  automationStartedAtMs: number | null;
+  automationElapsedMs: number;
+  automationTimerId: number;
   automationPidIntegralByBand: Record<string, number>;
   automationPidPreviousErrorByBand: Record<string, number>;
   automationMomentumByBand: Record<string, number>;

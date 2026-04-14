@@ -442,6 +442,16 @@ app.innerHTML = `
           <button id="runAutomationButton" class="btn btn-primary automation-run-button" type="button">
             Run Automatic Calibration
           </button>
+          <div class="automation-progress" aria-live="polite">
+            <div class="automation-progress-item">
+              <span class="automation-progress-label">Iterations</span>
+              <span id="automationIterationValue" class="automation-progress-value">0</span>
+            </div>
+            <div class="automation-progress-item">
+              <span class="automation-progress-label">Elapsed</span>
+              <span id="automationElapsedValue" class="automation-progress-value">00:00</span>
+            </div>
+          </div>
         </section>
       </div>
 
@@ -512,6 +522,11 @@ app.innerHTML = `
             <div id="apoPlotCard" class="plot-card">
               <span style="color:var(--text-muted);font-size:11px">Enable filters to see EQ graph</span>
             </div>
+            <div class="apo-preview-divider" aria-hidden="true"></div>
+            <div class="field apo-config-preview-field">
+              <label for="apoConfigPreview">APO Config Preview</label>
+              <textarea id="apoConfigPreview" class="apo-config-preview" readonly></textarea>
+            </div>
           </div>
         </div>
 
@@ -573,10 +588,6 @@ app.innerHTML = `
 
           <div id="apoFilterList" class="apo-filter-list"></div>
 
-          <div class="field">
-            <label for="apoConfigPreview">APO Config Preview</label>
-            <textarea id="apoConfigPreview" class="apo-config-preview" readonly></textarea>
-          </div>
         </div>
 
         <span class="section-title">Log</span>
@@ -605,6 +616,8 @@ const volumeInput = getElement<HTMLInputElement>('volumeInput');
 const volumeNumberInput = getElement<HTMLInputElement>('volumeNumberInput');
 const runMeasurementButton = getElement<HTMLButtonElement>('runMeasurementButton');
 const runAutomationButton = getElement<HTMLButtonElement>('runAutomationButton');
+const automationIterationValue = getElement<HTMLSpanElement>('automationIterationValue');
+const automationElapsedValue = getElement<HTMLSpanElement>('automationElapsedValue');
 const automationAlgorithmSelect = getElement<HTMLSelectElement>('automationAlgorithmSelect');
 const proportionalAutomationFields = getElement<HTMLDivElement>('proportionalAutomationFields');
 const pidAutomationFields = getElement<HTMLDivElement>('pidAutomationFields');
@@ -765,6 +778,10 @@ const state: AppState = {
   automationRunning: false,
   automationStopRequested: false,
   automationPassCount: 0,
+  automationDisplayedPassCount: 0,
+  automationStartedAtMs: null,
+  automationElapsedMs: 0,
+  automationTimerId: 0,
   automationPidIntegralByBand: {},
   automationPidPreviousErrorByBand: {},
   automationMomentumByBand: {},
@@ -1659,6 +1676,56 @@ function updateAutomationToleranceFieldState(): void {
   }
 }
 
+function formatElapsedDuration(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getCurrentAutomationElapsedMs(): number {
+  if (!state.automationRunning || state.automationStartedAtMs === null) {
+    return state.automationElapsedMs;
+  }
+
+  return state.automationElapsedMs + (Date.now() - state.automationStartedAtMs);
+}
+
+function updateAutomationProgressUi(): void {
+  automationIterationValue.textContent = String(state.automationDisplayedPassCount);
+  automationElapsedValue.textContent = formatElapsedDuration(getCurrentAutomationElapsedMs());
+}
+
+function stopAutomationTimer(): void {
+  if (state.automationTimerId) {
+    window.clearInterval(state.automationTimerId);
+    state.automationTimerId = 0;
+  }
+
+  if (state.automationStartedAtMs !== null) {
+    state.automationElapsedMs += Date.now() - state.automationStartedAtMs;
+    state.automationStartedAtMs = null;
+  }
+
+  updateAutomationProgressUi();
+}
+
+function startAutomationTimer(): void {
+  stopAutomationTimer();
+  state.automationElapsedMs = 0;
+  state.automationStartedAtMs = Date.now();
+  state.automationTimerId = window.setInterval(() => {
+    updateAutomationProgressUi();
+  }, 1000);
+  updateAutomationProgressUi();
+}
+
 function updateAutomationUi(): void {
   const isProportional = state.automationAlgorithm === 'proportional';
   const isPid = state.automationAlgorithm === 'pid';
@@ -1687,6 +1754,7 @@ function updateAutomationUi(): void {
   for (const band of AUTOMATION_TOLERANCE_BANDS) {
     automationToleranceInputs[band.key].value = state.automationBandTolerances[band.key].toFixed(1);
   }
+  updateAutomationProgressUi();
   updateMeasurementActionState();
 }
 
@@ -5670,9 +5738,11 @@ async function toggleAutomationLoop(): Promise<void> {
   state.automationRunning = true;
   state.automationStopRequested = false;
   state.automationPassCount = 0;
+  state.automationDisplayedPassCount = 0;
   state.automationPidIntegralByBand = {};
   state.automationPidPreviousErrorByBand = {};
   state.automationMomentumByBand = {};
+  startAutomationTimer();
   state.apoEqMode = 'graphic';
   resetGraphicEqFiltersToFlat();
   persistApoState();
@@ -5682,6 +5752,7 @@ async function toggleAutomationLoop(): Promise<void> {
 
   const appliedFlatProfile = await applyApoConfig({ continueOnBusyFileError: true });
   if (!appliedFlatProfile) {
+    stopAutomationTimer();
     state.automationRunning = false;
     state.automationStopRequested = false;
     state.automationPassCount = 0;
@@ -5707,6 +5778,9 @@ async function toggleAutomationLoop(): Promise<void> {
       if (!measurement || state.automationStopRequested) {
         break;
       }
+
+      state.automationDisplayedPassCount += 1;
+      updateAutomationProgressUi();
 
       state.apoSelectedMeasurementId = measurement.id;
       persistApoSelections();
@@ -5796,6 +5870,7 @@ async function toggleAutomationLoop(): Promise<void> {
     }
   } finally {
     const stopRequested = state.automationStopRequested;
+    stopAutomationTimer();
     state.automationRunning = false;
     state.automationStopRequested = false;
     state.automationPassCount = 0;
