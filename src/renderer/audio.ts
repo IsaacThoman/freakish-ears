@@ -1,11 +1,15 @@
 import { POST_ROLL_SECONDS, PRE_ROLL_SECONDS } from './constants';
 export { analyzeMeasurement } from '../shared/measurement-analysis';
 export { encodeWavFile } from '../shared/audio';
+import { encodeMultichannelWavFile } from '../shared/audio';
 import type {
   MeasurementChannelSelection,
   MeasurementCapture,
 } from './types';
 import { wait } from './utils';
+
+const OUTPUT_PLAYBACK_WARMUP_MS = 200;
+const AUDIO_CONTEXT_RESUME_TIMEOUT_MS = 500;
 
 export async function recordSweepMeasurement(settings: {
   deviceId: string;
@@ -31,16 +35,9 @@ export async function recordSweepMeasurement(settings: {
   });
 
   const audioContext = new AudioContext({
-    latencyHint: 'playback',
+    latencyHint: 'interactive',
     sampleRate: settings.sampleRate,
   });
-  const sinkAudioContext = audioContext as AudioContext & {
-    setSinkId?: (sinkId: string) => Promise<void>;
-  };
-
-  if (settings.outputDeviceId && sinkAudioContext.setSinkId) {
-    await sinkAudioContext.setSinkId(settings.outputDeviceId);
-  }
 
   const sampleRate = audioContext.sampleRate;
   const sweep = await renderLogSweep(
@@ -52,9 +49,8 @@ export async function recordSweepMeasurement(settings: {
   const sourceNode = audioContext.createMediaStreamSource(stream);
   const processorNode = audioContext.createScriptProcessor(4096, 2, 1);
   const mutedGain = audioContext.createGain();
-  const playbackGain = audioContext.createGain();
   mutedGain.gain.value = 0;
-  playbackGain.gain.value = Math.pow(10, settings.sweepLevelDb / 20);
+  const captureStartedAtMs = performance.now();
 
   const chunks: Float32Array[] = [];
   let sampleCount = 0;
@@ -68,45 +64,42 @@ export async function recordSweepMeasurement(settings: {
   sourceNode.connect(processorNode);
   processorNode.connect(mutedGain);
   mutedGain.connect(audioContext.destination);
-  playbackGain.connect(audioContext.destination);
 
-  const sweepBuffer = audioContext.createBuffer(2, sweep.length, sampleRate);
-  writeOutputSweepChannels(sweepBuffer, sweep, settings.outputChannel);
-
-  const sweepNode = audioContext.createBufferSource();
-  sweepNode.buffer = sweepBuffer;
-  sweepNode.connect(playbackGain);
-
-  const outputElement =
-    settings.outputDeviceId && !sinkAudioContext.setSinkId
-      ? await createOutputPlaybackElement(settings.outputDeviceId)
-      : null;
-
-  if (outputElement) {
-    playbackGain.disconnect();
-    const playbackDestination = audioContext.createMediaStreamDestination();
-    playbackGain.connect(playbackDestination);
-    outputElement.srcObject = playbackDestination.stream;
-    await outputElement.play();
-  }
+  const playbackSweep = padSweepWithLeadingSilence(
+    applySweepGain(sweep, settings.sweepLevelDb),
+    sampleRate,
+    OUTPUT_PLAYBACK_WARMUP_MS / 1000,
+  );
+  const outputElement = await createOutputPlaybackElement(
+    playbackSweep,
+    sampleRate,
+    settings.outputChannel,
+    settings.outputDeviceId,
+  );
 
   await audioContext.resume();
+  await waitForAudioContextRunning(audioContext);
+  await outputElement.play();
+  await waitForPlaybackStart(outputElement);
 
-  const sweepStartTime = audioContext.currentTime + PRE_ROLL_SECONDS;
-  sweepNode.start(sweepStartTime);
+  const actualPreRollSamples = Math.round(
+    (((performance.now() - captureStartedAtMs) / 1000) + PRE_ROLL_SECONDS) * sampleRate +
+      (playbackSweep.length - sweep.length),
+  );
 
   await wait(
-    (PRE_ROLL_SECONDS + settings.durationSeconds + POST_ROLL_SECONDS) * 1000 + 120,
+    PRE_ROLL_SECONDS * 1000 +
+      (playbackSweep.length / sampleRate) * 1000 +
+      POST_ROLL_SECONDS * 1000 +
+      120,
   );
 
   processorNode.disconnect();
   mutedGain.disconnect();
-  playbackGain.disconnect();
   sourceNode.disconnect();
-  outputElement?.pause();
-  if (outputElement) {
-    outputElement.srcObject = null;
-  }
+  outputElement.pause();
+  outputElement.srcObject = null;
+  clearPlaybackSource(outputElement);
 
   for (const track of stream.getTracks()) {
     track.stop();
@@ -118,7 +111,7 @@ export async function recordSweepMeasurement(settings: {
     recording: flattenChunks(chunks, sampleCount),
     sweep,
     sampleRate,
-    preRollSamples: Math.round(PRE_ROLL_SECONDS * sampleRate),
+    preRollSamples: actualPreRollSamples,
   };
 }
 
@@ -157,11 +150,10 @@ function selectInputSamples(
   return mixed;
 }
 
-function writeOutputSweepChannels(
-  sweepBuffer: AudioBuffer,
+function createPlaybackChannels(
   sweep: Float32Array,
   outputChannel: MeasurementChannelSelection,
-): void {
+): Float32Array[] {
   const left = new Float32Array(sweep.length);
   const right = new Float32Array(sweep.length);
 
@@ -173,8 +165,23 @@ function writeOutputSweepChannels(
     right.set(sweep);
   }
 
-  sweepBuffer.copyToChannel(left, 0);
-  sweepBuffer.copyToChannel(right, 1);
+  return [left, right];
+}
+
+function padSweepWithLeadingSilence(
+  sweep: Float32Array,
+  sampleRate: number,
+  silenceSeconds: number,
+): Float32Array {
+  const silenceSampleCount = Math.max(0, Math.round(sampleRate * silenceSeconds));
+
+  if (silenceSampleCount === 0) {
+    return sweep;
+  }
+
+  const padded = new Float32Array(sweep.length + silenceSampleCount);
+  padded.set(sweep, silenceSampleCount);
+  return padded;
 }
 
 async function renderLogSweep(
@@ -231,6 +238,9 @@ function flattenChunks(chunks: Float32Array[], totalLength: number): Float32Arra
 }
 
 async function createOutputPlaybackElement(
+  sweep: Float32Array,
+  sampleRate: number,
+  outputChannel: MeasurementChannelSelection,
   outputDeviceId: string,
 ): Promise<HTMLAudioElement> {
   const audioElement = new Audio();
@@ -240,6 +250,9 @@ async function createOutputPlaybackElement(
 
   audioElement.autoplay = true;
   audioElement.volume = 1;
+  audioElement.src = URL.createObjectURL(new Blob([
+    encodeMultichannelWavFile(createPlaybackChannels(sweep, outputChannel), sampleRate),
+  ], { type: 'audio/wav' }));
 
   if (outputDeviceId) {
     if (!sinkAudioElement.setSinkId) {
@@ -250,4 +263,87 @@ async function createOutputPlaybackElement(
   }
 
   return audioElement;
+}
+
+function clearPlaybackSource(audioElement: HTMLAudioElement): void {
+  if (!audioElement.src.startsWith('blob:')) {
+    return;
+  }
+
+  URL.revokeObjectURL(audioElement.src);
+  audioElement.removeAttribute('src');
+  audioElement.load();
+}
+
+function applySweepGain(sweep: Float32Array, sweepLevelDb: number): Float32Array {
+  const amplitude = Math.pow(10, sweepLevelDb / 20);
+  const scaled = new Float32Array(sweep.length);
+
+  for (let index = 0; index < sweep.length; index += 1) {
+    scaled[index] = sweep[index] * amplitude;
+  }
+
+  return scaled;
+}
+
+async function waitForPlaybackStart(audioElement: HTMLAudioElement): Promise<void> {
+  if (!audioElement.paused && audioElement.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      audioElement.removeEventListener('playing', handleReady);
+      audioElement.removeEventListener('canplay', handleReady);
+      window.clearTimeout(timeoutId);
+      resolve();
+    };
+
+    const handleReady = () => {
+      finish();
+    };
+
+    const timeoutId = window.setTimeout(finish, 500);
+
+    audioElement.addEventListener('playing', handleReady, { once: true });
+    audioElement.addEventListener('canplay', handleReady, { once: true });
+  });
+}
+
+async function waitForAudioContextRunning(audioContext: AudioContext): Promise<void> {
+  if (audioContext.state === 'running') {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      audioContext.removeEventListener('statechange', handleStateChange);
+      window.clearTimeout(timeoutId);
+      resolve();
+    };
+
+    const handleStateChange = () => {
+      if (audioContext.state === 'running') {
+        finish();
+      }
+    };
+
+    const timeoutId = window.setTimeout(finish, AUDIO_CONTEXT_RESUME_TIMEOUT_MS);
+
+    audioContext.addEventListener('statechange', handleStateChange);
+  });
 }

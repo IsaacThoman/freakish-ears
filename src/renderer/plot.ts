@@ -409,7 +409,7 @@ export function renderResponsePlot(input: {
 
           const isStarred = measurement.starred;
           const strokeColor = isStarred ? '#f8a145' : measurement.color;
-          const strokeWidth = isStarred ? '3.45' : '3';
+          const strokeWidth = isStarred ? '3.75' : '3';
 
           if (isStarred) {
             const gradientId = `${graphIdBase}-starred-gradient-${measurement.id}`;

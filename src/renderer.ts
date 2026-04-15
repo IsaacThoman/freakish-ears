@@ -424,7 +424,6 @@ app.innerHTML = `
                 <input id="pidDerivativeGainInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PID_DERIVATIVE_GAIN.toFixed(2)}" />
               </div>
             </div>
-            <span class="automation-hint">Each pass updates the current APO correction with proportional, accumulated, and change-rate error terms.</span>
           </div>
 
           <div id="dampedRefitAutomationFields" class="automation-fields" hidden>
@@ -1640,7 +1639,7 @@ apoReferenceSelect.addEventListener('change', () => {
   updateAutomationUi();
 });
 
-apoMaxFiltersInput.addEventListener('input', () => {
+apoMaxFiltersInput.addEventListener('change', () => {
   syncApoGenerationSettings(false);
 });
 
