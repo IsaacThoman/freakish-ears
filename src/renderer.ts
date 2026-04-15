@@ -326,7 +326,7 @@ app.innerHTML = `
           <div id="selectedFolder" class="folder-chip">None</div>
         </div>
 
-        <div class="folder-row">
+        <div class="folder-row folder-row-actions">
           <button id="saveConfigButton" class="btn btn-secondary" type="button">
             Save Config
           </button>
