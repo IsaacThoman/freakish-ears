@@ -142,6 +142,10 @@ export type PlotViewMode = 'measurements' | 'apo';
 
 export type AppState = {
   busy: boolean;
+  pendingApoConfigApply: {
+    continueOnBusyFileError?: boolean;
+    enableProfile?: boolean;
+  } | null;
   outputFolder: string | null;
   measurementBackend: MeasurementBackend;
   measurementKeepCount: number;

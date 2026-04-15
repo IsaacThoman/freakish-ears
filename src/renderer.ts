@@ -797,6 +797,7 @@ const MIN_SPLIT_PLOT_HEIGHT_PX = 220;
 const APO_PREAMP_MIN_DB = -24;
 const APO_PREAMP_MAX_DB = 24;
 const APO_CHANNEL_PROFILES: ApoChannelProfile[] = ['all', 'left', 'right'];
+const APO_APPLY_LOCK_RETRY_DELAYS_MS = [150, 300, 500, 800, 1200];
 const storedApoFilters = readStoredApoFilterSets();
 const storedApoEqModes = readStoredApoEqModes();
 const storedApoMaxFilterCounts = readStoredApoMaxFilterCounts();
@@ -805,6 +806,7 @@ const storedApoImportedBlockRepeatCount = readStoredApoImportedBlockRepeatCount(
 
 const state: AppState = {
   busy: false,
+  pendingApoConfigApply: null,
   outputFolder: localStorage.getItem(STORAGE_KEY),
   measurementBackend: readStoredMeasurementBackend(),
   measurementKeepCount: readStoredMeasurementKeepCount(),
@@ -1527,7 +1529,12 @@ for (const input of Object.values(automationToleranceInputs)) {
 }
 
 generateApoFiltersButton.addEventListener('click', () => {
-  void generateApoFilters();
+  void (async () => {
+    const generated = await generateApoFilters();
+    if (generated) {
+      requestApoConfigApply({ continueOnBusyFileError: true, enableProfile: true });
+    }
+  })();
 });
 
 addApoFilterButton.addEventListener('click', () => {
@@ -1911,7 +1918,9 @@ async function runAction(action: RendererAutomationAction): Promise<RendererAuto
       renderApoSection();
       break;
     case 'generate-apo-filters':
-      await generateApoFilters(null, action.useAutomationAlgorithm);
+      if (await generateApoFilters(null, action.useAutomationAlgorithm)) {
+        requestApoConfigApply({ continueOnBusyFileError: true, enableProfile: true });
+      }
       break;
     case 'import-eq-profile':
       await importEqProfile(createAutomationFile(action.file));
@@ -2228,6 +2237,12 @@ function setBusy(isBusy: boolean): void {
   if (state.measurements.length > 0 || state.referenceCurves.length > 0) {
     renderMeasurements();
   }
+
+  if (!isBusy && state.pendingApoConfigApply) {
+    const pendingApoConfigApply = state.pendingApoConfigApply;
+    state.pendingApoConfigApply = null;
+    void applyApoConfig(pendingApoConfigApply);
+  }
 }
 
 function setStatus(message: string, tone: StatusTone): void {
@@ -2251,11 +2266,6 @@ function appendLog(message: string, tone: LogTone = 'neutral'): void {
   item.dataset.tone = tone;
   item.textContent = `${new Date().toLocaleTimeString()}  ${message}`;
   logList.prepend(item);
-}
-
-function isBusyFileError(error: unknown): boolean {
-  const message = getErrorMessage(error);
-  return /\bEBUSY\b/u.test(message) || /resource busy or locked/iu.test(message);
 }
 
 function updateSelectedFolder(): void {
@@ -2303,11 +2313,13 @@ function updateMeasurementActionState(): void {
   selectApoPresetButton.disabled = state.busy || state.peacePresets.length === 0;
   importApoConfigButton.disabled = state.busy;
   exportApoConfigButton.disabled = state.busy || !state.outputFolder;
-  const enabledFilterCount = getActiveApoFilters().filter((filter) => filter.enabled).length;
+  const hasAnyEffectiveApoContent = APO_CHANNEL_PROFILES.some((channelProfile) =>
+    hasApoProfileEffectiveContent(channelProfile),
+  );
   const apoInstalled = state.equalizerApoStatus?.installed ?? false;
   const apoProfileEnabled = state.equalizerApoStatus?.freakishEarsIncludedInConfig ?? false;
   apoEnableOffButton.disabled = state.busy || !apoInstalled;
-  apoEnableOnButton.disabled = (state.busy || !apoInstalled || enabledFilterCount === 0) && !apoProfileEnabled;
+  apoEnableOnButton.disabled = (state.busy || !apoInstalled || !hasAnyEffectiveApoContent) && !apoProfileEnabled;
 }
 
 function updateMeasurementBackendUi(): void {
@@ -4757,12 +4769,28 @@ function handleApoFilterDragEnd(): void {
   reapplyApoConfigIfEnabled();
 }
 
+function requestApoConfigApply(options?: { continueOnBusyFileError?: boolean; enableProfile?: boolean }): void {
+  if (state.busy) {
+    state.pendingApoConfigApply = {
+      continueOnBusyFileError:
+        (state.pendingApoConfigApply?.continueOnBusyFileError ?? false) || !!options?.continueOnBusyFileError,
+      enableProfile:
+        options?.enableProfile === undefined
+          ? state.pendingApoConfigApply?.enableProfile
+          : options.enableProfile,
+    };
+    return;
+  }
+
+  void applyApoConfig(options);
+}
+
 function reapplyApoConfigIfEnabled(): void {
   if (!state.equalizerApoStatus?.freakishEarsIncludedInConfig) {
     return;
   }
 
-  void applyApoConfig({ continueOnBusyFileError: true });
+  requestApoConfigApply({ continueOnBusyFileError: true });
 }
 
 function syncApoGenerationSettings(normalize: boolean): void {
@@ -5081,16 +5109,10 @@ function syncApoEnableToggle(): void {
 }
 
 function getApoApplyStatusText(): string {
-  const enabledFilterCount = APO_CHANNEL_PROFILES.reduce(
-    (count, channelProfile) =>
-      count + getApoFilters(channelProfile, getApoEqMode(channelProfile)).filter((filter) => filter.enabled).length,
-    0,
-  );
-
-  if (enabledFilterCount === 0) {
+  if (!APO_CHANNEL_PROFILES.some((channelProfile) => hasApoProfileEffectiveContent(channelProfile))) {
     return state.equalizerApoStatus?.freakishEarsIncludedInConfig
-      ? 'No APO filters are enabled. Turn the APO profile off or enable at least one filter.'
-      : 'Enable at least one filter to turn the APO profile on.';
+      ? 'No effective APO adjustments are active. Turn the APO profile off or load an EQ curve.'
+      : 'Load an EQ curve or other APO adjustment to turn the profile on.';
   }
 
   const status = state.equalizerApoStatus;
@@ -5100,7 +5122,7 @@ function getApoApplyStatusText(): string {
   }
 
   if (!status.installed) {
-    return 'Equalizer APO not detected in the default install path.';
+    return 'Equalizer APO not detected in the configured config location.';
   }
 
   if (status.peaceRunning) {
@@ -5690,7 +5712,6 @@ async function generateApoFilters(
     persistApoState();
     persistActiveConfiguration();
     renderApoSection();
-    reapplyApoConfigIfEnabled();
 
     setStatus(`Generated ${generatedFilters.length} APO filter${generatedFilters.length === 1 ? '' : 's'}.`, 'success');
     appendLog(
@@ -6381,6 +6402,92 @@ function getPlotAppliedApoPreampDb(): number {
   return importedPreampDb === null ? 0 : roundTo(importedPreampDb, 0.1);
 }
 
+type ApoConfigBlockSpec = {
+  targetChannelProfile: ApoChannelProfile;
+  sourceChannelProfile: ApoChannelProfile;
+  eqMode: ApoEqMode;
+  blockRepeatCount: number;
+};
+
+function hasApoProfileEffectiveContent(channelProfile: ApoChannelProfile): boolean {
+  const eqMode = getApoEqMode(channelProfile);
+  const hasEffectiveFilters = getApoFilters(channelProfile, eqMode).some((filter) =>
+    hasApoFilterEffectiveContent(filter, eqMode),
+  );
+
+  if (hasEffectiveFilters) {
+    return true;
+  }
+
+  const importedPreampDb = getImportedApoPreampDb(channelProfile, eqMode);
+  return importedPreampDb !== null && Math.abs(importedPreampDb) >= 0.05;
+}
+
+function hasApoFilterEffectiveContent(filter: ApoFilter, eqMode: ApoEqMode): boolean {
+  if (!filter.enabled) {
+    return false;
+  }
+
+  if (eqMode === 'graphic') {
+    return Math.abs(filter.gainDb) >= 0.05;
+  }
+
+  if (apoFilterKindUsesGain(filter.kind)) {
+    return Math.abs(filter.gainDb) >= 0.05;
+  }
+
+  return true;
+}
+
+function getApoConfigBlockRepeatCount(
+  channelProfile: ApoChannelProfile,
+  eqMode: ApoEqMode,
+): number {
+  return eqMode === 'parametric'
+    ? getImportedApoBlockRepeatCount(channelProfile, 'parametric') ?? 1
+    : 1;
+}
+
+function getApoConfigBlockSpecs(): ApoConfigBlockSpec[] {
+  const leftHasContent = hasApoProfileEffectiveContent('left');
+  const rightHasContent = hasApoProfileEffectiveContent('right');
+
+  if (!leftHasContent && !rightHasContent) {
+    const fallbackProfile = hasApoProfileEffectiveContent('all') ? 'all' : state.apoChannelProfile;
+    const eqMode = getApoEqMode(fallbackProfile);
+    return [{
+      targetChannelProfile: fallbackProfile,
+      sourceChannelProfile: fallbackProfile,
+      eqMode,
+      blockRepeatCount: getApoConfigBlockRepeatCount(fallbackProfile, eqMode),
+    }];
+  }
+
+  const blockSpecs: ApoConfigBlockSpec[] = [];
+
+  if (leftHasContent) {
+    const eqMode = getApoEqMode('left');
+    blockSpecs.push({
+      targetChannelProfile: 'left',
+      sourceChannelProfile: 'left',
+      eqMode,
+      blockRepeatCount: getApoConfigBlockRepeatCount('left', eqMode),
+    });
+  }
+
+  if (rightHasContent) {
+    const eqMode = getApoEqMode('right');
+    blockSpecs.push({
+      targetChannelProfile: 'right',
+      sourceChannelProfile: 'right',
+      eqMode,
+      blockRepeatCount: getApoConfigBlockRepeatCount('right', eqMode),
+    });
+  }
+
+  return blockSpecs;
+}
+
 function buildApoConfigText(): string {
   const measurement = getSelectedApoMeasurement();
   const referenceCurve = getSelectedApoReference();
@@ -6404,15 +6511,20 @@ function buildApoConfigText(): string {
     right: 'Right channel',
   };
 
-  const buildFilterBlockLines = (channelProfile: ApoChannelProfile, eqMode: ApoEqMode): string[] => {
-    const enabledFilters = getApoFilters(channelProfile, eqMode).filter((filter) => filter.enabled);
-    const importedPreampDb = getImportedApoPreampDb(channelProfile, eqMode);
+  const buildFilterBlockLines = (
+    targetChannelProfile: ApoChannelProfile,
+    sourceChannelProfile: ApoChannelProfile,
+    eqMode: ApoEqMode,
+  ): string[] => {
+    const enabledFilters = getApoFilters(sourceChannelProfile, eqMode).filter((filter) => filter.enabled);
+    const importedPreampDb = getImportedApoPreampDb(sourceChannelProfile, eqMode);
     const preampDb = importedPreampDb === null
       ? 0
       : roundTo(importedPreampDb, 0.1);
     const blockLines = [
-      `Channel: ${channelTargets[channelProfile]}`,
-      `# ${channelLabels[channelProfile]}`,
+      `Channel: ${channelTargets[targetChannelProfile]}`,
+      `# ${channelLabels[targetChannelProfile]}`,
+      `# Source profile: ${channelLabels[sourceChannelProfile]}`,
       `# Mode: ${eqMode}`,
       `Preamp: ${preampDb.toFixed(1)} dB`,
     ];
@@ -6434,21 +6546,22 @@ function buildApoConfigText(): string {
     return blockLines;
   };
 
-  for (const channelProfile of APO_CHANNEL_PROFILES) {
+  for (const blockSpec of getApoConfigBlockSpecs()) {
     if (lines.length > headerLines.length) {
       lines.push('');
     }
 
-    const eqMode = getApoEqMode(channelProfile);
-    const blockRepeatCount = eqMode === 'parametric'
-      ? getImportedApoBlockRepeatCount(channelProfile, 'parametric') ?? 1
-      : 1;
-
-    for (let index = 0; index < blockRepeatCount; index += 1) {
+    for (let index = 0; index < blockSpec.blockRepeatCount; index += 1) {
       if (index > 0) {
         lines.push('');
       }
-      lines.push(...buildFilterBlockLines(channelProfile, eqMode));
+      lines.push(
+        ...buildFilterBlockLines(
+          blockSpec.targetChannelProfile,
+          blockSpec.sourceChannelProfile,
+          blockSpec.eqMode,
+        ),
+      );
     }
   }
 
@@ -6726,8 +6839,8 @@ function parseImportedEqProfileSet(contents: string): ImportedEqProfileSet {
     return {
       profiles: {
         all: {
-          mode: 'parametric',
-          filters: normalizeImportedEqFilters(graphicFilters, 'parametric'),
+          mode: 'graphic',
+          filters: normalizeImportedEqFilters(graphicFilters, 'graphic'),
           preampDb: parseEqualizerApoPreampDb(contents),
           blockRepeatCount: 1,
         },
@@ -7201,37 +7314,61 @@ async function applyApoConfig(options?: { continueOnBusyFileError?: boolean; ena
   }
 
   if (!status?.installed) {
-    setStatus('Equalizer APO was not detected in the default install path.', 'error');
-    appendLog('Apply APO aborted because Equalizer APO is not installed in the default path.', 'error');
+    setStatus('Equalizer APO was not detected in the configured config location.', 'error');
+    appendLog('Apply APO aborted because Equalizer APO is not installed in the configured config location.', 'error');
     return false;
   }
 
   try {
     setBusy(true);
-    setStatus(enableProfile ? 'Enabling Equalizer APO profile...' : 'Disabling Equalizer APO profile...', 'working');
+    const retryDelaysMs = options?.continueOnBusyFileError ? APO_APPLY_LOCK_RETRY_DELAYS_MS : [];
 
-    const result = await window.freakishEars.applyEqualizerApoConfig({
-      configText: buildApoConfigText(),
-      enableProfile,
-    });
+    for (let attemptIndex = 0; attemptIndex <= retryDelaysMs.length; attemptIndex += 1) {
+      setStatus(enableProfile ? 'Enabling Equalizer APO profile...' : 'Disabling Equalizer APO profile...', 'working');
 
-    await refreshEqualizerApoStatus();
-    setStatus(enableProfile ? 'Equalizer APO profile enabled.' : 'Equalizer APO profile disabled.', 'success');
-    appendLog(`${enableProfile ? 'Enabled' : 'Disabled'} Equalizer APO profile at ${result.profilePath}.`, 'success');
-    showToast({
-      message: enableProfile ? 'Equalizer APO profile enabled' : 'Equalizer APO profile disabled',
-      actionLabel: 'View in Finder',
-      actionPath: result.profilePath,
-    });
-    return true;
+      const result = await window.freakishEars.applyEqualizerApoConfig({
+        configText: buildApoConfigText(),
+        enableProfile,
+      });
+
+      await refreshEqualizerApoStatus();
+
+      if (result.applied) {
+        setStatus(enableProfile ? 'Equalizer APO profile enabled.' : 'Equalizer APO profile disabled.', 'success');
+        appendLog(`${enableProfile ? 'Enabled' : 'Disabled'} Equalizer APO profile at ${result.profilePath}.`, 'success');
+        showToast({
+          message: enableProfile ? 'Equalizer APO profile enabled' : 'Equalizer APO profile disabled',
+          actionLabel: 'View in Finder',
+          actionPath: result.profilePath,
+        });
+        return true;
+      }
+
+      if (result.skippedReason === 'locked' && attemptIndex < retryDelaysMs.length) {
+        const retryDelayMs = retryDelaysMs[attemptIndex];
+        appendLog(
+          `Equalizer APO config files are locked. Retrying in ${(retryDelayMs / 1000).toFixed(retryDelayMs >= 1000 ? 1 : 2)}s (${attemptIndex + 1}/${retryDelaysMs.length}).`,
+        );
+        await wait(retryDelayMs);
+        continue;
+      }
+
+      if (result.skippedReason === 'locked') {
+        const lockedMessage = 'Equalizer APO config files are locked. Close PEACE or other config editors and try again.';
+        setStatus(lockedMessage, 'error');
+        appendLog(lockedMessage, 'error');
+        return false;
+      }
+
+      setStatus('Equalizer APO profile update failed for an unknown reason.', 'error');
+      appendLog('Equalizer APO profile update failed for an unknown reason.', 'error');
+      return false;
+    }
+
+    return false;
   } catch (error) {
     const message = getErrorMessage(error);
     await refreshEqualizerApoStatus();
-
-    if (options?.continueOnBusyFileError && isBusyFileError(error)) {
-      appendLog(`Equalizer APO profile update skipped because the config is locked: ${message}`);
-      return true;
-    }
 
     setStatus(`Equalizer APO profile update failed: ${message}`, 'error');
     appendLog(`Equalizer APO profile update failed: ${message}`, 'error');

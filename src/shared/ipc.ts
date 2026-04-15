@@ -99,6 +99,11 @@ export type ApplyEqualizerApoConfigPayload = {
 export type ApplyEqualizerApoConfigResult = {
   configPath: string;
   profilePath: string;
+  applied: boolean;
+  enableProfile: boolean;
+  configChanged: boolean;
+  profileChanged: boolean;
+  skippedReason: 'locked' | null;
 };
 
 export type DisablePeaceResult = {

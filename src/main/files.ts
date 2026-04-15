@@ -17,9 +17,11 @@ import { BUNDLED_PEACE_PRESETS } from '../shared/peace-presets';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_EQUALIZER_APO_CONFIG_FOLDER = 'C:\\Program Files\\EqualizerAPO\\config';
+const EQUALIZER_APO_CONFIG_FOLDER_ENV_KEY = 'FREAKISH_EARS_EQUALIZER_APO_CONFIG_FOLDER';
 const APO_CONFIG_FILE_NAME = 'config.txt';
 const FREAKISH_EARS_PROFILE_NAME = 'FreakishEars.txt';
 const PEACE_PROFILE_NAME = 'peace.txt';
+const DISABLED_FREAKISH_EARS_PROFILE_TEXT = `# FreakishEars Equalizer APO profile disabled${os.EOL}`;
 
 export function sanitizePathSegment(value: string): string {
   const sanitized = Array.from(value.trim(), (character) => {
@@ -81,7 +83,7 @@ export async function saveFileAtPath(filePath: string, contents: Uint8Array): Pr
 }
 
 export async function getEqualizerApoStatus(): Promise<EqualizerApoStatus> {
-  const configFolderPath = DEFAULT_EQUALIZER_APO_CONFIG_FOLDER;
+  const configFolderPath = resolveEqualizerApoConfigFolderPath();
   const configPath = path.join(configFolderPath, APO_CONFIG_FILE_NAME);
   const profilePath = path.join(configFolderPath, FREAKISH_EARS_PROFILE_NAME);
   const peacePath = path.join(configFolderPath, PEACE_PROFILE_NAME);
@@ -100,9 +102,10 @@ export async function getEqualizerApoStatus(): Promise<EqualizerApoStatus> {
     };
   }
 
-  const [configContents, peaceRunning] = await Promise.all([
+  const [configContents, peaceRunning, peaceInstalled] = await Promise.all([
     readTextIfPresent(configPath),
     isProcessRunning('peace.exe'),
+    pathExists(peacePath),
   ]);
 
   return {
@@ -110,7 +113,7 @@ export async function getEqualizerApoStatus(): Promise<EqualizerApoStatus> {
     configFolderPath,
     configPath,
     profilePath,
-    peaceInstalled: await pathExists(peacePath),
+    peaceInstalled,
     peaceRunning,
     peaceIncludedInConfig: hasActiveInclude(configContents, PEACE_PROFILE_NAME),
     freakishEarsIncludedInConfig: hasActiveInclude(configContents, FREAKISH_EARS_PROFILE_NAME),
@@ -150,30 +153,87 @@ export async function applyEqualizerApoConfig(
   const status = await getEqualizerApoStatus();
 
   if (!status.installed || !status.configFolderPath || !status.configPath || !status.profilePath) {
-    throw new Error('Equalizer APO is not installed in the default config location.');
+    throw new Error(getEqualizerApoUnavailableErrorMessage());
   }
 
-  const configContents = await readTextIfPresent(status.configPath);
-  const priorProfileContents = await readTextIfPresentOrNull(status.profilePath);
+  const [configContents, priorProfileContents] = await Promise.all([
+    readTextIfPresent(status.configPath),
+    readTextIfPresentOrNull(status.profilePath),
+  ]);
 
   await mkdir(status.configFolderPath, { recursive: true });
 
+  const nextProfileContents = buildManagedProfileContents(payload.configText, payload.enableProfile);
   const nextConfigContents = payload.enableProfile
-    ? ensureFreakishEarsInclude(configContents)
-    : removeFreakishEarsInclude(configContents);
+    ? ensureInclude(configContents, FREAKISH_EARS_PROFILE_NAME)
+    : removeInclude(configContents, FREAKISH_EARS_PROFILE_NAME);
+  const profileChanged = priorProfileContents !== nextProfileContents;
+  const configChanged = configContents !== nextConfigContents;
 
-  await writeFile(status.profilePath, payload.configText, 'utf8');
+  if (!profileChanged && !configChanged) {
+    return {
+      configPath: status.configPath,
+      profilePath: status.profilePath,
+      applied: true,
+      enableProfile: payload.enableProfile,
+      configChanged: false,
+      profileChanged: false,
+      skippedReason: null,
+    };
+  }
 
   try {
-    await writeFile(status.configPath, nextConfigContents, 'utf8');
+    if (profileChanged) {
+      await writeFile(status.profilePath, nextProfileContents, 'utf8');
+    }
   } catch (error) {
-    await restorePreviousProfileContents(status.profilePath, priorProfileContents);
+    if (isBusyFileError(error)) {
+      return {
+        configPath: status.configPath,
+        profilePath: status.profilePath,
+        applied: false,
+        enableProfile: payload.enableProfile,
+        configChanged,
+        profileChanged,
+        skippedReason: 'locked',
+      };
+    }
+
+    throw error;
+  }
+
+  try {
+    if (configChanged) {
+      await writeFile(status.configPath, nextConfigContents, 'utf8');
+    }
+  } catch (error) {
+    if (profileChanged) {
+      await restorePreviousProfileContents(status.profilePath, priorProfileContents);
+    }
+
+    if (isBusyFileError(error)) {
+      return {
+        configPath: status.configPath,
+        profilePath: status.profilePath,
+        applied: false,
+        enableProfile: payload.enableProfile,
+        configChanged,
+        profileChanged,
+        skippedReason: 'locked',
+      };
+    }
+
     throw error;
   }
 
   return {
     configPath: status.configPath,
     profilePath: status.profilePath,
+    applied: true,
+    enableProfile: payload.enableProfile,
+    configChanged,
+    profileChanged,
+    skippedReason: null,
   };
 }
 
@@ -181,7 +241,7 @@ export async function disablePeace(): Promise<{ disabled: boolean; processKilled
   const status = await getEqualizerApoStatus();
 
   if (!status.installed || !status.configPath) {
-    throw new Error('Equalizer APO is not installed in the default config location.');
+    throw new Error(getEqualizerApoUnavailableErrorMessage());
   }
 
   const configContents = await readTextIfPresent(status.configPath);
@@ -193,12 +253,12 @@ export async function disablePeace(): Promise<{ disabled: boolean; processKilled
       await execFileAsync('taskkill', ['/IM', 'Peace.exe', '/F']);
       processKilled = true;
     } catch {
-      // Process might have already exited
+      // Process might have already exited.
     }
   }
 
   if (peaceWasIncluded) {
-    const nextConfigContents = removePeaceInclude(configContents);
+    const nextConfigContents = removeInclude(configContents, PEACE_PROFILE_NAME);
     await writeFile(status.configPath, nextConfigContents, 'utf8');
     return { disabled: true, processKilled };
   }
@@ -206,22 +266,88 @@ export async function disablePeace(): Promise<{ disabled: boolean; processKilled
   return { disabled: false, processKilled };
 }
 
-function removePeaceInclude(contents: string): string {
-  const nextLines = contents
-    .split(/\r?\n/u)
-    .filter((line) => !/^Include:\s*peace\.txt$/iu.test(line.trim()))
-    .filter((line, index, allLines) => !(index === allLines.length - 1 && line === ''));
-
-  return nextLines.length > 0 ? `${nextLines.join(os.EOL)}${os.EOL}` : '';
+function resolveEqualizerApoConfigFolderPath(): string {
+  const overridePath = process.env[EQUALIZER_APO_CONFIG_FOLDER_ENV_KEY]?.trim();
+  return overridePath ? path.resolve(overridePath) : DEFAULT_EQUALIZER_APO_CONFIG_FOLDER;
 }
 
-function removeFreakishEarsInclude(contents: string): string {
-  const nextLines = contents
-    .split(/\r?\n/u)
-    .filter((line) => !/^Include:\s*FreakishEars\.txt$/iu.test(line.trim()))
-    .filter((line, index, allLines) => !(index === allLines.length - 1 && line === ''));
+function getEqualizerApoUnavailableErrorMessage(): string {
+  return `Equalizer APO is not installed in the configured config location (${resolveEqualizerApoConfigFolderPath()}).`;
+}
 
-  return nextLines.length > 0 ? `${nextLines.join(os.EOL)}${os.EOL}` : '';
+function buildManagedProfileContents(configText: string, enableProfile: boolean): string {
+  if (!enableProfile) {
+    return DISABLED_FREAKISH_EARS_PROFILE_TEXT;
+  }
+
+  const normalizedContents = configText
+    .replace(/\r\n/gu, '\n')
+    .replace(/\r/gu, '\n')
+    .trim();
+
+  return normalizedContents.length > 0
+    ? `${normalizedContents.split('\n').join(os.EOL)}${os.EOL}`
+    : DISABLED_FREAKISH_EARS_PROFILE_TEXT;
+}
+
+function splitConfigLines(contents: string): string[] {
+  return contents
+    .split(/\r?\n/u)
+    .filter((line, index, allLines) => !(index === allLines.length - 1 && line === ''));
+}
+
+function joinConfigLines(lines: string[]): string {
+  return lines.length > 0 ? `${lines.join(os.EOL)}${os.EOL}` : '';
+}
+
+function ensureInclude(contents: string, fileName: string): string {
+  const nextLines = removeMatchingIncludeLines(splitConfigLines(contents), fileName);
+  nextLines.push(`Include: ${fileName}`);
+  return joinConfigLines(nextLines);
+}
+
+function removeInclude(contents: string, fileName: string): string {
+  return joinConfigLines(removeMatchingIncludeLines(splitConfigLines(contents), fileName));
+}
+
+function removeMatchingIncludeLines(lines: string[], fileName: string): string[] {
+  return lines.filter((line) => !matchesIncludeTarget(line, fileName));
+}
+
+function matchesIncludeTarget(line: string, fileName: string): boolean {
+  const includeTarget = parseIncludeTarget(line);
+  if (!includeTarget) {
+    return false;
+  }
+
+  const normalizedTarget = includeTarget.replace(/\//gu, '\\');
+  return path.win32.basename(normalizedTarget).toLowerCase() === fileName.toLowerCase();
+}
+
+function parseIncludeTarget(line: string): string | null {
+  const trimmedLine = line.trim();
+  if (trimmedLine.length === 0 || trimmedLine.startsWith('#') || trimmedLine.startsWith(';')) {
+    return null;
+  }
+
+  const match = trimmedLine.match(/^Include:\s*(.+?)\s*$/iu);
+  if (!match) {
+    return null;
+  }
+
+  return stripWrappingQuotes(match[1].trim());
+}
+
+function stripWrappingQuotes(value: string): string {
+  if (
+    value.length >= 2 &&
+    ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'")))
+  ) {
+    return value.slice(1, -1).trim();
+  }
+
+  return value;
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -262,24 +388,22 @@ async function restorePreviousProfileContents(
 }
 
 function hasActiveInclude(contents: string, fileName: string): boolean {
-  return contents
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .some((line) => new RegExp(`^Include:\\s*${escapeRegExp(fileName)}$`, 'iu').test(line));
+  return splitConfigLines(contents).some((line) => matchesIncludeTarget(line, fileName));
 }
 
-function ensureFreakishEarsInclude(contents: string): string {
-  const lines = contents
-    .split(/\r?\n/u)
-    .filter((line, index, allLines) => !(index === allLines.length - 1 && line === ''));
+function isBusyFileError(error: unknown): boolean {
+  const errorCode =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : '';
+  const message = error instanceof Error ? error.message : String(error);
 
-  if (lines.some((line) => /^Include:\s*FreakishEars\.txt$/iu.test(line.trim()))) {
-    return `${lines.join(os.EOL)}${os.EOL}`;
-  }
-
-  const nextLines = [...lines];
-  nextLines.push('Include: FreakishEars.txt');
-  return `${nextLines.join(os.EOL)}${os.EOL}`;
+  return errorCode === 'EBUSY' ||
+    errorCode === 'EPERM' ||
+    errorCode === 'EACCES' ||
+    /\bEBUSY\b/u.test(message) ||
+    /resource busy or locked/iu.test(message) ||
+    /used by another process/iu.test(message);
 }
 
 async function isProcessRunning(imageName: string): Promise<boolean> {
