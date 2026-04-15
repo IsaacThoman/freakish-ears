@@ -12,6 +12,7 @@ import type {
 
 const SOX_RECORDER_LEAD_IN_MS = 200;
 const SOX_WAVEAUDIO_DEVICE = 'default';
+const SOX_PLAYBACK_PADDING_SECONDS = 0.05;
 
 export async function runSoxMeasurement(
   payload: RunSoxMeasurementPayload,
@@ -21,7 +22,7 @@ export async function runSoxMeasurement(
   try {
     const sweepPath = path.join(tempDirectory, 'sweep.wav');
     const recordingPath = path.join(tempDirectory, 'recording.wav');
-    await synthesizeSweepWav(sweepPath, payload);
+    const sweep = await synthesizeSweepWav(sweepPath, payload);
 
     const recordingDurationSeconds =
       payload.preRollSeconds + payload.durationSeconds + payload.postRollSeconds + 0.25;
@@ -68,11 +69,6 @@ export async function runSoxMeasurement(
 
     await recorder.completion;
 
-    const sweepWav = new Uint8Array(await readFile(sweepPath));
-    const sweep = selectChannelSamples(
-      decode16BitPcmWavChannels(sweepWav),
-      payload.outputChannel,
-    );
     const recordingWav = new Uint8Array(await readFile(recordingPath));
     const recording = selectChannelSamples(
       decode16BitPcmWavChannels(recordingWav),
@@ -94,7 +90,7 @@ export async function runSoxMeasurement(
 async function synthesizeSweepWav(
   sweepPath: string,
   payload: RunSoxMeasurementPayload,
-): Promise<void> {
+): Promise<Float32Array> {
   const monoSweep = renderLogSweep(
     payload.sampleRate,
     payload.durationSeconds,
@@ -102,9 +98,13 @@ async function synthesizeSweepWav(
     payload.endFrequency,
     payload.sweepLevelDb,
   );
-  const channels = createOutputChannels(monoSweep, payload.outputChannel);
+  const channels = createOutputChannels(
+    padSweepWithSilence(monoSweep, payload.sampleRate, SOX_PLAYBACK_PADDING_SECONDS),
+    payload.outputChannel,
+  );
   const wavBytes = encodeMultichannelWavFile(channels, payload.sampleRate);
   await writeFile(sweepPath, wavBytes);
+  return monoSweep;
 }
 
 function decode16BitPcmWavChannels(wavBytes: Uint8Array): Float32Array[] {
@@ -242,6 +242,22 @@ function createOutputChannels(
   }
 
   return [left, right];
+}
+
+function padSweepWithSilence(
+  sweep: Float32Array,
+  sampleRate: number,
+  paddingSeconds: number,
+): Float32Array {
+  const paddingSampleCount = Math.max(0, Math.round(sampleRate * paddingSeconds));
+
+  if (paddingSampleCount === 0) {
+    return sweep;
+  }
+
+  const padded = new Float32Array(sweep.length + paddingSampleCount * 2);
+  padded.set(sweep, paddingSampleCount);
+  return padded;
 }
 
 function readAscii(view: DataView, offset: number, length: number): string {

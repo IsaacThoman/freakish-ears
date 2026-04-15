@@ -158,7 +158,9 @@ export async function applyEqualizerApoConfig(
   await mkdir(status.configFolderPath, { recursive: true });
   await writeFile(status.profilePath, payload.configText, 'utf8');
 
-  const nextConfigContents = ensureFreakishEarsInclude(configContents);
+  const nextConfigContents = payload.enableProfile
+    ? ensureFreakishEarsInclude(configContents)
+    : removeFreakishEarsInclude(configContents);
   await writeFile(status.configPath, nextConfigContents, 'utf8');
 
   return {
@@ -200,6 +202,15 @@ function removePeaceInclude(contents: string): string {
   const nextLines = contents
     .split(/\r?\n/u)
     .filter((line) => !/^Include:\s*peace\.txt$/iu.test(line.trim()))
+    .filter((line, index, allLines) => !(index === allLines.length - 1 && line === ''));
+
+  return nextLines.length > 0 ? `${nextLines.join(os.EOL)}${os.EOL}` : '';
+}
+
+function removeFreakishEarsInclude(contents: string): string {
+  const nextLines = contents
+    .split(/\r?\n/u)
+    .filter((line) => !/^Include:\s*FreakishEars\.txt$/iu.test(line.trim()))
     .filter((line, index, allLines) => !(index === allLines.length - 1 && line === ''));
 
   return nextLines.length > 0 ? `${nextLines.join(os.EOL)}${os.EOL}` : '';

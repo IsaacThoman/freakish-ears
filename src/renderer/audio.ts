@@ -31,9 +31,17 @@ export async function recordSweepMeasurement(settings: {
   });
 
   const audioContext = new AudioContext({
-    latencyHint: 'interactive',
+    latencyHint: 'playback',
     sampleRate: settings.sampleRate,
   });
+  const sinkAudioContext = audioContext as AudioContext & {
+    setSinkId?: (sinkId: string) => Promise<void>;
+  };
+
+  if (settings.outputDeviceId && sinkAudioContext.setSinkId) {
+    await sinkAudioContext.setSinkId(settings.outputDeviceId);
+  }
+
   const sampleRate = audioContext.sampleRate;
   const sweep = await renderLogSweep(
     sampleRate,
@@ -45,7 +53,6 @@ export async function recordSweepMeasurement(settings: {
   const processorNode = audioContext.createScriptProcessor(4096, 2, 1);
   const mutedGain = audioContext.createGain();
   const playbackGain = audioContext.createGain();
-  const playbackDestination = audioContext.createMediaStreamDestination();
   mutedGain.gain.value = 0;
   playbackGain.gain.value = Math.pow(10, settings.sweepLevelDb / 20);
 
@@ -61,7 +68,7 @@ export async function recordSweepMeasurement(settings: {
   sourceNode.connect(processorNode);
   processorNode.connect(mutedGain);
   mutedGain.connect(audioContext.destination);
-  playbackGain.connect(playbackDestination);
+  playbackGain.connect(audioContext.destination);
 
   const sweepBuffer = audioContext.createBuffer(2, sweep.length, sampleRate);
   writeOutputSweepChannels(sweepBuffer, sweep, settings.outputChannel);
@@ -70,10 +77,18 @@ export async function recordSweepMeasurement(settings: {
   sweepNode.buffer = sweepBuffer;
   sweepNode.connect(playbackGain);
 
-  const outputElement = await createOutputPlaybackElement(
-    playbackDestination.stream,
-    settings.outputDeviceId,
-  );
+  const outputElement =
+    settings.outputDeviceId && !sinkAudioContext.setSinkId
+      ? await createOutputPlaybackElement(settings.outputDeviceId)
+      : null;
+
+  if (outputElement) {
+    playbackGain.disconnect();
+    const playbackDestination = audioContext.createMediaStreamDestination();
+    playbackGain.connect(playbackDestination);
+    outputElement.srcObject = playbackDestination.stream;
+    await outputElement.play();
+  }
 
   await audioContext.resume();
 
@@ -88,8 +103,10 @@ export async function recordSweepMeasurement(settings: {
   mutedGain.disconnect();
   playbackGain.disconnect();
   sourceNode.disconnect();
-  outputElement.pause();
-  outputElement.srcObject = null;
+  outputElement?.pause();
+  if (outputElement) {
+    outputElement.srcObject = null;
+  }
 
   for (const track of stream.getTracks()) {
     track.stop();
@@ -214,7 +231,6 @@ function flattenChunks(chunks: Float32Array[], totalLength: number): Float32Arra
 }
 
 async function createOutputPlaybackElement(
-  stream: MediaStream,
   outputDeviceId: string,
 ): Promise<HTMLAudioElement> {
   const audioElement = new Audio();
@@ -224,7 +240,6 @@ async function createOutputPlaybackElement(
 
   audioElement.autoplay = true;
   audioElement.volume = 1;
-  audioElement.srcObject = stream;
 
   if (outputDeviceId) {
     if (!sinkAudioElement.setSinkId) {
@@ -234,6 +249,5 @@ async function createOutputPlaybackElement(
     await sinkAudioElement.setSinkId(outputDeviceId);
   }
 
-  await audioElement.play();
   return audioElement;
 }

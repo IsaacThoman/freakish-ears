@@ -79,6 +79,7 @@ import {
 } from './renderer/constants';
 import { analyzeMeasurement, encodeWavFile, recordSweepMeasurement } from './renderer/audio';
 import {
+  applyMicrophoneCalibration,
   buildMeasurementCsv,
   buildMeasurementJson,
   buildRewMeasurementText,
@@ -86,6 +87,7 @@ import {
   createLoadedMeasurement,
   createMeasurementFromAnalysis,
   getMeasurementPointsForDisplay,
+  normalizeImportedMeasurement,
   parseImportedMeasurementFile,
 } from './renderer/measurements';
 import {
@@ -128,6 +130,7 @@ import type {
   LogTone,
   MeasurementBackend,
   MeasurementChannelSelection,
+  MeasurementImport,
   MeasurementSmoothingMode,
   ReferenceCurve,
   StatusTone,
@@ -241,7 +244,6 @@ app.innerHTML = `
         <div class="field">
           <label for="inputChannelSelect">Input Channel</label>
           <select id="inputChannelSelect">
-            <option value="both">Both</option>
             <option value="left">Left</option>
             <option value="right">Right</option>
           </select>
@@ -249,6 +251,20 @@ app.innerHTML = `
 
         <div class="field">
           <select id="microphoneSelect"></select>
+        </div>
+
+        <div class="folder-row">
+          <button id="importLeftCalibrationButton" class="btn btn-secondary" type="button">
+            Left Cal
+          </button>
+          <div id="leftCalibrationValue" class="folder-chip">None</div>
+        </div>
+
+        <div class="folder-row">
+          <button id="importRightCalibrationButton" class="btn btn-secondary" type="button">
+            Right Cal
+          </button>
+          <div id="rightCalibrationValue" class="folder-chip">None</div>
         </div>
 
         <button id="refreshDevicesButton" class="btn btn-secondary" type="button">
@@ -499,6 +515,16 @@ app.innerHTML = `
             </div>
           </div>
           <div class="apo-controls-bar">
+            <div class="apo-apply-anchor">
+              <div id="apoEnableToggle" class="segmented-toggle apo-enable-toggle" role="tablist" aria-label="EQ enable selector">
+                <button id="apoEnableOffButton" class="segmented-toggle-option" type="button" data-apo-enabled="false" role="tab" aria-selected="true">EQ Off</button>
+                <button id="apoEnableOnButton" class="segmented-toggle-option" type="button" data-apo-enabled="true" role="tab" aria-selected="false">EQ On</button>
+                <span class="segmented-toggle-thumb" aria-hidden="true"></span>
+              </div>
+              <div id="apoApplyWarning" class="apo-apply-warning" hidden>
+                <span>PEACE is running</span>
+              </div>
+            </div>
             <div id="apoEqModeToggle" class="segmented-toggle" role="tablist" aria-label="EQ mode selector">
               <button id="apoEqModeParametricButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="parametric" role="tab" aria-selected="true">Parametric</button>
               <button id="apoEqModeGraphicButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="graphic" role="tab" aria-selected="false">Graphic</button>
@@ -512,6 +538,8 @@ app.innerHTML = `
 
           <input id="measurementFileInput" type="file" accept=".txt,.csv,.json,.targetcurve,text/plain,application/json" multiple hidden />
           <input id="referenceFileInput" type="file" accept=".txt,.csv,.targetcurve,text/plain" multiple hidden />
+          <input id="leftCalibrationFileInput" type="file" accept=".txt,.csv,.json,.targetcurve,text/plain,application/json" hidden />
+          <input id="rightCalibrationFileInput" type="file" accept=".txt,.csv,.json,.targetcurve,text/plain,application/json" hidden />
           <input id="configFileInput" type="file" accept=".json,application/json,text/plain" hidden />
           <input id="apoConfigFileInput" type="file" accept=".txt,.peace,.peq,.ini,text/plain" hidden />
 
@@ -561,14 +589,6 @@ app.innerHTML = `
               <button id="exportApoConfigButton" class="btn btn-secondary" type="button">
                 Export EQ
               </button>
-              <div class="apo-apply-anchor">
-                <button id="applyApoConfigButton" class="btn btn-secondary" type="button">
-                  Apply APO
-                </button>
-                <div id="apoApplyWarning" class="apo-apply-warning" hidden>
-                  <span>PEACE is running</span>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -614,6 +634,10 @@ const microphoneSelect = getElement<HTMLSelectElement>('microphoneSelect');
 const measurementBackendSelect = getElement<HTMLSelectElement>('measurementBackendSelect');
 const sampleRateSelect = getElement<HTMLSelectElement>('sampleRateSelect');
 const inputChannelSelect = getElement<HTMLSelectElement>('inputChannelSelect');
+const importLeftCalibrationButton = getElement<HTMLButtonElement>('importLeftCalibrationButton');
+const importRightCalibrationButton = getElement<HTMLButtonElement>('importRightCalibrationButton');
+const leftCalibrationValue = getElement<HTMLDivElement>('leftCalibrationValue');
+const rightCalibrationValue = getElement<HTMLDivElement>('rightCalibrationValue');
 const refreshDevicesButton = getElement<HTMLButtonElement>('refreshDevicesButton');
 const chooseFolderButton = getElement<HTMLButtonElement>('chooseFolderButton');
 const saveConfigButton = getElement<HTMLButtonElement>('saveConfigButton');
@@ -670,6 +694,8 @@ const smoothingModeSelect = getElement<HTMLSelectElement>('smoothingModeSelect')
 
 const measurementFileInput = getElement<HTMLInputElement>('measurementFileInput');
 const referenceFileInput = getElement<HTMLInputElement>('referenceFileInput');
+const leftCalibrationFileInput = getElement<HTMLInputElement>('leftCalibrationFileInput');
+const rightCalibrationFileInput = getElement<HTMLInputElement>('rightCalibrationFileInput');
 const configFileInput = getElement<HTMLInputElement>('configFileInput');
 const apoConfigFileInput = getElement<HTMLInputElement>('apoConfigFileInput');
 const plotsContainer = getElement<HTMLDivElement>('plotsContainer');
@@ -687,7 +713,9 @@ const selectApoPresetButton = getElement<HTMLButtonElement>('selectApoPresetButt
 const apoPresetMenu = getElement<HTMLDivElement>('apoPresetMenu');
 const importApoConfigButton = getElement<HTMLButtonElement>('importApoConfigButton');
 const exportApoConfigButton = getElement<HTMLButtonElement>('exportApoConfigButton');
-const applyApoConfigButton = getElement<HTMLButtonElement>('applyApoConfigButton');
+const apoEnableToggle = getElement<HTMLDivElement>('apoEnableToggle');
+const apoEnableOffButton = getElement<HTMLButtonElement>('apoEnableOffButton');
+const apoEnableOnButton = getElement<HTMLButtonElement>('apoEnableOnButton');
 const apoApplyWarning = getElement<HTMLDivElement>('apoApplyWarning');
 const apoMeasurementSelect = getElement<HTMLSelectElement>('apoMeasurementSelect');
 const apoReferenceSelect = getElement<HTMLSelectElement>('apoReferenceSelect');
@@ -714,6 +742,8 @@ const state: AppState = {
   smoothingMode: readStoredSmoothingMode(),
   measurements: [],
   referenceCurves: [],
+  leftMicrophoneCalibration: null,
+  rightMicrophoneCalibration: null,
   focusedMeasurementId: null,
   nextMeasurementIndex: 1,
   nextReferenceIndex: 1,
@@ -952,6 +982,14 @@ importConfigButton.addEventListener('click', () => {
   configFileInput.click();
 });
 
+importLeftCalibrationButton.addEventListener('click', () => {
+  leftCalibrationFileInput.click();
+});
+
+importRightCalibrationButton.addEventListener('click', () => {
+  rightCalibrationFileInput.click();
+});
+
 measurementBackendSelect.addEventListener('change', () => {
   state.measurementBackend = getSelectedMeasurementBackend();
   localStorage.setItem(MEASUREMENT_BACKEND_STORAGE_KEY, state.measurementBackend);
@@ -996,6 +1034,24 @@ referenceFileInput.addEventListener('change', () => {
 
   if (files.length > 0) {
     void importReferenceFiles(files);
+  }
+});
+
+leftCalibrationFileInput.addEventListener('change', () => {
+  const file = leftCalibrationFileInput.files?.[0] ?? null;
+  leftCalibrationFileInput.value = '';
+
+  if (file) {
+    void importMicrophoneCalibrationFile(file, 'left');
+  }
+});
+
+rightCalibrationFileInput.addEventListener('change', () => {
+  const file = rightCalibrationFileInput.files?.[0] ?? null;
+  rightCalibrationFileInput.value = '';
+
+  if (file) {
+    void importMicrophoneCalibrationFile(file, 'right');
   }
 });
 
@@ -1377,8 +1433,18 @@ exportApoConfigButton.addEventListener('click', () => {
   void exportApoConfig();
 });
 
-applyApoConfigButton.addEventListener('click', () => {
-  void applyApoConfig();
+apoEnableToggle.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const enableValue = target.dataset.apoEnabled;
+  if (enableValue !== 'true' && enableValue !== 'false') {
+    return;
+  }
+
+  void applyApoConfig({ enableProfile: enableValue === 'true' });
 });
 
 apoEqModeToggle.addEventListener('click', (event) => {
@@ -1559,6 +1625,7 @@ dynamicProportionalPToggle.checked = state.dynamicProportionalP;
 automationDelayInput.value = state.automationDelaySeconds.toFixed(1);
 initializeMeasurementConfigFromStorage();
 hideToast();
+updateMicrophoneCalibrationLabels();
 updateMeasurementActionState();
 updateAutomationUi();
 renderApoSection();
@@ -1581,6 +1648,8 @@ function setBusy(isBusy: boolean): void {
 
   sampleRateSelect.disabled = isBusy;
   inputChannelSelect.disabled = isBusy;
+  importLeftCalibrationButton.disabled = isBusy;
+  importRightCalibrationButton.disabled = isBusy;
   microphoneSelect.disabled = isBusy;
   refreshDevicesButton.disabled = isBusy;
   chooseFolderButton.disabled = isBusy;
@@ -1597,6 +1666,8 @@ function setBusy(isBusy: boolean): void {
   runAutomationButton.disabled = isBusy && !state.automationRunning;
   measurementFileInput.disabled = isBusy;
   referenceFileInput.disabled = isBusy;
+  leftCalibrationFileInput.disabled = isBusy;
+  rightCalibrationFileInput.disabled = isBusy;
   configFileInput.disabled = isBusy;
   apoConfigFileInput.disabled = isBusy;
   measurementBackendSelect.disabled = isBusy;
@@ -1620,7 +1691,8 @@ function setBusy(isBusy: boolean): void {
   selectApoPresetButton.disabled = isBusy || state.peacePresets.length === 0;
   importApoConfigButton.disabled = isBusy;
   exportApoConfigButton.disabled = isBusy;
-  applyApoConfigButton.disabled = isBusy;
+  apoEnableOffButton.disabled = isBusy;
+  apoEnableOnButton.disabled = isBusy;
   apoEqModeParametricButton.disabled = isBusy;
   apoEqModeGraphicButton.disabled = isBusy;
   apoMeasurementSelect.disabled = isBusy;
@@ -1672,9 +1744,18 @@ function updateSelectedFolder(): void {
   }
 }
 
+function updateMicrophoneCalibrationLabels(): void {
+  leftCalibrationValue.textContent = state.leftMicrophoneCalibration?.name ?? 'None';
+  leftCalibrationValue.title = state.leftMicrophoneCalibration?.sourcePath ?? '';
+  rightCalibrationValue.textContent = state.rightMicrophoneCalibration?.name ?? 'None';
+  rightCalibrationValue.title = state.rightMicrophoneCalibration?.sourcePath ?? '';
+}
+
 function updateMeasurementActionState(): void {
   importMeasurementsButton.disabled = state.busy;
   importReferenceButton.disabled = state.busy;
+  importLeftCalibrationButton.disabled = state.busy;
+  importRightCalibrationButton.disabled = state.busy;
   saveConfigButton.disabled = state.busy;
   importConfigButton.disabled = state.busy;
   runMeasurementButton.disabled = state.busy || state.automationRunning;
@@ -1693,7 +1774,9 @@ function updateMeasurementActionState(): void {
   exportApoConfigButton.disabled = state.busy || !state.outputFolder;
   const enabledFilterCount = getActiveApoFilters().filter((filter) => filter.enabled).length;
   const apoInstalled = state.equalizerApoStatus?.installed ?? false;
-  applyApoConfigButton.disabled = state.busy || enabledFilterCount === 0 || !apoInstalled;
+  const apoProfileEnabled = state.equalizerApoStatus?.freakishEarsIncludedInConfig ?? false;
+  apoEnableOffButton.disabled = state.busy || !apoInstalled;
+  apoEnableOnButton.disabled = (state.busy || !apoInstalled || enabledFilterCount === 0) && !apoProfileEnabled;
 }
 
 function updateMeasurementBackendUi(): void {
@@ -1897,7 +1980,7 @@ function resetUserInputsToDefaults(): void {
   sampleRateSelect.value = String(DEFAULT_SAMPLE_RATE);
   localStorage.setItem(SAMPLE_RATE_STORAGE_KEY, sampleRateSelect.value);
 
-  inputChannelSelect.value = 'both';
+  inputChannelSelect.value = 'left';
   outputChannelSelect.value = 'both';
   localStorage.setItem(INPUT_CHANNEL_STORAGE_KEY, inputChannelSelect.value);
   localStorage.setItem(OUTPUT_CHANNEL_STORAGE_KEY, outputChannelSelect.value);
@@ -2214,7 +2297,7 @@ async function runMeasurement(options?: {
   const outputFolder = state.outputFolder;
   const measurementBackend = getSelectedMeasurementBackend();
   const sampleRate = getSelectedSampleRate();
-  const inputChannel = getSelectedChannel(inputChannelSelect);
+  const inputChannel = getSelectedInputChannel();
   const outputChannel = getSelectedChannel(outputChannelSelect);
   const deviceId = microphoneSelect.value;
   const outputDeviceId = outputSelect.value;
@@ -2325,6 +2408,16 @@ async function runMeasurement(options?: {
     appendLog('Captured raw PCM. Aligning the sweep and computing the response.');
 
     const analysis = analyzeMeasurement(capture, startFrequency, endFrequency);
+    const activeMicrophoneCalibration = getActiveMicrophoneCalibration(inputChannel);
+    const calibratedAnalysis = activeMicrophoneCalibration
+      ? applyMicrophoneCalibration(analysis, activeMicrophoneCalibration.points)
+      : analysis;
+
+    if (activeMicrophoneCalibration) {
+      appendLog(
+        `Applied ${inputChannel} microphone calibration from ${activeMicrophoneCalibration.name} to this measurement.`,
+      );
+    }
 
     if (options?.discardIf?.()) {
       setStatus('Measurement stopped. Discarded the current sweep result.', 'idle');
@@ -2334,7 +2427,7 @@ async function runMeasurement(options?: {
 
     const sessionName = `measurement-${formatTimestampForPath(new Date())}`;
     const measurementJson = buildMeasurementJson({
-      analysis,
+      analysis: calibratedAnalysis,
       capture,
       microphoneLabel,
       outputDeviceLabel,
@@ -2347,12 +2440,14 @@ async function runMeasurement(options?: {
         sampleRate,
         inputChannel,
         outputChannel,
+        microphoneCalibrationName: activeMicrophoneCalibration?.name ?? null,
+        microphoneCalibrationSourcePath: activeMicrophoneCalibration?.sourcePath ?? null,
       },
       preRollSeconds: PRE_ROLL_SECONDS,
       postRollSeconds: POST_ROLL_SECONDS,
       splOffsetDb: state.splOffsetDb,
     });
-    const measurementCsv = buildMeasurementCsv(analysis.points);
+    const measurementCsv = buildMeasurementCsv(calibratedAnalysis.points);
 
     const saveResult = await window.freakishEars.saveMeasurementSession({
       folderPath: outputFolder,
@@ -2380,7 +2475,10 @@ async function runMeasurement(options?: {
       return null;
     }
 
-    const measurement = takeMeasurementFromAnalysis(analysis, saveResult.sessionDirectory);
+    const measurement = takeMeasurementFromAnalysis(
+      calibratedAnalysis,
+      saveResult.sessionDirectory,
+    );
     addMeasurement(measurement);
     updateLatestAutomationToleranceStatus(measurement, getSelectedApoReference());
     setStatus('Measurement complete.', 'success');
@@ -2411,6 +2509,14 @@ function takeReferenceCurve(
   const referenceCurve = createReferenceCurve(importedMeasurement, state.nextReferenceIndex);
   state.nextReferenceIndex += 1;
   return referenceCurve;
+}
+
+function getActiveMicrophoneCalibration(
+  inputChannel: 'left' | 'right',
+): MeasurementImport | null {
+  return inputChannel === 'right'
+    ? state.rightMicrophoneCalibration
+    : state.leftMicrophoneCalibration;
 }
 
 function takeMeasurementFromAnalysis(
@@ -2799,7 +2905,7 @@ function initializeMeasurementConfigFromStorage(): void {
     syncVolumeControls('slider');
   }
 
-  if (storedInputChannel === 'left' || storedInputChannel === 'right' || storedInputChannel === 'both') {
+  if (storedInputChannel === 'left' || storedInputChannel === 'right') {
     inputChannelSelect.value = storedInputChannel;
   }
 
@@ -2836,7 +2942,7 @@ function persistActiveConfiguration(): void {
     backend: getSelectedMeasurementBackend(),
     measurementKeepCount: state.measurementKeepCount,
     sampleRate: getSelectedSampleRate(),
-    inputChannel: getSelectedChannel(inputChannelSelect),
+    inputChannel: getSelectedInputChannel(),
     outputChannel: getSelectedChannel(outputChannelSelect),
     inputDeviceId: getPreferredInputDeviceId(),
     outputDeviceId: getPreferredOutputDeviceId(),
@@ -2875,6 +2981,8 @@ function persistActiveConfiguration(): void {
     apoMaxCutDb: state.apoMaxCutDb,
     parametricApoFilters: state.parametricApoFilters,
     graphicApoFilters: state.graphicApoFilters,
+    leftMicrophoneCalibration: state.leftMicrophoneCalibration,
+    rightMicrophoneCalibration: state.rightMicrophoneCalibration,
   };
 
   localStorage.setItem(ACTIVE_CONFIG_STORAGE_KEY, JSON.stringify(payload));
@@ -2953,6 +3061,43 @@ async function importReferenceFiles(files: File[]): Promise<void> {
   }
 }
 
+async function importMicrophoneCalibrationFile(
+  file: File,
+  channel: 'left' | 'right',
+): Promise<void> {
+  if (state.busy) {
+    return;
+  }
+
+  try {
+    setBusy(true);
+    setStatus(`Importing ${channel} microphone calibration...`, 'working');
+
+    const contents = await file.text();
+    const importedCalibration = parseImportedMeasurementFile(file, contents);
+
+    if (channel === 'left') {
+      state.leftMicrophoneCalibration = importedCalibration;
+    } else {
+      state.rightMicrophoneCalibration = importedCalibration;
+    }
+
+    updateMicrophoneCalibrationLabels();
+    persistActiveConfiguration();
+    setStatus(`Imported ${channel} microphone calibration.`, 'success');
+    appendLog(
+      `Imported ${channel} microphone calibration from ${file.name}. Future ${channel} input measurements will be corrected using this curve.`,
+      'success',
+    );
+  } catch (error) {
+    const message = getErrorMessage(error);
+    setStatus(`Unable to import ${channel} microphone calibration: ${message}`, 'error');
+    appendLog(`Calibration import failed for ${file.name}: ${message}`, 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function saveConfiguration(): Promise<void> {
   if (state.busy) {
     return;
@@ -2967,7 +3112,7 @@ async function saveConfiguration(): Promise<void> {
       backend: getSelectedMeasurementBackend(),
       measurementKeepCount: state.measurementKeepCount,
       sampleRate: getSelectedSampleRate(),
-      inputChannel: getSelectedChannel(inputChannelSelect),
+      inputChannel: getSelectedInputChannel(),
       outputChannel: getSelectedChannel(outputChannelSelect),
       inputDeviceId: microphoneSelect.value,
       inputDeviceLabel: microphoneSelect.selectedOptions[0]?.textContent ?? null,
@@ -2994,6 +3139,8 @@ async function saveConfiguration(): Promise<void> {
       automationToleranceMaxAcceptableErrorWidthHz: state.automationToleranceMaxAcceptableErrorWidthHz,
       automationRegressionLimit: state.automationRegressionLimit,
       apoFilterListPageSize: state.apoFilterListPageSize,
+      leftMicrophoneCalibration: state.leftMicrophoneCalibration,
+      rightMicrophoneCalibration: state.rightMicrophoneCalibration,
     };
 
     const saveResult = await window.freakishEars.saveFileAs({
@@ -3080,7 +3227,7 @@ function applyImportedConfiguration(
   inputChannelSelect.value =
     config.inputChannel === 'left' || config.inputChannel === 'right'
       ? String(config.inputChannel)
-      : 'both';
+      : 'left';
   localStorage.setItem(INPUT_CHANNEL_STORAGE_KEY, inputChannelSelect.value);
   outputChannelSelect.value =
     config.outputChannel === 'left' || config.outputChannel === 'right'
@@ -3096,6 +3243,14 @@ function applyImportedConfiguration(
   outputSelect.dataset.storedDeviceId = importedOutputDeviceId;
   localStorage.setItem(INPUT_DEVICE_STORAGE_KEY, importedInputDeviceId);
   localStorage.setItem(OUTPUT_DEVICE_STORAGE_KEY, importedOutputDeviceId);
+
+  state.leftMicrophoneCalibration = normalizeImportedMeasurement(
+    config.leftMicrophoneCalibration,
+  );
+  state.rightMicrophoneCalibration = normalizeImportedMeasurement(
+    config.rightMicrophoneCalibration,
+  );
+  updateMicrophoneCalibrationLabels();
 
   if (includeMeasurementSweepSettings) {
     setNumericInputValue(startFrequencyInput, config.startFrequency);
@@ -3456,6 +3611,10 @@ function getSelectedChannel(
   select: HTMLSelectElement,
 ): MeasurementChannelSelection {
   return select.value === 'left' || select.value === 'right' ? select.value : 'both';
+}
+
+function getSelectedInputChannel(): 'left' | 'right' {
+  return inputChannelSelect.value === 'right' ? 'right' : 'left';
 }
 
 function readStoredSmoothingMode(): MeasurementSmoothingMode {
@@ -3946,6 +4105,7 @@ function renderApoSection(): void {
     });
   }
   apoConfigPreview.value = buildApoConfigText();
+  syncApoEnableToggle();
   apoApplyStatus.textContent = getApoApplyStatusText();
   apoApplyWarning.hidden = !state.equalizerApoStatus?.peaceRunning;
   renderApoPresetMenu();
@@ -3968,11 +4128,23 @@ function syncApoEqModeToggle(): void {
   apoEqModeGraphicButton.setAttribute('aria-selected', String(isGraphic));
 }
 
+function syncApoEnableToggle(): void {
+  const isEnabled = state.equalizerApoStatus?.freakishEarsIncludedInConfig ?? false;
+
+  apoEnableToggle.dataset.mode = isEnabled ? 'graphic' : 'parametric';
+  apoEnableOffButton.dataset.active = String(!isEnabled);
+  apoEnableOnButton.dataset.active = String(isEnabled);
+  apoEnableOffButton.setAttribute('aria-selected', String(!isEnabled));
+  apoEnableOnButton.setAttribute('aria-selected', String(isEnabled));
+}
+
 function getApoApplyStatusText(): string {
   const enabledFilterCount = getActiveApoFilters().filter((filter) => filter.enabled).length;
 
   if (enabledFilterCount === 0) {
-    return 'Enable at least one filter to apply APO.';
+    return state.equalizerApoStatus?.freakishEarsIncludedInConfig
+      ? 'No APO filters are enabled. Turn the APO profile off or enable at least one filter.'
+      : 'Enable at least one filter to turn the APO profile on.';
   }
 
   const status = state.equalizerApoStatus;
@@ -3986,18 +4158,18 @@ function getApoApplyStatusText(): string {
   }
 
   if (status.peaceRunning) {
-    return 'PEACE is running. Apply APO is still available, but PEACE may override the active profile until it is closed.';
+    return 'PEACE is running. The APO profile toggle still works, but PEACE may override the active profile until it is closed.';
   }
 
   if (status.peaceIncludedInConfig) {
-    return 'PEACE is included in config.txt. Apply APO will still update FreakishEars.txt.';
+    return 'PEACE is included in config.txt. The APO profile toggle will still update FreakishEars.txt.';
   }
 
   if (status.freakishEarsIncludedInConfig) {
-    return `Apply APO writes to ${status.profilePath ?? 'FreakishEars.txt'} and is currently enabled in Equalizer APO.`;
+    return `The APO profile writes to ${status.profilePath ?? 'FreakishEars.txt'} and is currently enabled in Equalizer APO.`;
   }
 
-  return `Apply APO writes to ${status.profilePath ?? 'FreakishEars.txt'} and will enable it in Equalizer APO.`;
+  return `The APO profile writes to ${status.profilePath ?? 'FreakishEars.txt'} and is currently disabled in Equalizer APO.`;
 }
 
 function syncApoSelectionOptions(): void {
@@ -5896,8 +6068,9 @@ async function refreshEqualizerApoStatus(): Promise<void> {
   renderApoSection();
 }
 
-async function applyApoConfig(options?: { continueOnBusyFileError?: boolean }): Promise<boolean> {
+async function applyApoConfig(options?: { continueOnBusyFileError?: boolean; enableProfile?: boolean }): Promise<boolean> {
   const status = state.equalizerApoStatus;
+  const enableProfile = options?.enableProfile ?? true;
 
   if (state.busy) {
     return false;
@@ -5911,17 +6084,18 @@ async function applyApoConfig(options?: { continueOnBusyFileError?: boolean }): 
 
   try {
     setBusy(true);
-    setStatus('Applying Equalizer APO profile...', 'working');
+    setStatus(enableProfile ? 'Enabling Equalizer APO profile...' : 'Disabling Equalizer APO profile...', 'working');
 
     const result = await window.freakishEars.applyEqualizerApoConfig({
       configText: buildApoConfigText(),
+      enableProfile,
     });
 
     await refreshEqualizerApoStatus();
-    setStatus('Equalizer APO profile applied.', 'success');
-    appendLog(`Applied Equalizer APO profile to ${result.profilePath}.`, 'success');
+    setStatus(enableProfile ? 'Equalizer APO profile enabled.' : 'Equalizer APO profile disabled.', 'success');
+    appendLog(`${enableProfile ? 'Enabled' : 'Disabled'} Equalizer APO profile at ${result.profilePath}.`, 'success');
     showToast({
-      message: 'Equalizer APO profile applied',
+      message: enableProfile ? 'Equalizer APO profile enabled' : 'Equalizer APO profile disabled',
       actionLabel: 'View in Finder',
       actionPath: result.profilePath,
     });
@@ -5931,12 +6105,12 @@ async function applyApoConfig(options?: { continueOnBusyFileError?: boolean }): 
     await refreshEqualizerApoStatus();
 
     if (options?.continueOnBusyFileError && isBusyFileError(error)) {
-      appendLog(`Apply APO skipped because Equalizer APO config is locked: ${message}`);
+      appendLog(`Equalizer APO profile update skipped because the config is locked: ${message}`);
       return true;
     }
 
-    setStatus(`Apply APO failed: ${message}`, 'error');
-    appendLog(`Apply APO failed: ${message}`, 'error');
+    setStatus(`Equalizer APO profile update failed: ${message}`, 'error');
+    appendLog(`Equalizer APO profile update failed: ${message}`, 'error');
     return false;
   } finally {
     setBusy(false);

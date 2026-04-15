@@ -93,6 +93,7 @@ export type ReadPeacePresetResult = {
 
 export type ApplyEqualizerApoConfigPayload = {
   configText: string;
+  enableProfile: boolean;
 };
 
 export type ApplyEqualizerApoConfigResult = {

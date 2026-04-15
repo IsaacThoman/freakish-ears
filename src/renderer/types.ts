@@ -140,6 +140,8 @@ export type AppState = {
   smoothingMode: MeasurementSmoothingMode;
   measurements: LoadedMeasurement[];
   referenceCurves: ReferenceCurve[];
+  leftMicrophoneCalibration: MeasurementImport | null;
+  rightMicrophoneCalibration: MeasurementImport | null;
   focusedMeasurementId: string | null;
   nextMeasurementIndex: number;
   nextReferenceIndex: number;

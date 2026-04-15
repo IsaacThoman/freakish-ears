@@ -514,6 +514,11 @@ input {
   margin-bottom: 0;
 }
 
+.apo-controls-bar .apo-enable-toggle {
+  flex: 0 0 auto;
+  align-self: flex-start;
+}
+
 .apo-control-group {
   display: flex;
   flex-direction: column;
@@ -986,6 +991,16 @@ input {
 .apo-apply-anchor {
   position: relative;
   display: inline-flex;
+  align-items: center;
+}
+
+.apo-enable-toggle {
+  min-width: 160px;
+}
+
+.apo-enable-toggle .segmented-toggle-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .apo-apply-warning {

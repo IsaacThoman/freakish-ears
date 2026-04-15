@@ -41,6 +41,8 @@ export function buildMeasurementJson(input: {
       sampleRate: number;
       inputChannel: MeasurementChannelSelection;
       outputChannel: MeasurementChannelSelection;
+      microphoneCalibrationName?: string | null;
+      microphoneCalibrationSourcePath?: string | null;
     };
   preRollSeconds: number;
   postRollSeconds: number;
@@ -257,6 +259,73 @@ export function createReferenceCurve(
   };
 }
 
+export function normalizeImportedMeasurement(value: unknown): MeasurementImport | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const name = typeof record.name === 'string' ? record.name : null;
+  const exportName = typeof record.exportName === 'string' ? record.exportName : null;
+  const sourcePath = typeof record.sourcePath === 'string' ? record.sourcePath : null;
+  const magnitudeMode = record.magnitudeMode === 'relative' ? 'relative' : 'spl';
+  const rawPoints = Array.isArray(record.points) ? record.points : null;
+
+  if (!name || !exportName || !rawPoints) {
+    return null;
+  }
+
+  try {
+    const points = normalizeMeasurementPoints(rawPoints);
+    const summaryRecord =
+      record.summary && typeof record.summary === 'object'
+        ? (record.summary as Record<string, unknown>)
+        : {};
+
+    return {
+      name,
+      exportName,
+      magnitudeMode,
+      sourcePath,
+      points,
+      summary: {
+        latencyMs: toOptionalNumber(summaryRecord.latencyMs),
+        peakDbfs: toOptionalNumber(summaryRecord.peakDbfs),
+        rmsDbfs: toOptionalNumber(summaryRecord.rmsDbfs),
+        savedPath:
+          typeof summaryRecord.savedPath === 'string' ? summaryRecord.savedPath : sourcePath,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function applyMicrophoneCalibration(
+  analysis: MeasurementAnalysis,
+  calibrationPoints: MeasurementPoint[],
+): MeasurementAnalysis {
+  if (calibrationPoints.length < 2) {
+    return analysis;
+  }
+
+  return {
+    ...analysis,
+    points: analysis.points.map((point) => {
+      const calibrationDb = interpolateCalibrationMagnitudeDb(
+        calibrationPoints,
+        point.frequencyHz,
+      );
+
+      return {
+        ...point,
+        magnitudeDbRelative: point.magnitudeDbRelative - calibrationDb,
+        smoothedMagnitudeDbRelative: point.smoothedMagnitudeDbRelative - calibrationDb,
+      };
+    }),
+  };
+}
+
 export function getMeasurementPointsForDisplay(
   points: MeasurementPoint[],
   measurement: LoadedMeasurement,
@@ -388,12 +457,19 @@ function inferTextMeasurementMagnitudeMode(contents: string): MeasurementMagnitu
 }
 
 function looksLikeCsvMeasurement(contents: string): boolean {
-  const firstLine = contents
+  const significantLines = contents
     .split(/\r?\n/u)
     .map((line) => line.trim())
-    .find((line) => line.length > 0);
+    .filter((line) => line.length > 0);
 
-  return firstLine?.includes(',') ?? false;
+  const firstLine = significantLines[0] ?? '';
+  const secondLine = significantLines[1] ?? '';
+
+  if (firstLine.toLowerCase().startsWith('frequency_hz')) {
+    return true;
+  }
+
+  return firstLine.includes(',') && secondLine.includes(',') && !secondLine.includes('\t');
 }
 
 function looksLikeTargetCurveMeasurement(contents: string): boolean {
@@ -661,4 +737,44 @@ function interpolateMeasurementComponents(
       20 * Math.log10(Math.hypot(interpolatedReal, interpolatedImag) + 1e-12),
     phaseDegrees: (Math.atan2(interpolatedImag, interpolatedReal) * 180) / Math.PI,
   };
+}
+
+function interpolateCalibrationMagnitudeDb(
+  calibrationPoints: MeasurementPoint[],
+  frequencyHz: number,
+): number {
+  const firstPoint = calibrationPoints[0];
+  const lastPoint = calibrationPoints.at(-1) ?? firstPoint;
+
+  if (frequencyHz <= firstPoint.frequencyHz) {
+    return firstPoint.magnitudeDbRelative;
+  }
+
+  if (frequencyHz >= lastPoint.frequencyHz) {
+    return lastPoint.magnitudeDbRelative;
+  }
+
+  let upperIndex = 1;
+  while (
+    upperIndex < calibrationPoints.length &&
+    calibrationPoints[upperIndex].frequencyHz < frequencyHz
+  ) {
+    upperIndex += 1;
+  }
+
+  const lowerPoint = calibrationPoints[Math.max(0, upperIndex - 1)] ?? firstPoint;
+  const upperPoint = calibrationPoints[upperIndex] ?? lastPoint;
+  const lowerFrequencyLog = Math.log(lowerPoint.frequencyHz);
+  const upperFrequencyLog = Math.log(upperPoint.frequencyHz);
+  const frequencyLog = Math.log(frequencyHz);
+  const ratio =
+    upperFrequencyLog === lowerFrequencyLog
+      ? 0
+      : (frequencyLog - lowerFrequencyLog) / (upperFrequencyLog - lowerFrequencyLog);
+
+  return interpolate(
+    lowerPoint.magnitudeDbRelative,
+    upperPoint.magnitudeDbRelative,
+    ratio,
+  );
 }
