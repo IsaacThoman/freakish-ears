@@ -535,7 +535,7 @@ input {
   line-height: 1;
 }
 
-.apo-control-group input {
+.apo-control-group input:not([type='range']) {
   width: 90px;
   height: 36px;
   padding: 0 10px;
@@ -547,7 +547,7 @@ input {
   box-sizing: border-box;
 }
 
-.apo-control-group input:focus {
+.apo-control-group input:not([type='range']):focus {
   outline: none;
   border-color: var(--accent);
 }
@@ -607,9 +607,11 @@ input {
 }
 
 .segmented-toggle {
+  --segmented-count: 2;
+  --segmented-index: 0;
   position: relative;
   display: inline-grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--segmented-count), minmax(0, 1fr));
   align-self: flex-end;
   min-width: 220px;
   height: 36px;
@@ -626,15 +628,12 @@ input {
   top: 3px;
   bottom: 3px;
   left: 3px;
-  width: calc(50% - 3px);
+  width: calc((100% - 6px) / var(--segmented-count));
   border-radius: 4px;
   background: var(--accent);
   transition: transform 0.18s ease;
+  transform: translateX(calc(var(--segmented-index) * 100%));
   z-index: 0;
-}
-
-.segmented-toggle[data-mode='graphic'] .segmented-toggle-thumb {
-  transform: translateX(100%);
 }
 
 .segmented-toggle-option {
@@ -1044,6 +1043,79 @@ input {
 .apo-hint {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.apo-preamp-control {
+  width: 100%;
+  max-width: 360px;
+  align-self: flex-start;
+  gap: 8px;
+}
+
+.apo-preamp-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.apo-preamp-slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 240px;
+  min-width: 0;
+}
+
+.apo-preamp-range {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.apo-preamp-number-input {
+  width: 84px;
+}
+
+.apo-preamp-ticks {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.apo-preamp-ticks span {
+  position: relative;
+  text-align: center;
+}
+
+.apo-preamp-ticks span::before {
+  content: '';
+  display: block;
+  width: 1px;
+  height: 6px;
+  margin: 0 auto 4px;
+  background: var(--input-border);
+}
+
+@media (max-width: 720px) {
+  .apo-preamp-control {
+    width: 100%;
+    max-width: none;
+  }
+
+  .apo-preamp-inputs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .apo-preamp-slider-group {
+    min-width: 0;
+  }
 }
 
 .apo-filter-list {

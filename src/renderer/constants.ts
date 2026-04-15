@@ -5,6 +5,7 @@ export const NORMALIZE_PLOT_STORAGE_KEY = 'freakish-ears-normalize-plot';
 export const SMOOTHING_MODE_STORAGE_KEY = 'freakish-ears-smoothing-mode';
 export const APO_FILTERS_STORAGE_KEY = 'freakish-ears-apo-filters';
 export const APO_EQ_MODE_STORAGE_KEY = 'freakish-ears-apo-eq-mode';
+export const APO_CHANNEL_PROFILE_STORAGE_KEY = 'freakish-ears-apo-channel-profile';
 export const APO_SELECTED_MEASUREMENT_STORAGE_KEY = 'freakish-ears-apo-selected-measurement';
 export const APO_SELECTED_REFERENCE_STORAGE_KEY = 'freakish-ears-apo-selected-reference';
 export const APO_MAX_FILTERS_STORAGE_KEY = 'freakish-ears-apo-max-filters';

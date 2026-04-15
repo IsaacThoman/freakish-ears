@@ -106,6 +106,16 @@ export type ApoFilterKind =
   | 'HSCQ';
 
 export type ApoEqMode = 'parametric' | 'graphic';
+export type ApoChannelProfile = 'all' | 'left' | 'right';
+export type ApoChannelProfileState<TValue> = {
+  all: TValue;
+  left: TValue;
+  right: TValue;
+};
+export type ApoModeState<TValue> = {
+  parametric: TValue;
+  graphic: TValue;
+};
 export type AutomationAlgorithm = 'proportional' | 'pid' | 'damped-refit' | 'momentum';
 export type AutomationToleranceBand =
   | 'subBass'
@@ -145,9 +155,9 @@ export type AppState = {
   focusedMeasurementId: string | null;
   nextMeasurementIndex: number;
   nextReferenceIndex: number;
-  apoEqMode: ApoEqMode;
-  parametricApoFilters: ApoFilter[];
-  graphicApoFilters: ApoFilter[];
+  apoEqModes: ApoChannelProfileState<ApoEqMode>;
+  apoChannelProfile: ApoChannelProfile;
+  apoFilters: ApoChannelProfileState<ApoModeState<ApoFilter[]>>;
   automationAlgorithm: AutomationAlgorithm;
   automationDelaySeconds: number;
   proportionalP: number;
@@ -175,12 +185,9 @@ export type AppState = {
   automationMomentumByBand: Record<string, number>;
   apoSelectedMeasurementId: string | null;
   apoSelectedReferenceId: string | null;
-  parametricApoMaxFilters: number;
-  graphicApoMaxFilters: number;
-  parametricApoImportedPreampDb: number | null;
-  graphicApoImportedPreampDb: number | null;
-  parametricApoImportedBlockRepeatCount: number | null;
-  graphicApoImportedBlockRepeatCount: number | null;
+  apoMaxFilters: ApoChannelProfileState<ApoModeState<number>>;
+  apoImportedPreampDb: ApoChannelProfileState<ApoModeState<number | null>>;
+  apoImportedBlockRepeatCount: ApoChannelProfileState<ApoModeState<number | null>>;
   apoMaxBoostDb: number;
   apoMaxCutDb: number;
   nextApoFilterIndex: number;

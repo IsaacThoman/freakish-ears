@@ -46,6 +46,12 @@ type ApoBandVisualStyle = {
   fillBottom: string;
 };
 
+type GraphicEqNodeRenderProfile = {
+  radius: number;
+  strokeWidth: number;
+  visibleStride: number;
+};
+
 type BandFillPolarity = 'positive' | 'negative';
 
 type BandFillSegment = {
@@ -601,7 +607,7 @@ export function renderApoEqPlot(input: {
         })),
       }));
   const labelSizing = getPlotLabelSizing(input.compact);
-  const yAxisLabelText = 'EQ Gain (dB)';
+  const yAxisLabelText = Math.abs(input.preampDb) >= 0.05 ? 'Output Gain (dB)' : 'EQ Gain (dB)';
   const geometry = getApoEqPlotGeometry(
     enabledFilters,
     sampledPoints,
@@ -733,7 +739,7 @@ export function renderApoEqPlot(input: {
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
-          return `<text x="${(geometry.left - PLOT_Y_TICK_GAP).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" class="plot-axis-text">${formatDbLabel(value)}</text>`;
+          return `<text x="${(geometry.left - PLOT_Y_TICK_GAP).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" class="plot-axis-text">${formatDbLabel(getDisplayedApoAxisValueDb(value, input.preampDb))}</text>`;
         })
         .join('')}
       ${labelSizing.xTicks.map((frequency) => {
@@ -1108,27 +1114,35 @@ function getRenderedApoEqValueDb(
   valueDb: number,
   eqMode: ApoEqMode,
   responseMultiplier: number,
-  preampDb: number,
+  _preampDb: number,
 ): number {
+  void _preampDb;
+
   if (eqMode !== 'parametric') {
     return valueDb;
   }
 
-  return valueDb * responseMultiplier + preampDb;
+  return valueDb * responseMultiplier;
 }
 
 function getEditableApoGainDb(
   displayedDb: number,
   eqMode: ApoEqMode,
   responseMultiplier: number,
-  preampDb: number,
+  _preampDb: number,
 ): number {
+  void _preampDb;
+
   if (eqMode !== 'parametric') {
     return displayedDb;
   }
 
   const normalizedMultiplier = Math.max(Math.abs(responseMultiplier), 1e-6);
-  return (displayedDb - preampDb) / normalizedMultiplier;
+  return displayedDb / normalizedMultiplier;
+}
+
+function getDisplayedApoAxisValueDb(valueDb: number, preampDb: number): number {
+  return valueDb + preampDb;
 }
 
 function getRenderedApoFilterNodeGainDb(
@@ -1631,13 +1645,18 @@ export function attachApoPlotInteractions(input: {
       controller.responseMultiplier,
       controller.preampDb,
     );
-    const closestPoint = findClosestPoint(sampledPoints, hoveredFrequency);
+    const closestPoint = sampledPoints.reduce((closest, point) => (
+      Math.abs(point.frequencyHz - hoveredFrequency) < Math.abs(closest.frequencyHz - hoveredFrequency)
+        ? point
+        : closest
+    ));
     const hoverLineX = getPlotX(closestPoint.frequencyHz, geometry);
 
     hoverLine.setAttribute('x1', hoverLineX.toFixed(1));
     hoverLine.setAttribute('x2', hoverLineX.toFixed(1));
     hoverLine.setAttribute('opacity', '1');
-    hoverLabel.textContent = `Hover: ${formatFrequencyDetailed(closestPoint.frequencyHz)} | ${closestPoint.totalDb.toFixed(1)} dB`;
+    const displayedDb = getDisplayedApoAxisValueDb(closestPoint.totalDb, controller.preampDb);
+    hoverLabel.textContent = `Hover: ${formatFrequencyDetailed(closestPoint.frequencyHz)} | ${displayedDb.toFixed(1)} dB`;
   };
 
   const getTooltipScreenPosition = (svg: SVGSVGElement, nodeX: number, nodeY: number) => {
