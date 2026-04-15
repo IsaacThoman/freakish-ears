@@ -8,7 +8,7 @@
   "scripts": {
     "start": "electron-forge start",
     "measure:sox": "tsx src/cli/measure-sox.ts",
-    "measure:sox:electron": "electron-forge start -- --headless-measure",
+    "measure:sox:electron": "electron . --headless-measure",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",

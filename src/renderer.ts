@@ -150,6 +150,13 @@ import {
   readStoredNumber,
   wait,
 } from './renderer/utils';
+import type {
+  AutomationItemSelector,
+  AutomationVirtualFile,
+  RendererAutomationAction,
+  RendererAutomationElementBounds,
+  RendererAutomationSnapshot,
+} from './shared/automation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -261,14 +268,36 @@ app.innerHTML = `
           <button id="importLeftCalibrationButton" class="btn btn-secondary" type="button">
             Left Cal
           </button>
-          <div id="leftCalibrationValue" class="folder-chip">None</div>
+          <div id="leftCalibrationValue" class="folder-chip">
+            <span id="leftCalibrationName" class="folder-chip-label">None</span>
+            <button
+              id="clearLeftCalibrationButton"
+              class="folder-chip-clear"
+              type="button"
+              aria-label="Clear left microphone calibration"
+              title="Clear left microphone calibration"
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
         <div class="folder-row">
           <button id="importRightCalibrationButton" class="btn btn-secondary" type="button">
             Right Cal
           </button>
-          <div id="rightCalibrationValue" class="folder-chip">None</div>
+          <div id="rightCalibrationValue" class="folder-chip">
+            <span id="rightCalibrationName" class="folder-chip-label">None</span>
+            <button
+              id="clearRightCalibrationButton"
+              class="folder-chip-clear"
+              type="button"
+              aria-label="Clear right microphone calibration"
+              title="Clear right microphone calibration"
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
         <button id="refreshDevicesButton" class="btn btn-secondary" type="button">
@@ -663,6 +692,10 @@ const importLeftCalibrationButton = getElement<HTMLButtonElement>('importLeftCal
 const importRightCalibrationButton = getElement<HTMLButtonElement>('importRightCalibrationButton');
 const leftCalibrationValue = getElement<HTMLDivElement>('leftCalibrationValue');
 const rightCalibrationValue = getElement<HTMLDivElement>('rightCalibrationValue');
+const leftCalibrationName = getElement<HTMLSpanElement>('leftCalibrationName');
+const rightCalibrationName = getElement<HTMLSpanElement>('rightCalibrationName');
+const clearLeftCalibrationButton = getElement<HTMLButtonElement>('clearLeftCalibrationButton');
+const clearRightCalibrationButton = getElement<HTMLButtonElement>('clearRightCalibrationButton');
 const refreshDevicesButton = getElement<HTMLButtonElement>('refreshDevicesButton');
 const chooseFolderButton = getElement<HTMLButtonElement>('chooseFolderButton');
 const saveConfigButton = getElement<HTMLButtonElement>('saveConfigButton');
@@ -1096,6 +1129,14 @@ importLeftCalibrationButton.addEventListener('click', () => {
 
 importRightCalibrationButton.addEventListener('click', () => {
   rightCalibrationFileInput.click();
+});
+
+clearLeftCalibrationButton.addEventListener('click', () => {
+  clearMicrophoneCalibration('left');
+});
+
+clearRightCalibrationButton.addEventListener('click', () => {
+  clearMicrophoneCalibration('right');
 });
 
 measurementBackendSelect.addEventListener('change', () => {
@@ -1582,6 +1623,7 @@ apoEqModeToggle.addEventListener('click', (event) => {
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
+  reapplyApoConfigIfEnabled();
 });
 
 apoMeasurementSelect.addEventListener('change', () => {
@@ -1760,6 +1802,12 @@ appendLog('Click Refresh to access microphones and outputs.');
 void refreshEqualizerApoStatus();
 void refreshMicrophones(false);
 
+window.freakishEarsAutomation = {
+  runAction,
+  getSnapshot: getRendererAutomationSnapshot,
+  getElementBounds: getRendererAutomationElementBounds,
+};
+
 function getElement<TElement extends HTMLElement>(id: string): TElement {
   const element = document.getElementById(id);
 
@@ -1768,6 +1816,344 @@ function getElement<TElement extends HTMLElement>(id: string): TElement {
   }
 
   return element as TElement;
+}
+
+async function runAction(action: RendererAutomationAction): Promise<RendererAutomationSnapshot> {
+  switch (action.type) {
+    case 'set-output-folder':
+      state.outputFolder = action.folderPath;
+      updateSelectedFolder();
+      break;
+    case 'apply-configuration':
+      applyImportedConfiguration(action.config, {
+        persist: action.persist,
+        includeMeasurementSweepSettings: action.includeMeasurementSweepSettings,
+        includeApoState: action.includeApoState,
+      });
+      break;
+    case 'import-measurements':
+      await importMeasurementFiles(action.files.map(createAutomationFile));
+      break;
+    case 'import-references':
+      await importReferenceFiles(action.files.map(createAutomationFile));
+      break;
+    case 'import-microphone-calibration':
+      await importMicrophoneCalibrationFile(createAutomationFile(action.file), action.channel);
+      break;
+    case 'set-plot-options':
+      applyAutomationPlotOptions(action);
+      break;
+    case 'set-automation-options':
+      applyAutomationOptions(action);
+      break;
+    case 'select-apo-measurement': {
+      const measurement = selectAutomationItem(state.measurements, action.selector);
+      if (!measurement) {
+        throw new Error('Unable to find the requested measurement.');
+      }
+      state.apoSelectedMeasurementId = measurement.id;
+      persistApoSelections();
+      renderApoSection();
+      break;
+    }
+    case 'select-apo-reference': {
+      const referenceCurve = selectAutomationItem(state.referenceCurves, action.selector);
+      if (!referenceCurve) {
+        throw new Error('Unable to find the requested reference curve.');
+      }
+      state.apoSelectedReferenceId = referenceCurve.id;
+      persistApoSelections();
+      renderApoSection();
+      break;
+    }
+    case 'set-measurement-visibility': {
+      const measurement = selectAutomationItem(state.measurements, action.selector);
+      if (!measurement) {
+        throw new Error('Unable to find the requested measurement.');
+      }
+      setMeasurementVisibility(measurement.id, action.visible);
+      break;
+    }
+    case 'set-reference-visibility': {
+      const referenceCurve = selectAutomationItem(state.referenceCurves, action.selector);
+      if (!referenceCurve) {
+        throw new Error('Unable to find the requested reference curve.');
+      }
+      setReferenceVisibility(referenceCurve.id, action.visible);
+      break;
+    }
+    case 'set-measurement-starred': {
+      const measurement = selectAutomationItem(state.measurements, action.selector);
+      if (!measurement) {
+        throw new Error('Unable to find the requested measurement.');
+      }
+      const current = state.measurements.find((entry) => entry.id === measurement.id);
+      if (!!current?.starred !== action.starred) {
+        toggleMeasurementStar(measurement.id);
+      }
+      break;
+    }
+    case 'set-apo-mode':
+      applyAutomationApoMode(action);
+      break;
+    case 'set-apo-filters':
+      setActiveApoFilters(cloneApoFilters(action.filters));
+      clearActiveImportedApoPreamp();
+      clearActiveImportedApoBlockRepeatCount();
+      if (getActiveApoEqMode() === 'graphic') {
+        setActiveApoMaxFilters(clamp(action.filters.length || 1, 1, MAX_GRAPHIC_APO_FILTERS));
+        syncGraphicEqFiltersToBandCount();
+      } else {
+        syncParametricApoFilterCountToFilters();
+      }
+      state.nextApoFilterIndex = getNextApoFilterIndex();
+      persistApoState();
+      persistActiveConfiguration();
+      renderApoSection();
+      break;
+    case 'generate-apo-filters':
+      await generateApoFilters(null, action.useAutomationAlgorithm);
+      break;
+    case 'import-eq-profile':
+      await importEqProfile(createAutomationFile(action.file));
+      break;
+    case 'import-peace-preset':
+      await importPeacePreset(action.fileName);
+      break;
+    case 'refresh-equalizer-apo-status':
+      await refreshEqualizerApoStatus();
+      break;
+    case 'apply-apo-config':
+      await applyApoConfig({ enableProfile: action.enableProfile });
+      break;
+    case 'disable-peace':
+      await window.freakishEars.disablePeace();
+      await refreshEqualizerApoStatus();
+      break;
+    case 'run-measurement':
+      await runMeasurement();
+      break;
+    case 'toggle-automation':
+      await toggleAutomationLoop();
+      break;
+    case 'wait':
+      await wait(Math.max(0, Math.round(action.ms)));
+      break;
+    case 'wait-for-idle':
+      await waitForRendererIdle(action.timeoutMs);
+      break;
+    default:
+      throw new Error(`Unsupported automation action: ${(action as { type: string }).type}`);
+  }
+
+  return getRendererAutomationSnapshot();
+}
+
+function createAutomationFile(file: AutomationVirtualFile): File {
+  const automationFile = new File([file.contents ?? ''], file.name, { type: 'text/plain' }) as File & {
+    path?: string;
+  };
+
+  if (file.path) {
+    Object.defineProperty(automationFile, 'path', {
+      value: file.path,
+      configurable: true,
+    });
+  }
+
+  return automationFile;
+}
+
+function applyAutomationPlotOptions(action: Extract<RendererAutomationAction, { type: 'set-plot-options' }>): void {
+  if (typeof action.normalizePlot === 'boolean') {
+    state.normalizePlot = action.normalizePlot;
+    normalizePlotToggle.checked = action.normalizePlot;
+    localStorage.setItem(NORMALIZE_PLOT_STORAGE_KEY, String(action.normalizePlot));
+  }
+
+  if (action.smoothingMode && isSmoothingMode(action.smoothingMode)) {
+    state.smoothingMode = action.smoothingMode;
+    smoothingModeSelect.value = action.smoothingMode;
+    localStorage.setItem(SMOOTHING_MODE_STORAGE_KEY, action.smoothingMode);
+  }
+
+  if (state.measurements.length > 0 || state.referenceCurves.length > 0) {
+    renderMeasurements();
+  }
+}
+
+function applyAutomationOptions(
+  action: Extract<RendererAutomationAction, { type: 'set-automation-options' }>,
+): void {
+  if (action.algorithm && isAutomationAlgorithm(action.algorithm)) {
+    state.automationAlgorithm = action.algorithm;
+    automationAlgorithmSelect.value = action.algorithm;
+  }
+
+  if (Number.isFinite(action.delaySeconds)) {
+    automationDelayInput.value = Number(action.delaySeconds).toFixed(1);
+  }
+
+  if (Number.isFinite(action.proportionalP)) {
+    proportionalPInput.value = Number(action.proportionalP).toFixed(2);
+  }
+
+  if (typeof action.dynamicProportionalP === 'boolean') {
+    dynamicProportionalPToggle.checked = action.dynamicProportionalP;
+  }
+
+  if (Number.isFinite(action.pidProportionalGain)) {
+    pidProportionalGainInput.value = Number(action.pidProportionalGain).toFixed(2);
+  }
+
+  if (Number.isFinite(action.pidIntegralGain)) {
+    pidIntegralGainInput.value = Number(action.pidIntegralGain).toFixed(2);
+  }
+
+  if (Number.isFinite(action.pidDerivativeGain)) {
+    pidDerivativeGainInput.value = Number(action.pidDerivativeGain).toFixed(2);
+  }
+
+  if (Number.isFinite(action.dampedRefitBlend)) {
+    dampedRefitBlendInput.value = Number(action.dampedRefitBlend).toFixed(2);
+  }
+
+  if (Number.isFinite(action.momentumBlend)) {
+    momentumBlendInput.value = Number(action.momentumBlend).toFixed(2);
+  }
+
+  if (Number.isFinite(action.momentumDecay)) {
+    momentumDecayInput.value = Number(action.momentumDecay).toFixed(2);
+  }
+
+  if (typeof action.stopOnTolerance === 'boolean') {
+    automationStopOnToleranceToggle.checked = action.stopOnTolerance;
+  }
+
+  if (Number.isFinite(action.toleranceMaxAcceptableErrorWidthHz)) {
+    automationToleranceMaxAcceptableErrorWidthInput.value = String(
+      Math.round(Number(action.toleranceMaxAcceptableErrorWidthHz)),
+    );
+  }
+
+  if (Number.isFinite(action.regressionLimit)) {
+    automationRegressionLimitInput.value = String(Math.round(Number(action.regressionLimit)));
+  }
+
+  if (action.bandTolerances) {
+    for (const band of AUTOMATION_TOLERANCE_BANDS) {
+      const tolerance = action.bandTolerances[band.key];
+      if (Number.isFinite(tolerance)) {
+        automationToleranceInputs[band.key].value = Number(tolerance).toFixed(1);
+      }
+    }
+  }
+
+  syncAutomationSettings(true);
+  updateAutomationUi();
+}
+
+function applyAutomationApoMode(action: Extract<RendererAutomationAction, { type: 'set-apo-mode' }>): void {
+  if (action.channelProfile && isApoChannelProfile(action.channelProfile)) {
+    state.apoChannelProfile = action.channelProfile;
+  }
+
+  if (action.eqMode && isApoEqMode(action.eqMode)) {
+    setActiveApoEqMode(action.eqMode);
+  }
+
+  if (Number.isFinite(action.maxFilters)) {
+    setActiveApoMaxFilters(
+      clamp(
+        Math.round(Number(action.maxFilters)),
+        1,
+        getActiveApoEqMode() === 'graphic' ? MAX_GRAPHIC_APO_FILTERS : MAX_PARAMETRIC_APO_FILTERS,
+      ),
+    );
+    if (getActiveApoEqMode() === 'graphic') {
+      syncGraphicEqFiltersToBandCount();
+    } else {
+      syncParametricFiltersToCount();
+    }
+  }
+
+  if (Number.isFinite(action.preampDb)) {
+    setActiveImportedApoPreampDb(roundTo(clamp(Number(action.preampDb), APO_PREAMP_MIN_DB, APO_PREAMP_MAX_DB), 0.1));
+  }
+
+  state.nextApoFilterIndex = getNextApoFilterIndex();
+  persistApoState();
+  persistActiveConfiguration();
+  renderApoSection();
+}
+
+function selectAutomationItem<TItem extends { id: string; name: string }>(
+  items: TItem[],
+  selector: AutomationItemSelector,
+): TItem | null {
+  if (selector.id) {
+    return items.find((item) => item.id === selector.id) ?? null;
+  }
+
+  if (selector.name) {
+    return items.find((item) => item.name === selector.name) ?? null;
+  }
+
+  if (Number.isInteger(selector.index)) {
+    return items[selector.index as number] ?? null;
+  }
+
+  if (selector.strategy === 'first') {
+    return items[0] ?? null;
+  }
+
+  return getLastItem(items) ?? null;
+}
+
+async function waitForRendererIdle(timeoutMs: number | undefined): Promise<void> {
+  const timeoutAt = Date.now() + Math.max(1000, Math.round(timeoutMs ?? 30000));
+
+  while (Date.now() < timeoutAt) {
+    if (!state.busy && !state.automationRunning) {
+      return;
+    }
+
+    await wait(100);
+  }
+
+  throw new Error('Renderer did not become idle in time.');
+}
+
+function getRendererAutomationSnapshot(): RendererAutomationSnapshot {
+  return {
+    busy: state.busy,
+    automationRunning: state.automationRunning,
+    latestStatusMessage: state.latestStatusMessage,
+    latestStatusTone: state.latestStatusTone,
+    measurementCount: state.measurements.length,
+    referenceCount: state.referenceCurves.length,
+    selectedApoMeasurementId: state.apoSelectedMeasurementId,
+    selectedApoReferenceId: state.apoSelectedReferenceId,
+    apoChannelProfile: state.apoChannelProfile,
+    apoEqMode: getActiveApoEqMode(),
+    apoFilterCount: getActiveApoFilters().length,
+  };
+}
+
+function getRendererAutomationElementBounds(selector: string): RendererAutomationElementBounds {
+  const element = document.querySelector<HTMLElement>(selector);
+  if (!element) {
+    return null;
+  }
+
+  const bounds = element.getBoundingClientRect();
+  return {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    devicePixelRatio: window.devicePixelRatio || 1,
+  };
 }
 
 function getLastItem<TValue>(items: TValue[]): TValue | undefined {
@@ -1781,6 +2167,8 @@ function setBusy(isBusy: boolean): void {
   inputChannelSelect.disabled = isBusy;
   importLeftCalibrationButton.disabled = isBusy;
   importRightCalibrationButton.disabled = isBusy;
+  clearLeftCalibrationButton.disabled = isBusy || state.leftMicrophoneCalibration === null;
+  clearRightCalibrationButton.disabled = isBusy || state.rightMicrophoneCalibration === null;
   microphoneSelect.disabled = isBusy;
   refreshDevicesButton.disabled = isBusy;
   chooseFolderButton.disabled = isBusy;
@@ -1881,10 +2269,18 @@ function updateSelectedFolder(): void {
 }
 
 function updateMicrophoneCalibrationLabels(): void {
-  leftCalibrationValue.textContent = state.leftMicrophoneCalibration?.name ?? 'None';
+  const hasLeftCalibration = state.leftMicrophoneCalibration !== null;
+  const hasRightCalibration = state.rightMicrophoneCalibration !== null;
+
+  leftCalibrationName.textContent = state.leftMicrophoneCalibration?.name ?? 'None';
   leftCalibrationValue.title = state.leftMicrophoneCalibration?.sourcePath ?? '';
-  rightCalibrationValue.textContent = state.rightMicrophoneCalibration?.name ?? 'None';
+  clearLeftCalibrationButton.disabled = state.busy || !hasLeftCalibration;
+  clearLeftCalibrationButton.hidden = !hasLeftCalibration;
+
+  rightCalibrationName.textContent = state.rightMicrophoneCalibration?.name ?? 'None';
   rightCalibrationValue.title = state.rightMicrophoneCalibration?.sourcePath ?? '';
+  clearRightCalibrationButton.disabled = state.busy || !hasRightCalibration;
+  clearRightCalibrationButton.hidden = !hasRightCalibration;
 }
 
 function updateMeasurementActionState(): void {
@@ -3231,6 +3627,31 @@ async function importMicrophoneCalibrationFile(
   }
 }
 
+function clearMicrophoneCalibration(channel: 'left' | 'right'): void {
+  if (state.busy) {
+    return;
+  }
+
+  if (channel === 'left') {
+    if (state.leftMicrophoneCalibration === null) {
+      return;
+    }
+
+    state.leftMicrophoneCalibration = null;
+  } else {
+    if (state.rightMicrophoneCalibration === null) {
+      return;
+    }
+
+    state.rightMicrophoneCalibration = null;
+  }
+
+  updateMicrophoneCalibrationLabels();
+  persistActiveConfiguration();
+  setStatus(`Cleared ${channel} microphone calibration.`, 'success');
+  appendLog(`Cleared ${channel} microphone calibration.`, 'success');
+}
+
 async function saveConfiguration(): Promise<void> {
   if (state.busy) {
     return;
@@ -4334,6 +4755,15 @@ function handleApoFilterDrag(
 
 function handleApoFilterDragEnd(): void {
   renderApoSection();
+  reapplyApoConfigIfEnabled();
+}
+
+function reapplyApoConfigIfEnabled(): void {
+  if (!state.equalizerApoStatus?.freakishEarsIncludedInConfig) {
+    return;
+  }
+
+  void applyApoConfig({ continueOnBusyFileError: true });
 }
 
 function syncApoGenerationSettings(normalize: boolean): void {
@@ -4368,6 +4798,7 @@ function syncApoGenerationSettings(normalize: boolean): void {
   persistActiveConfiguration();
 
   renderApoSection();
+  reapplyApoConfigIfEnabled();
 }
 
 function syncApoPreampSettings(value: string, normalize: boolean): void {
@@ -4394,6 +4825,7 @@ function syncApoPreampSettings(value: string, normalize: boolean): void {
   }
 
   renderApoSection();
+  reapplyApoConfigIfEnabled();
 }
 
 function syncAutomationSettings(normalize: boolean): void {
@@ -4935,6 +5367,7 @@ function addApoFilter(partial: Partial<ApoFilter> = {}): void {
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
+  reapplyApoConfigIfEnabled();
 }
 
 function handleApoFilterPageChange(action: string): void {
@@ -5050,6 +5483,7 @@ function clearApoFilters(): void {
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
+  reapplyApoConfigIfEnabled();
   appendLog(
     getActiveApoEqMode() === 'graphic'
       ? 'Reset graphic EQ bands to flat.'
@@ -5076,6 +5510,7 @@ function removeApoFilter(filterId: string): void {
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
+  reapplyApoConfigIfEnabled();
 }
 
 function updateApoFilter(filterId: string, field: string, value: string | boolean): void {
@@ -5153,6 +5588,7 @@ function updateApoFilter(filterId: string, field: string, value: string | boolea
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
+  reapplyApoConfigIfEnabled();
 }
 
 function addApoFilterAtPoint(frequencyHz: number, gainDb: number): void {
@@ -5202,6 +5638,7 @@ function addApoFilterAtPoint(frequencyHz: number, gainDb: number): void {
     persistApoState();
     persistActiveConfiguration();
     renderApoSection();
+    reapplyApoConfigIfEnabled();
     return;
   }
 
@@ -5254,6 +5691,7 @@ async function generateApoFilters(
     persistApoState();
     persistActiveConfiguration();
     renderApoSection();
+    reapplyApoConfigIfEnabled();
 
     setStatus(`Generated ${generatedFilters.length} APO filter${generatedFilters.length === 1 ? '' : 's'}.`, 'success');
     appendLog(
@@ -5970,11 +6408,8 @@ function buildApoConfigText(): string {
   const buildFilterBlockLines = (channelProfile: ApoChannelProfile, eqMode: ApoEqMode): string[] => {
     const enabledFilters = getApoFilters(channelProfile, eqMode).filter((filter) => filter.enabled);
     const importedPreampDb = getImportedApoPreampDb(channelProfile, eqMode);
-    const responseMultiplier = eqMode === 'parametric'
-      ? getImportedApoBlockRepeatCount(channelProfile, eqMode) ?? 1
-      : 1;
     const preampDb = importedPreampDb === null
-      ? -roundTo(getCombinedApoResponseDbForFilters(getApoFilters(channelProfile, eqMode), PLOT_NORMALIZATION_FREQUENCY_HZ, eqMode, responseMultiplier), 0.1)
+      ? 0
       : roundTo(importedPreampDb, 0.1);
     const blockLines = [
       `Channel: ${channelTargets[channelProfile]}`,
@@ -6240,6 +6675,7 @@ function applyImportedEqProfileSet(importedProfileSet: ImportedEqProfileSet, sou
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
+  reapplyApoConfigIfEnabled();
 
   setStatus(importSummaries[0] ?? 'Imported EQ profile.', 'success');
   for (const summary of importSummaries) {

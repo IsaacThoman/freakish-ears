@@ -154,14 +154,22 @@ export async function applyEqualizerApoConfig(
   }
 
   const configContents = await readTextIfPresent(status.configPath);
+  const priorProfileContents = await readTextIfPresentOrNull(status.profilePath);
 
   await mkdir(status.configFolderPath, { recursive: true });
-  await writeFile(status.profilePath, payload.configText, 'utf8');
 
   const nextConfigContents = payload.enableProfile
     ? ensureFreakishEarsInclude(configContents)
     : removeFreakishEarsInclude(configContents);
-  await writeFile(status.configPath, nextConfigContents, 'utf8');
+
+  await writeFile(status.profilePath, payload.configText, 'utf8');
+
+  try {
+    await writeFile(status.configPath, nextConfigContents, 'utf8');
+  } catch (error) {
+    await restorePreviousProfileContents(status.profilePath, priorProfileContents);
+    throw error;
+  }
 
   return {
     configPath: status.configPath,
@@ -231,6 +239,26 @@ async function readTextIfPresent(filePath: string): Promise<string> {
   } catch {
     return '';
   }
+}
+
+async function readTextIfPresentOrNull(filePath: string): Promise<string | null> {
+  try {
+    return await readFile(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+async function restorePreviousProfileContents(
+  filePath: string,
+  priorContents: string | null,
+): Promise<void> {
+  if (priorContents === null) {
+    await rm(filePath, { force: true });
+    return;
+  }
+
+  await writeFile(filePath, priorContents, 'utf8');
 }
 
 function hasActiveInclude(contents: string, fileName: string): boolean {

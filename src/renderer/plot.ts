@@ -349,7 +349,7 @@ export function renderResponsePlot(input: {
 
   const starredMeasurements = plottedMeasurements.filter(({ measurement }) => measurement.starred);
   const graphIdBase = `response-plot-${Date.now()}`;
-  const starredGradientDefs = starredMeasurements.map(({ measurement, points }) => {
+  const starredGradientDefs = starredMeasurements.map(({ measurement }) => {
     const gradientId = `${graphIdBase}-starred-gradient-${measurement.id}`;
     const starredStyle: ApoBandVisualStyle = {
       nodeFill: '#f8a145',
@@ -357,7 +357,7 @@ export function renderResponsePlot(input: {
       fillTop: 'rgba(248,161,69,0.35)',
       fillBottom: 'rgba(248,161,69,0.02)',
     };
-    return buildApoBandGradientDef(gradientId, points.map((p) => ({ frequencyHz: p.frequencyHz, totalDb: p.smoothedMagnitudeDbRelative })), geometry, xAxisY, starredStyle);
+    return buildApoBandGradientDef(gradientId, starredStyle);
   }).join('');
 
   return `

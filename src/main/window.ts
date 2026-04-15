@@ -1,6 +1,12 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 
+type CreateWindowOptions = {
+  width?: number;
+  height?: number;
+  show?: boolean;
+};
+
 function resolveWindowIconPath(): string {
   const iconFileName = process.platform === 'win32' ? 'autocal-icon.ico' : 'autocal-icon.png';
 
@@ -11,18 +17,21 @@ function resolveWindowIconPath(): string {
   return path.join(app.getAppPath(), 'src', 'assets', iconFileName);
 }
 
-export function createWindow(): BrowserWindow {
+export function createWindow(options: CreateWindowOptions = {}): BrowserWindow {
   const mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 840,
+    width: options.width ?? 1180,
+    height: options.height ?? 840,
     minWidth: 960,
     minHeight: 720,
     backgroundColor: '#151515',
     darkTheme: true,
     autoHideMenuBar: true,
     icon: resolveWindowIconPath(),
+    show: options.show ?? true,
+    paintWhenInitiallyHidden: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      backgroundThrottling: false,
     },
   });
 

@@ -1,9 +1,20 @@
-import { app } from 'electron';
+import { app, BrowserWindow, Rectangle } from 'electron';
+import { appendFile, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
-import { saveMeasurementSession } from './files';
+import { saveFileAtPath, saveMeasurementSession } from './files';
 import { runSoxMeasurement } from './sox';
+import { createWindow } from './window';
 import { PRE_ROLL_SECONDS, POST_ROLL_SECONDS } from '../renderer/constants';
 import { encodeWavFile } from '../shared/audio';
+import type {
+  AutomationVirtualFile,
+  HeadlessAutomationScript,
+  HeadlessAutomationStep,
+  RendererAutomationAction,
+  RendererAutomationElementBounds,
+  RendererAutomationSnapshot,
+} from '../shared/automation';
 import {
   buildMeasurementCsv,
   buildMeasurementJson,
@@ -23,8 +34,18 @@ type HeadlessMeasurementOptions = {
   pauseMs: number;
 };
 
+type LoadedHeadlessAutomationScript = {
+  script: HeadlessAutomationScript;
+  scriptPath: string;
+  logPath: string;
+};
+
 export function isHeadlessMeasurementMode(argv: string[]): boolean {
   return argv.includes('--headless-measure');
+}
+
+export function isHeadlessAutomationMode(argv: string[]): boolean {
+  return argv.includes('--headless-automation');
 }
 
 export async function runHeadlessMeasurementMode(argv: string[]): Promise<void> {
@@ -121,6 +142,37 @@ export async function runHeadlessMeasurementMode(argv: string[]): Promise<void> 
   app.quit();
 }
 
+export async function runHeadlessAutomationMode(argv: string[]): Promise<void> {
+  const { script, scriptPath, logPath } = await loadHeadlessAutomationScript(argv);
+  await writeFile(logPath, '');
+  await logHeadlessAutomation(logPath, `Starting headless automation with script ${scriptPath}`);
+  const mainWindow = createWindow({
+    width: normalizeWindowDimension(script.window?.width, 1440),
+    height: normalizeWindowDimension(script.window?.height, 1024),
+    show: false,
+  });
+
+  try {
+    await waitForAutomationBridge(mainWindow);
+    await logHeadlessAutomation(logPath, 'Renderer automation bridge is ready');
+
+    for (const [stepIndex, step] of script.steps.entries()) {
+      await logHeadlessAutomation(
+        logPath,
+        `Running automation step ${stepIndex + 1}/${script.steps.length}: ${step.type}`,
+      );
+      await runAutomationStep(mainWindow, step);
+    }
+    await logHeadlessAutomation(logPath, 'Headless automation completed successfully');
+  } catch (error) {
+    await logHeadlessAutomation(logPath, `Headless automation failed: ${getErrorMessage(error)}`);
+    throw error;
+  } finally {
+    mainWindow.destroy();
+    app.exit(0);
+  }
+}
+
 function parseHeadlessMeasurementOptions(argv: string[]): HeadlessMeasurementOptions {
   const outputFolder = readStringOption(argv, 'output-folder');
 
@@ -146,6 +198,169 @@ function parseHeadlessMeasurementOptions(argv: string[]): HeadlessMeasurementOpt
     repeat,
     pauseMs: readNumberOption(argv, 'pause-ms', 0),
   };
+}
+
+async function loadHeadlessAutomationScript(argv: string[]): Promise<LoadedHeadlessAutomationScript> {
+  const scriptPath = readStringOption(argv, 'script');
+
+  if (!scriptPath) {
+    throw new Error('Headless automation requires --script <path>.');
+  }
+
+  const absoluteScriptPath = path.resolve(scriptPath);
+  const contents = await readFile(absoluteScriptPath, 'utf8');
+  const parsed = JSON.parse(contents) as HeadlessAutomationScript;
+
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.steps)) {
+    throw new Error('Automation script must be a JSON object with a steps array.');
+  }
+
+  return {
+    script: parsed,
+    scriptPath: absoluteScriptPath,
+    logPath: path.join(path.dirname(absoluteScriptPath), 'headless-automation.log'),
+  };
+}
+
+async function logHeadlessAutomation(logPath: string, message: string): Promise<void> {
+  const line = `[${new Date().toISOString()}] ${message}\n`;
+  await appendFile(logPath, line, 'utf8');
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function waitForAutomationBridge(mainWindow: BrowserWindow): Promise<void> {
+  const timeoutAt = Date.now() + 30000;
+
+  while (Date.now() < timeoutAt) {
+    const ready = await mainWindow.webContents.executeJavaScript(
+      'Boolean(window.freakishEarsAutomation)',
+      true,
+    );
+
+    if (ready) {
+      return;
+    }
+
+    await wait(100);
+  }
+
+  throw new Error('Renderer automation bridge did not become ready in time.');
+}
+
+async function runAutomationStep(
+  mainWindow: BrowserWindow,
+  step: HeadlessAutomationStep,
+): Promise<void> {
+  if (step.type === 'screenshot') {
+    await saveScreenshot(mainWindow, step.outputPath, step.selector);
+    return;
+  }
+
+  await runRendererAutomationAction(mainWindow, step.action);
+}
+
+async function runRendererAutomationAction(
+  mainWindow: BrowserWindow,
+  action: RendererAutomationAction,
+): Promise<RendererAutomationSnapshot> {
+  const normalizedAction = await resolveRendererAutomationActionFiles(action);
+  return mainWindow.webContents.executeJavaScript(
+    `window.freakishEarsAutomation.runAction(${JSON.stringify(normalizedAction)})`,
+    true,
+  ) as Promise<RendererAutomationSnapshot>;
+}
+
+async function resolveRendererAutomationActionFiles(
+  action: RendererAutomationAction,
+): Promise<RendererAutomationAction> {
+  switch (action.type) {
+    case 'import-measurements':
+      return {
+        ...action,
+        files: await Promise.all(action.files.map(resolveAutomationFile)),
+      };
+    case 'import-references':
+      return {
+        ...action,
+        files: await Promise.all(action.files.map(resolveAutomationFile)),
+      };
+    case 'import-microphone-calibration':
+      return {
+        ...action,
+        file: await resolveAutomationFile(action.file),
+      };
+    case 'import-eq-profile':
+      return {
+        ...action,
+        file: await resolveAutomationFile(action.file),
+      };
+    default:
+      return action;
+  }
+}
+
+async function resolveAutomationFile(file: AutomationVirtualFile): Promise<AutomationVirtualFile> {
+  if (typeof file.contents === 'string') {
+    return file;
+  }
+
+  if (!file.path) {
+    throw new Error(`Automation file ${file.name} is missing contents and path.`);
+  }
+
+  return {
+    ...file,
+    contents: await readFile(path.resolve(file.path), 'utf8'),
+  };
+}
+
+async function saveScreenshot(
+  mainWindow: BrowserWindow,
+  outputPath: string,
+  selector?: string,
+): Promise<void> {
+  const absoluteOutputPath = path.resolve(outputPath);
+  const captureBounds = selector
+    ? await getAutomationElementCaptureBounds(mainWindow, selector)
+    : null;
+  const image = captureBounds
+    ? await mainWindow.webContents.capturePage(captureBounds)
+    : await mainWindow.webContents.capturePage();
+
+  await saveFileAtPath(absoluteOutputPath, image.toPNG());
+  console.log(JSON.stringify({ screenshotPath: absoluteOutputPath, selector: selector ?? null }));
+}
+
+async function getAutomationElementCaptureBounds(
+  mainWindow: BrowserWindow,
+  selector: string,
+): Promise<Rectangle> {
+  const bounds = await mainWindow.webContents.executeJavaScript(
+    `window.freakishEarsAutomation.getElementBounds(${JSON.stringify(selector)})`,
+    true,
+  ) as RendererAutomationElementBounds;
+
+  if (!bounds) {
+    throw new Error(`Unable to find screenshot selector: ${selector}`);
+  }
+
+  return {
+    x: Math.max(0, Math.floor(bounds.x * bounds.devicePixelRatio)),
+    y: Math.max(0, Math.floor(bounds.y * bounds.devicePixelRatio)),
+    width: Math.max(1, Math.ceil(bounds.width * bounds.devicePixelRatio)),
+    height: Math.max(1, Math.ceil(bounds.height * bounds.devicePixelRatio)),
+  };
+}
+
+function normalizeWindowDimension(value: number | undefined, fallback: number): number {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(960, Math.round(value as number));
 }
 
 function readStringOption(argv: string[], key: string): string | null {
