@@ -1047,8 +1047,8 @@ input {
 
 .apo-preamp-control {
   width: 100%;
-  max-width: 360px;
-  align-self: flex-start;
+  max-width: none;
+  align-self: stretch;
   gap: 8px;
 }
 
@@ -1056,7 +1056,8 @@ input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
-  align-items: start;
+  align-items: center;
+  width: 100%;
 }
 
 .apo-preamp-slider-group {
@@ -1064,8 +1065,8 @@ input {
   flex-direction: column;
   gap: 6px;
   width: 100%;
-  min-width: 240px;
   min-width: 0;
+  justify-self: center;
 }
 
 .apo-preamp-range {
@@ -1080,21 +1081,31 @@ input {
 }
 
 .apo-preamp-ticks {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
-  padding: 0 2px;
+  position: relative;
+  height: 22px;
+  margin-top: 2px;
   color: var(--text-muted);
   font-size: 10px;
   line-height: 1;
 }
 
-.apo-preamp-ticks span {
-  position: relative;
+.apo-preamp-tick {
+  position: absolute;
+  top: 0;
+  left: var(--tick-position);
   text-align: center;
+  transform: translateX(-50%);
 }
 
-.apo-preamp-ticks span::before {
+.apo-preamp-tick[data-edge='start'] {
+  transform: translateX(0);
+}
+
+.apo-preamp-tick[data-edge='end'] {
+  transform: translateX(-100%);
+}
+
+.apo-preamp-tick::before {
   content: '';
   display: block;
   width: 1px;
@@ -1106,7 +1117,6 @@ input {
 @media (max-width: 720px) {
   .apo-preamp-control {
     width: 100%;
-    max-width: none;
   }
 
   .apo-preamp-inputs {

@@ -624,13 +624,7 @@ app.innerHTML = `
             <div class="apo-preamp-inputs">
               <div class="apo-preamp-slider-group">
                 <input id="apoPreampInput" class="apo-preamp-range range-input" type="range" min="-24" max="24" step="0.1" value="0" />
-                <div class="apo-preamp-ticks" aria-hidden="true">
-                  <span>-24</span>
-                  <span>-12</span>
-                  <span>0</span>
-                  <span>+12</span>
-                  <span>+24</span>
-                </div>
+                <div id="apoPreampTicks" class="apo-preamp-ticks" aria-hidden="true"></div>
               </div>
               <div class="number-input-row">
                 <input id="apoPreampNumberInput" class="apo-preamp-number-input level-number-input" type="number" min="-24" max="24" step="0.1" value="0.0" />
@@ -756,6 +750,7 @@ const apoMeasurementSelect = getElement<HTMLSelectElement>('apoMeasurementSelect
 const apoReferenceSelect = getElement<HTMLSelectElement>('apoReferenceSelect');
 const apoPreampInput = getElement<HTMLInputElement>('apoPreampInput');
 const apoPreampNumberInput = getElement<HTMLInputElement>('apoPreampNumberInput');
+const apoPreampTicks = getElement<HTMLDivElement>('apoPreampTicks');
 const apoPreampHint = getElement<HTMLSpanElement>('apoPreampHint');
 const apoMaxFiltersInput = getElement<HTMLInputElement>('apoMaxFiltersInput');
 const apoFilterList = getElement<HTMLDivElement>('apoFilterList');
@@ -4597,6 +4592,7 @@ function syncApoPreampMeter(): void {
   const displayPreampDb = roundTo(importedPreampDb === null ? 0 : importedPreampDb, 0.1);
 
   apoPreampInput.value = displayPreampDb.toFixed(1);
+  renderApoPreampTicks();
   apoPreampInput.setAttribute(
     'aria-label',
     importedPreampDb === null
@@ -4607,6 +4603,39 @@ function syncApoPreampMeter(): void {
   apoPreampHint.textContent = importedPreampDb === null
     ? 'No imported profile preamp is active for this channel and mode.'
     : 'Imported profile preamp applied to this channel and mode.';
+}
+
+function renderApoPreampTicks(): void {
+  const sliderWidth = Math.max(apoPreampInput.clientWidth, 0);
+  const intervalDb = getApoPreampTickIntervalDb(sliderWidth);
+  const tickValues: number[] = [];
+
+  for (let valueDb = APO_PREAMP_MIN_DB; valueDb <= APO_PREAMP_MAX_DB; valueDb += intervalDb) {
+    tickValues.push(valueDb);
+  }
+
+  apoPreampTicks.innerHTML = tickValues
+    .map((valueDb, index) => {
+      const positionPercent = ((valueDb - APO_PREAMP_MIN_DB) / (APO_PREAMP_MAX_DB - APO_PREAMP_MIN_DB)) * 100;
+      const edge = index === 0 ? 'start' : index === tickValues.length - 1 ? 'end' : 'middle';
+      const label = valueDb > 0 ? `+${valueDb}` : String(valueDb);
+      return `<span class="apo-preamp-tick" data-edge="${edge}" style="--tick-position:${positionPercent.toFixed(4)}%">${label}</span>`;
+    })
+    .join('');
+}
+
+function getApoPreampTickIntervalDb(sliderWidth: number): number {
+  const availableTickCount = Math.max(5, Math.floor(sliderWidth / 54) + 1);
+  const candidateIntervals = [1, 2, 3, 4, 6, 8, 12, 24];
+
+  for (const intervalDb of candidateIntervals) {
+    const tickCount = Math.floor((APO_PREAMP_MAX_DB - APO_PREAMP_MIN_DB) / intervalDb) + 1;
+    if (tickCount <= availableTickCount) {
+      return intervalDb;
+    }
+  }
+
+  return 24;
 }
 
 function syncApoEnableToggle(): void {
