@@ -19,7 +19,9 @@
   --control-height: 36px;
   --control-height-compact: 28px;
   --control-padding-x: 10px;
-  --button-min-width: 96px;
+  --button-min-width: 76px;
+  --sidebar-width: 272px;
+  --sidebar-collapsed-width: 34px;
   color-scheme: dark;
   scrollbar-color: var(--accent) var(--panel);
   scrollbar-width: thin;
@@ -82,20 +84,221 @@ input {
   height: auto;
 }
 
+.header-spacer {
+  width: min(100%, 194px);
+}
+
+.header-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.header-tabs-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius);
+  padding: var(--space-1);
+}
+
+.header-tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-radius: var(--control-radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  height: var(--control-height-compact);
+  min-width: 80px;
+  padding: 0 var(--space-3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.header-tab:hover {
+  color: var(--text);
+  background: var(--input-bg);
+}
+
+.header-tab[data-active='true'] {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* Tab-based visibility */
+.grid[data-active-tab='measure'] [data-tab-content]:not([data-tab-content~='measure']),
+.grid[data-active-tab='equalizer'] [data-tab-content]:not([data-tab-content~='equalizer']),
+.grid[data-active-tab='autocal'] [data-tab-content]:not([data-tab-content~='autocal']) {
+  display: none;
+}
+
+/* When on measure tab, measurement plot takes full height */
+.grid[data-active-tab='measure'] .measure-content,
+.grid[data-active-tab='autocal'] .measure-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.grid[data-active-tab='measure'] #measurementsPlotCard,
+.grid[data-active-tab='autocal'] #measurementsPlotCard {
+  flex: 1;
+  min-height: 0;
+}
+
+/* When on equalizer tab, equalizer content is visible */
+.grid[data-active-tab='equalizer'] .equalizer-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Adjust plots container layout for measure/autocal tabs */
+.grid[data-active-tab='measure'] .plots-container,
+.grid[data-active-tab='autocal'] .plots-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.grid[data-active-tab='measure'] .measure-content,
+.grid[data-active-tab='autocal'] .measure-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.grid[data-active-tab='measure'] #measurementsPlotCard,
+.grid[data-active-tab='autocal'] #measurementsPlotCard {
+  flex: 1;
+  min-height: 400px;
+}
+
+/* Make right panel expand when on measure/autocal tabs */
+.grid[data-active-tab='measure'] > .section,
+.grid[data-active-tab='autocal'] > .section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.grid[data-active-tab='measure'] > .section .plots-container,
+.grid[data-active-tab='autocal'] > .section .plots-container {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Hide plots container entirely when on equalizer tab (left panel hidden) */
+.grid[data-active-tab='equalizer'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.grid[data-active-tab='equalizer'] > .options-stack {
+  display: none;
+}
+
+.grid[data-active-tab='equalizer'] > .section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.grid[data-active-tab='equalizer'] > .section .plots-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.grid[data-active-tab='equalizer'] .equalizer-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .grid {
   display: grid;
-  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   gap: var(--space-3);
   flex: 1 1 auto;
   min-height: 0;
 }
 
+.grid[data-measure-sidebar-collapsed='true'] {
+  grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr);
+}
+
 .options-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-width: 0;
   min-height: 0;
+  position: relative;
+}
+
+.options-stack > .sidebar-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.options-stack[data-collapsed='true'] > .sidebar-content {
+  display: none;
+}
+
+.sidebar-toggle {
+  position: absolute;
+  top: 8px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 1px solid var(--input-border);
+  border-radius: 999px;
+  background: var(--input-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  z-index: 3;
+}
+
+.sidebar-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.options-stack > .sidebar-toggle,
+.equalizer-settings-sidebar > .sidebar-toggle {
+  margin: 0;
+}
+
+.options-stack > .sidebar-toggle,
+.equalizer-settings-sidebar > .sidebar-toggle {
+  right: -12px;
 }
 
 .panel {
@@ -110,7 +313,7 @@ input {
 .section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-height: 0;
 }
 
@@ -251,8 +454,18 @@ input {
 }
 
 .folder-row.folder-row-actions > .btn {
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-width: 0;
+}
+
+.folder-row.folder-row-actions {
+  flex-wrap: wrap;
+}
+
+#refreshDevicesButton,
+#runMeasurementButton {
+  align-self: flex-start;
+  min-width: 110px;
 }
 
 .folder-chip {
@@ -300,7 +513,7 @@ input {
 
 .btn {
   min-height: var(--control-height);
-  padding: 0 14px;
+  padding: 0 12px;
   border: none;
   border-radius: var(--control-radius);
   cursor: pointer;
@@ -384,7 +597,8 @@ input {
 }
 
 .automation-run-button {
-  align-self: stretch;
+  align-self: flex-start;
+  min-width: 172px;
 }
 
 .automation-progress {
@@ -1014,6 +1228,127 @@ input {
   background: rgba(255, 255, 255, 0.015);
 }
 
+.equalizer-layout {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.equalizer-layout[data-left-collapsed='true'] {
+  grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr);
+}
+
+.equalizer-settings-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.equalizer-settings-sidebar #apoCard {
+  height: 100%;
+  gap: var(--space-3);
+}
+
+.equalizer-settings-sidebar > .sidebar-content {
+  width: 100%;
+}
+
+.equalizer-settings-sidebar[data-collapsed='true'] > .sidebar-content {
+  display: none;
+}
+
+.equalizer-settings-sidebar .apo-controls-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.equalizer-settings-sidebar .apo-controls-bar .apo-apply-anchor,
+.equalizer-settings-sidebar .apo-controls-bar .segmented-toggle,
+.equalizer-settings-sidebar .apo-controls-bar .apo-control-group-inline {
+  width: 100%;
+}
+
+.equalizer-settings-sidebar .apo-controls-bar .apo-control-group-inline {
+  justify-content: space-between;
+}
+
+.equalizer-settings-sidebar .apo-toolbar {
+  align-items: stretch;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.equalizer-settings-sidebar .apo-toolbar .section-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.equalizer-settings-sidebar .apo-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  width: auto;
+}
+
+.equalizer-settings-sidebar .apo-toolbar-actions .btn,
+.equalizer-settings-sidebar .apo-toolbar-actions .apo-preset-menu-anchor,
+.equalizer-settings-sidebar .apo-toolbar-actions .apo-preset-menu-anchor > .btn {
+  width: auto;
+}
+
+.equalizer-settings-sidebar .apo-toolbar-actions .btn {
+  justify-content: center;
+  min-width: 0;
+}
+
+.equalizer-settings-sidebar .apo-hint {
+  line-height: 1.45;
+}
+
+.equalizer-settings-sidebar #apoApplyStatus {
+  margin-top: calc(var(--space-1) * -1);
+}
+
+.equalizer-settings-sidebar #apoPreampMeter {
+  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--panel-border);
+}
+
+.equalizer-settings-sidebar .apo-preamp-inputs {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.equalizer-settings-sidebar .apo-preamp-inputs .number-input-row {
+  width: 100%;
+}
+
+.equalizer-settings-sidebar .apo-preamp-number-input {
+  width: 100%;
+}
+
+.equalizer-main-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 0;
+}
+
 .apo-toolbar {
   display: flex;
   align-items: center;
@@ -1221,46 +1556,46 @@ input {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-}
-
-.apo-filter-header {
-  display: grid;
-  grid-template-columns: auto 70px minmax(90px, 1fr) minmax(90px, 1fr) minmax(80px, 1fr) auto;
-  gap: var(--space-2);
-  align-items: center;
-  padding: var(--space-1) var(--space-2);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.apo-filter-header-cell {
-  text-align: center;
+  min-height: 0;
 }
 
 .apo-filter-row {
   display: grid;
-  grid-template-columns: auto 70px minmax(90px, 1fr) minmax(90px, 1fr) minmax(80px, 1fr) auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-2);
-  align-items: center;
-}
-
-.apo-card.is-graphic .apo-filter-header,
-.apo-card.is-graphic .apo-filter-row {
-  grid-template-columns: auto minmax(90px, 1fr) minmax(90px, 1fr) auto;
-}
-
-.apo-card.is-graphic .apo-filter-header-type,
-.apo-card.is-graphic .apo-filter-header-q,
-.apo-card.is-graphic .apo-filter-shape {
-  display: none;
+  align-items: start;
+  padding: var(--space-2);
+  border: 1px solid var(--input-border);
+  border-radius: var(--control-radius);
+  background: rgba(255, 255, 255, 0.015);
 }
 
 .apo-filter-row.is-hidden {
   opacity: 0.6;
+}
+
+.apo-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.apo-filter-field-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.apo-filter-field-action {
+  grid-column: 1 / -1;
+}
+
+.apo-filter-field-action .btn {
+  width: auto;
+  align-self: flex-start;
 }
 
 .apo-filter-row select,
@@ -1280,6 +1615,10 @@ input {
   gap: 6px;
   color: var(--text-muted);
   min-height: var(--control-height);
+  padding: 0 var(--control-padding-x);
+  border: 1px solid var(--input-border);
+  border-radius: var(--control-radius);
+  background: var(--input-bg);
 }
 
 .apo-filter-enabled input {
@@ -1335,112 +1674,10 @@ input {
   box-shadow: 0 0 0 1px rgba(240, 121, 0, 0.2);
 }
 
-.apo-filter-pagination {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-2);
-  border-top: 1px solid var(--panel-border);
-  margin-top: var(--space-2);
-}
-
-.apo-filter-pagination-nav {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  flex-wrap: nowrap;
-  white-space: nowrap;
-}
-
-.apo-filter-pagination-jump {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.apo-filter-page-size-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.apo-filter-page-jump-label {
-  display: inline-flex;
-  align-items: center;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.apo-filter-page-size-select {
-  min-height: var(--control-height-compact);
-  padding: 0 8px;
-  background: var(--input-bg);
-  border: 1px solid var(--input-border);
-  border-radius: var(--control-radius);
-  color: var(--text);
-  font-size: 12px;
-}
-
-.apo-filter-page-size-select:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(240, 121, 0, 0.2);
-}
-
-.apo-filter-page-buttons {
-  display: flex;
-  gap: var(--space-1);
-  flex-wrap: nowrap;
-  justify-content: center;
-  white-space: nowrap;
-}
-
-.apo-filter-page-info {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.apo-filter-page-input {
-  width: 50px;
-  min-height: var(--control-height-compact);
-  padding: 0 6px;
-  background: var(--input-bg);
-  border: 1px solid var(--input-border);
-  border-radius: var(--control-radius);
-  color: var(--text);
-  font-size: 12px;
-  text-align: center;
-}
-
-.apo-filter-page-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(240, 121, 0, 0.2);
-}
-
-.apo-filter-pagination-ellipsis {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  min-height: var(--control-height-compact);
-  padding: 0 6px;
-  font-size: 12px;
-  color: var(--text-muted);
-  user-select: none;
-}
-
-.btn-small {
-  min-width: 32px;
-  min-height: var(--control-height-compact);
-  padding: 0 10px;
-  font-size: 12px;
+.grid[data-active-tab='equalizer'] #apoEqModeToggle,
+.grid[data-active-tab='equalizer'] #generateApoFiltersButton,
+.grid[data-active-tab='equalizer'] .apo-hidden-controls {
+  display: none;
 }
 
 .log-list {
@@ -1575,6 +1812,10 @@ input {
   .apo-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .equalizer-layout {
+    grid-template-columns: 1fr;
   }
 
   .apo-grid,

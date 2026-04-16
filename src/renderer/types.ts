@@ -195,8 +195,6 @@ export type AppState = {
   apoMaxBoostDb: number;
   apoMaxCutDb: number;
   nextApoFilterIndex: number;
-  apoFilterListPage: number;
-  apoFilterListPageSize: number;
   latestStatusMessage: string;
   latestStatusTone: StatusTone;
   equalizerApoStatus: EqualizerApoStatus | null;

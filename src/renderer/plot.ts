@@ -6,6 +6,7 @@ import { getMeasurementPointsForDisplay } from './measurements';
 import {
   apoFilterKindUsesGain,
   formatApoFilterKindLabel,
+  formatApoFilterShapeValue,
   getApoFilterNodeGainDb,
   getApoFilterResponseDb,
   getApoFilterShapeLabel,
@@ -1522,6 +1523,7 @@ export function attachApoPlotInteractions(input: {
   responseMultiplier: number;
   preampDb: number;
   lockFrequency: boolean;
+  onFilterSelect: (filterId: string) => void;
   onFilterDrag: ApoPlotDragHandler;
   onDragEnd: () => void;
   onAddFilter: (frequencyHz: number, gainDb: number) => void;
@@ -1535,6 +1537,7 @@ export function attachApoPlotInteractions(input: {
       responseMultiplier: number;
       preampDb: number;
       lockFrequency: boolean;
+      onFilterSelect: (filterId: string) => void;
       onFilterDrag: ApoPlotDragHandler;
       onDragEnd: () => void;
       onAddFilter: (frequencyHz: number, gainDb: number) => void;
@@ -1550,6 +1553,7 @@ export function attachApoPlotInteractions(input: {
     plotCardWithController.__apoPlotController.responseMultiplier = input.responseMultiplier;
     plotCardWithController.__apoPlotController.preampDb = input.preampDb;
     plotCardWithController.__apoPlotController.lockFrequency = input.lockFrequency;
+    plotCardWithController.__apoPlotController.onFilterSelect = input.onFilterSelect;
     plotCardWithController.__apoPlotController.onFilterDrag = input.onFilterDrag;
     plotCardWithController.__apoPlotController.onDragEnd = input.onDragEnd;
     plotCardWithController.__apoPlotController.onAddFilter = input.onAddFilter;
@@ -1563,6 +1567,16 @@ export function attachApoPlotInteractions(input: {
     if (hoverLabel) {
       hoverLabel.textContent = 'Hover: --';
     }
+  };
+
+  const formatNodeTooltipText = (filter: ApoFilter, frequencyHz: number, gainDb: number): string => {
+    const tooltipParts = [`${frequencyHz.toFixed(0)} Hz`, `${gainDb.toFixed(1)} dB`];
+
+    if ((plotCardWithController.__apoPlotController?.eqMode ?? input.eqMode) !== 'graphic') {
+      tooltipParts.push(`${getApoFilterShapeLabel(filter.kind)} ${formatApoFilterShapeValue(filter)}`);
+    }
+
+    return tooltipParts.join(', ');
   };
 
   const getGeometryFromSvg = (filters: ApoFilter[]): ResponsePlotGeometry | null => {
@@ -1694,6 +1708,8 @@ export function attachApoPlotInteractions(input: {
       return;
     }
 
+    controller.onFilterSelect(filterId);
+
     event.preventDefault();
 
     // Create tooltip positioned above the node (append to body to survive re-renders)
@@ -1713,9 +1729,7 @@ export function attachApoPlotInteractions(input: {
     tooltip.id = 'apo-node-tooltip';
 
     // Set initial content from filter values
-    const initialFreq = filter ? filter.frequencyHz.toFixed(0) : '0';
-    const initialGain = filter ? filter.gainDb.toFixed(1) : '0.0';
-    tooltip.textContent = `${initialFreq} Hz, ${initialGain} dB`;
+    tooltip.textContent = formatNodeTooltipText(filter, filter.frequencyHz, filter.gainDb);
 
     // Position using the filter's graph coordinates so it still works when many nodes are hidden.
     const nodeCx = getPlotX(filter.frequencyHz, geometry);
@@ -1811,7 +1825,7 @@ export function attachApoPlotInteractions(input: {
             },
             controller.sampleRate,
           );
-      tooltip.textContent = `${frequencyHz.toFixed(0)} Hz, ${displayedGainDb.toFixed(1)} dB`;
+      tooltip.textContent = formatNodeTooltipText(activeFilter ?? filterFallback(frequencyHz), frequencyHz, displayedGainDb);
 
       const nodeX = getPlotX(frequencyHz, geometry);
       const nodeY = getPlotY(
@@ -1945,11 +1959,25 @@ export function attachApoPlotInteractions(input: {
     responseMultiplier: input.responseMultiplier,
     preampDb: input.preampDb,
     lockFrequency: input.lockFrequency,
+    onFilterSelect: input.onFilterSelect,
     onFilterDrag: input.onFilterDrag,
     onDragEnd: input.onDragEnd,
     onAddFilter: input.onAddFilter,
     draggingFilterId: null,
     cleanup,
+  };
+}
+
+function filterFallback(frequencyHz: number): ApoFilter {
+  return {
+    id: '',
+    enabled: true,
+    kind: 'PK',
+    frequencyHz,
+    gainDb: 0,
+    q: 1.41,
+    order: null,
+    slopeDbPerOct: null,
   };
 }
 

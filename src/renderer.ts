@@ -34,7 +34,6 @@ import {
   DEFAULT_APO_MAX_FILTERS,
   MAX_GRAPHIC_APO_FILTERS,
   MAX_PARAMETRIC_APO_FILTERS,
-  APO_FILTER_LIST_PAGE_SIZE,
   DEFAULT_AUTOMATION_ALGORITHM,
   DEFAULT_AUTOMATION_DELAY_SECONDS,
   DEFAULT_AUTOMATION_REGRESSION_LIMIT,
@@ -52,6 +51,7 @@ import {
   END_FREQUENCY_STORAGE_KEY,
   INPUT_DEVICE_STORAGE_KEY,
   INPUT_CHANNEL_STORAGE_KEY,
+  MEASURE_SIDEBAR_COLLAPSED_STORAGE_KEY,
   MEASUREMENT_BACKEND_STORAGE_KEY,
   MEASUREMENT_KEEP_COUNT_STORAGE_KEY,
   MOMENTUM_BLEND_STORAGE_KEY,
@@ -61,6 +61,7 @@ import {
   NORMALIZE_PLOT_STORAGE_KEY,
   OUTPUT_CHANNEL_STORAGE_KEY,
   OUTPUT_DEVICE_STORAGE_KEY,
+  EQ_SETTINGS_SIDEBAR_COLLAPSED_STORAGE_KEY,
   POST_ROLL_SECONDS,
   PRE_ROLL_SECONDS,
   PID_DERIVATIVE_GAIN_STORAGE_KEY,
@@ -229,10 +230,29 @@ app.innerHTML = `
   <main class="shell">
     <header class="header">
       <img class="header-logo" src="${logoUrl}" alt="dutocal" />
+      <nav class="header-tabs">
+        <div class="header-tabs-inner">
+          <button class="header-tab" type="button" data-tab="measure">Measure</button>
+          <button class="header-tab" type="button" data-tab="equalizer">Equalizer</button>
+          <button class="header-tab" type="button" data-tab="autocal">Autocal</button>
+        </div>
+      </nav>
+      <div class="header-spacer"></div>
     </header>
 
-    <section class="grid">
-      <div class="options-stack">
+    <section class="grid" data-active-tab="measure">
+      <div class="options-stack" data-tab-content="measure autocal">
+        <button
+          id="measureSidebarToggleButton"
+          class="sidebar-toggle"
+          type="button"
+          aria-label="Collapse measurement sidebar"
+          title="Collapse measurement sidebar"
+          aria-expanded="true"
+        >
+          <span aria-hidden="true">◀</span>
+        </button>
+        <div class="sidebar-content">
         <section class="panel section">
           <span class="section-title">Input</span>
 
@@ -501,79 +521,13 @@ app.innerHTML = `
             </div>
           </div>
         </section>
+        </div>
       </div>
 
       <section class="panel section">
         <div id="statusPill" class="status-bar" data-tone="idle">Ready</div>
 
-        <div id="summaryGrid" class="metrics">
-          <div class="metric">
-            <div class="metric-label">Latency</div>
-            <div class="metric-value" id="latencyValue">--</div>
-          </div>
-          <div class="metric">
-            <div class="metric-label">Peak</div>
-            <div class="metric-value" id="peakValue">--</div>
-          </div>
-          <div class="metric">
-            <div class="metric-label">RMS</div>
-            <div class="metric-value" id="rmsValue">--</div>
-          </div>
-          <div class="metric">
-            <div class="metric-label">Path</div>
-            <div class="metric-value" id="savedPathValue">--</div>
-          </div>
-        </div>
-
         <div id="plotsContainer" class="plots-container">
-          <div class="plot-toolbar plot-toolbar-measurements">
-            <div class="plot-toolbar-actions">
-              <label class="plot-toggle">
-                <input id="normalizePlotToggle" type="checkbox" />
-                <span>Normalize @ 1 kHz</span>
-              </label>
-              <label class="plot-smoothing" for="smoothingModeSelect">
-                <span>Smoothing</span>
-                <select id="smoothingModeSelect">
-                  ${SMOOTHING_MODE_OPTIONS.map((value) => `<option value="${value}">${formatSmoothingModeLabel(value)}</option>`).join('')}
-                </select>
-              </label>
-              <button id="importMeasurementsButton" class="btn btn-secondary" type="button">
-                Import
-              </button>
-              <button id="importReferenceButton" class="btn btn-secondary" type="button">
-                Import Ref
-              </button>
-            </div>
-          </div>
-          <div class="apo-controls-bar">
-            <div class="apo-apply-anchor">
-              <div id="apoEnableToggle" class="segmented-toggle apo-enable-toggle" role="tablist" aria-label="EQ enable selector">
-                <button id="apoEnableOffButton" class="segmented-toggle-option" type="button" data-apo-enabled="false" role="tab" aria-selected="true">EQ Off</button>
-                <button id="apoEnableOnButton" class="segmented-toggle-option" type="button" data-apo-enabled="true" role="tab" aria-selected="false">EQ On</button>
-                <span class="segmented-toggle-thumb" aria-hidden="true"></span>
-              </div>
-              <div id="apoApplyWarning" class="apo-apply-warning" hidden>
-                <span>PEACE is running</span>
-              </div>
-            </div>
-            <div id="apoChannelProfileToggle" class="segmented-toggle" role="tablist" aria-label="EQ channel selector">
-              <button id="apoChannelProfileAllButton" class="segmented-toggle-option" type="button" data-apo-channel-profile="all" role="tab" aria-selected="true">All</button>
-              <button id="apoChannelProfileLeftButton" class="segmented-toggle-option" type="button" data-apo-channel-profile="left" role="tab" aria-selected="false">Left</button>
-              <button id="apoChannelProfileRightButton" class="segmented-toggle-option" type="button" data-apo-channel-profile="right" role="tab" aria-selected="false">Right</button>
-              <span class="segmented-toggle-thumb" aria-hidden="true"></span>
-            </div>
-            <div id="apoEqModeToggle" class="segmented-toggle" role="tablist" aria-label="EQ mode selector">
-              <button id="apoEqModeParametricButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="parametric" role="tab" aria-selected="true">Parametric</button>
-              <button id="apoEqModeGraphicButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="graphic" role="tab" aria-selected="false">Graphic</button>
-              <span id="apoEqModeThumb" class="segmented-toggle-thumb" aria-hidden="true"></span>
-            </div>
-            <label class="apo-control-group apo-control-group-inline" for="apoMaxFiltersInput">
-              <span>Filters</span>
-              <input id="apoMaxFiltersInput" type="number" min="1" max="${MAX_PARAMETRIC_APO_FILTERS}" step="1" value="${DEFAULT_APO_MAX_FILTERS}" />
-            </label>
-          </div>
-
           <input id="measurementFileInput" type="file" accept=".txt,.csv,.json,.targetcurve,text/plain,application/json" multiple hidden />
           <input id="referenceFileInput" type="file" accept=".txt,.csv,.targetcurve,text/plain" multiple hidden />
           <input id="leftCalibrationFileInput" type="file" accept=".txt,.csv,.json,.targetcurve,text/plain,application/json" hidden />
@@ -581,97 +535,156 @@ app.innerHTML = `
           <input id="configFileInput" type="file" accept=".json,application/json,text/plain" hidden />
           <input id="apoConfigFileInput" type="file" accept=".txt,.peace,.peq,.ini,text/plain" hidden />
 
-          <div id="measurementsPlotCard" class="plot-card">
-            <span style="color:var(--text-muted);font-size:11px">Run or import measurements to plot response</span>
-          </div>
-          <div class="apo-plot-stack">
-            <div id="apoPlotCard" class="plot-card">
-              <span style="color:var(--text-muted);font-size:11px">Enable filters to see EQ graph</span>
-            </div>
-            <div class="apo-preview-divider" aria-hidden="true"></div>
-            <div class="field apo-config-preview-field">
-              <label for="apoConfigPreview">APO Config Preview</label>
-              <textarea id="apoConfigPreview" class="apo-config-preview" readonly></textarea>
-            </div>
-          </div>
-        </div>
-
-        <div id="apoCard" class="apo-card">
-          <div class="apo-toolbar">
-            <span class="section-title">Equalizer</span>
-            <div class="apo-toolbar-actions">
-              <button id="generateApoFiltersButton" class="btn btn-secondary" type="button">
-                Generate Baseline
-              </button>
-              <button id="addApoFilterButton" class="btn btn-secondary" type="button">
-                Add Filter
-              </button>
-              <button id="clearApoFiltersButton" class="btn btn-secondary" type="button">
-                Clear
-              </button>
-              <div id="apoPresetMenuAnchor" class="apo-preset-menu-anchor">
-                <button
-                  id="selectApoPresetButton"
-                  class="btn btn-secondary"
-                  type="button"
-                  aria-haspopup="menu"
-                  aria-expanded="false"
-                >
-                  Select Preset
+          <div class="measure-content" data-tab-content="measure autocal">
+            <div class="plot-toolbar plot-toolbar-measurements">
+              <div class="plot-toolbar-actions">
+                <label class="plot-toggle">
+                  <input id="normalizePlotToggle" type="checkbox" />
+                  <span>Normalize @ 1 kHz</span>
+                </label>
+                <label class="plot-smoothing" for="smoothingModeSelect">
+                  <span>Smoothing</span>
+                  <select id="smoothingModeSelect">
+                    ${SMOOTHING_MODE_OPTIONS.map((value) => `<option value="${value}">${formatSmoothingModeLabel(value)}</option>`).join('')}
+                  </select>
+                </label>
+                <button id="importMeasurementsButton" class="btn btn-secondary" type="button">
+                  Import
                 </button>
-                <div id="apoPresetMenu" class="apo-preset-menu" role="menu" hidden></div>
-              </div>
-              <button id="importApoConfigButton" class="btn btn-secondary" type="button">
-                Import EQ
-              </button>
-              <button id="exportApoConfigButton" class="btn btn-secondary" type="button">
-                Export EQ
-              </button>
-            </div>
-          </div>
-
-          <div class="apo-grid">
-            <div class="field">
-              <label for="apoMeasurementSelect">Measurement</label>
-              <select id="apoMeasurementSelect"></select>
-            </div>
-
-            <div class="field">
-              <label for="apoReferenceSelect">Target</label>
-              <select id="apoReferenceSelect"></select>
-            </div>
-          </div>
-
-
-
-          <span class="apo-hint">Generate filters from the selected measurement and target curve, then fine-tune them below or iterate automatically from the left panel.</span>
-          <span id="apoApplyStatus" class="apo-hint"></span>
-
-          <div id="apoPreampMeter" class="apo-control-group apo-preamp-control" aria-live="polite">
-            <label for="apoPreampInput">Preamp</label>
-            <div class="apo-preamp-inputs">
-              <div class="apo-preamp-slider-group">
-                <input id="apoPreampInput" class="apo-preamp-range range-input" type="range" min="-24" max="24" step="0.1" value="0" />
-                <div id="apoPreampTicks" class="apo-preamp-ticks" aria-hidden="true"></div>
-              </div>
-              <div class="number-input-row">
-                <input id="apoPreampNumberInput" class="apo-preamp-number-input level-number-input" type="number" min="-24" max="24" step="0.1" value="0.0" />
-                <span class="value-chip">dB</span>
+                <button id="importReferenceButton" class="btn btn-secondary" type="button">
+                  Import Ref
+                </button>
               </div>
             </div>
-            <span id="apoPreampHint" class="apo-hint">Imports the profile preamp from PEACE and Equalizer APO files when present.</span>
+            <div id="measurementsPlotCard" class="plot-card">
+              <span style="color:var(--text-muted);font-size:11px">Run or import measurements to plot response</span>
+            </div>
           </div>
+          <div class="equalizer-content" data-tab-content="equalizer">
+            <div class="equalizer-layout">
+              <aside class="equalizer-settings-sidebar">
+                <button
+                  id="equalizerSettingsSidebarToggleButton"
+                  class="sidebar-toggle"
+                  type="button"
+                  aria-label="Collapse equalizer settings sidebar"
+                  title="Collapse equalizer settings sidebar"
+                  aria-expanded="true"
+                >
+                  <span aria-hidden="true">◀</span>
+                </button>
+                <div class="sidebar-content">
+                <div id="apoCard" class="apo-card">
+                  <div class="apo-controls-bar">
+                    <div class="apo-apply-anchor">
+                      <div id="apoEnableToggle" class="segmented-toggle apo-enable-toggle" role="tablist" aria-label="EQ enable selector">
+                        <button id="apoEnableOffButton" class="segmented-toggle-option" type="button" data-apo-enabled="false" role="tab" aria-selected="true">EQ Off</button>
+                        <button id="apoEnableOnButton" class="segmented-toggle-option" type="button" data-apo-enabled="true" role="tab" aria-selected="false">EQ On</button>
+                        <span class="segmented-toggle-thumb" aria-hidden="true"></span>
+                      </div>
+                      <div id="apoApplyWarning" class="apo-apply-warning" hidden>
+                        <span>PEACE is running</span>
+                      </div>
+                    </div>
+                    <div id="apoChannelProfileToggle" class="segmented-toggle" role="tablist" aria-label="EQ channel selector">
+                      <button id="apoChannelProfileAllButton" class="segmented-toggle-option" type="button" data-apo-channel-profile="all" role="tab" aria-selected="true">All</button>
+                      <button id="apoChannelProfileLeftButton" class="segmented-toggle-option" type="button" data-apo-channel-profile="left" role="tab" aria-selected="false">Left</button>
+                      <button id="apoChannelProfileRightButton" class="segmented-toggle-option" type="button" data-apo-channel-profile="right" role="tab" aria-selected="false">Right</button>
+                      <span class="segmented-toggle-thumb" aria-hidden="true"></span>
+                    </div>
+                    <div id="apoEqModeToggle" class="segmented-toggle" role="tablist" aria-label="EQ mode selector">
+                      <button id="apoEqModeParametricButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="parametric" role="tab" aria-selected="true">Parametric</button>
+                      <button id="apoEqModeGraphicButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="graphic" role="tab" aria-selected="false">Graphic</button>
+                      <span id="apoEqModeThumb" class="segmented-toggle-thumb" aria-hidden="true"></span>
+                    </div>
+                    <label class="apo-control-group apo-control-group-inline" for="apoMaxFiltersInput">
+                      <span>Filters</span>
+                      <input id="apoMaxFiltersInput" type="number" min="1" max="${MAX_PARAMETRIC_APO_FILTERS}" step="1" value="${DEFAULT_APO_MAX_FILTERS}" />
+                    </label>
+                  </div>
 
-          <div class="apo-filter-header">
-            <span class="apo-filter-header-cell">On</span>
-            <span class="apo-filter-header-cell apo-filter-header-type">Type</span>
-            <span class="apo-filter-header-cell">Freq (Hz)</span>
-            <span class="apo-filter-header-cell">Gain (dB)</span>
-            <span class="apo-filter-header-cell apo-filter-header-q">Q / Order / Slope</span>
-            <span class="apo-filter-header-cell">Action</span>
+                  <div class="apo-toolbar">
+                    <span class="section-title">Equalizer</span>
+                    <div class="apo-toolbar-actions">
+                      <button id="generateApoFiltersButton" class="btn btn-secondary" type="button">
+                        Generate Baseline
+                      </button>
+                      <button id="addApoFilterButton" class="btn btn-secondary" type="button">
+                        Add Filter
+                      </button>
+                      <button id="clearApoFiltersButton" class="btn btn-secondary" type="button">
+                        Clear
+                      </button>
+                      <div id="apoPresetMenuAnchor" class="apo-preset-menu-anchor">
+                        <button
+                          id="selectApoPresetButton"
+                          class="btn btn-secondary"
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded="false"
+                        >
+                          Select Preset
+                        </button>
+                        <div id="apoPresetMenu" class="apo-preset-menu" role="menu" hidden></div>
+                      </div>
+                      <button id="importApoConfigButton" class="btn btn-secondary" type="button">
+                        Import EQ
+                      </button>
+                      <button id="exportApoConfigButton" class="btn btn-secondary" type="button">
+                        Export EQ
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="apo-grid apo-hidden-controls">
+                    <div class="field">
+                      <label for="apoMeasurementSelect">Measurement</label>
+                      <select id="apoMeasurementSelect"></select>
+                    </div>
+
+                    <div class="field">
+                      <label for="apoReferenceSelect">Target</label>
+                      <select id="apoReferenceSelect"></select>
+                    </div>
+                  </div>
+
+                  <span class="apo-hint">Generate filters from the selected measurement and target curve, then fine-tune them below or iterate automatically from the left panel.</span>
+                  <span id="apoApplyStatus" class="apo-hint"></span>
+
+                  <div id="apoPreampMeter" class="apo-control-group apo-preamp-control" aria-live="polite">
+                    <label for="apoPreampInput">Preamp</label>
+                    <div class="apo-preamp-inputs">
+                      <div class="apo-preamp-slider-group">
+                        <input id="apoPreampInput" class="apo-preamp-range range-input" type="range" min="-24" max="24" step="0.1" value="0" />
+                        <div id="apoPreampTicks" class="apo-preamp-ticks" aria-hidden="true"></div>
+                      </div>
+                      <div class="number-input-row">
+                        <input id="apoPreampNumberInput" class="apo-preamp-number-input level-number-input" type="number" min="-24" max="24" step="0.1" value="0.0" />
+                        <span class="value-chip">dB</span>
+                      </div>
+                    </div>
+                    <span id="apoPreampHint" class="apo-hint">Imports the profile preamp from PEACE and Equalizer APO files when present.</span>
+                  </div>
+                </div>
+                </div>
+              </aside>
+
+              <div class="equalizer-main-panel">
+                <div class="apo-plot-stack">
+                  <div id="apoPlotCard" class="plot-card">
+                    <span style="color:var(--text-muted);font-size:11px">Enable filters to see EQ graph</span>
+                  </div>
+                  <div class="apo-preview-divider" aria-hidden="true"></div>
+                  <div id="apoFilterList" class="apo-filter-list"></div>
+                  <div class="apo-preview-divider" aria-hidden="true"></div>
+                  <div class="field apo-config-preview-field">
+                    <label for="apoConfigPreview">APO Config Preview</label>
+                    <textarea id="apoConfigPreview" class="apo-config-preview" readonly></textarea>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-
-          <div id="apoFilterList" class="apo-filter-list"></div>
 
         </div>
 
@@ -740,10 +753,9 @@ const automationToleranceInputs: Record<AutomationToleranceBand, HTMLInputElemen
   brilliance: getElement<HTMLInputElement>('automationTolerancebrillianceInput'),
 };
 const statusPill = getElement<HTMLDivElement>('statusPill');
-const latencyValue = getElement<HTMLSpanElement>('latencyValue');
-const peakValue = getElement<HTMLSpanElement>('peakValue');
-const rmsValue = getElement<HTMLSpanElement>('rmsValue');
-const savedPathValue = getElement<HTMLSpanElement>('savedPathValue');
+const headerTabs = document.querySelectorAll<HTMLButtonElement>('.header-tab');
+const measureSidebarToggleButton = getElement<HTMLButtonElement>('measureSidebarToggleButton');
+const equalizerSettingsSidebarToggleButton = getElement<HTMLButtonElement>('equalizerSettingsSidebarToggleButton');
 const importMeasurementsButton = getElement<HTMLButtonElement>('importMeasurementsButton');
 const importReferenceButton = getElement<HTMLButtonElement>('importReferenceButton');
 const normalizePlotToggle = getElement<HTMLInputElement>('normalizePlotToggle');
@@ -790,6 +802,9 @@ const apoConfigPreview = getElement<HTMLTextAreaElement>('apoConfigPreview');
 const apoApplyStatus = getElement<HTMLSpanElement>('apoApplyStatus');
 const logList = getElement<HTMLUListElement>('logList');
 const toastButton = getElement<HTMLButtonElement>('toastButton');
+const optionsStack = document.querySelector<HTMLElement>('.options-stack');
+const equalizerLayout = document.querySelector<HTMLElement>('.equalizer-layout');
+const equalizerSettingsSidebar = document.querySelector<HTMLElement>('.equalizer-settings-sidebar');
 
 const PLOT_ASPECT_RATIO = DEFAULT_PLOT_WIDTH / DEFAULT_PLOT_HEIGHT;
 const PLOTS_GAP_PX = 12;
@@ -803,6 +818,7 @@ const storedApoEqModes = readStoredApoEqModes();
 const storedApoMaxFilterCounts = readStoredApoMaxFilterCounts();
 const storedApoImportedPreampDb = readStoredApoImportedPreampDb();
 const storedApoImportedBlockRepeatCount = readStoredApoImportedBlockRepeatCount();
+let selectedApoFilterId: string | null = null;
 
 const state: AppState = {
   busy: false,
@@ -912,8 +928,6 @@ const state: AppState = {
   apoMaxBoostDb: DEFAULT_APO_MAX_BOOST_DB,
   apoMaxCutDb: DEFAULT_APO_MAX_CUT_DB,
   nextApoFilterIndex: 1,
-  apoFilterListPage: 1,
-  apoFilterListPageSize: APO_FILTER_LIST_PAGE_SIZE,
   latestStatusMessage: 'Ready',
   latestStatusTone: 'idle',
   equalizerApoStatus: null,
@@ -1122,6 +1136,114 @@ saveConfigButton.addEventListener('click', () => {
 
 importConfigButton.addEventListener('click', () => {
   configFileInput.click();
+});
+
+const gridElement = document.querySelector<HTMLElement>('.grid');
+let isMeasureSidebarCollapsed = localStorage.getItem(MEASURE_SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
+let isEqualizerSettingsSidebarCollapsed = localStorage.getItem(EQ_SETTINGS_SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
+
+function applySidebarQueryOverrides(): void {
+  const searchParams = new URLSearchParams(window.location.search);
+  const measureSidebarQuery = searchParams.get('measureSidebar');
+  const eqSettingsSidebarQuery = searchParams.get('eqSettingsSidebar');
+
+  if (measureSidebarQuery === 'collapsed' || measureSidebarQuery === 'expanded') {
+    isMeasureSidebarCollapsed = measureSidebarQuery === 'collapsed';
+  }
+
+  if (eqSettingsSidebarQuery === 'collapsed' || eqSettingsSidebarQuery === 'expanded') {
+    isEqualizerSettingsSidebarCollapsed = eqSettingsSidebarQuery === 'collapsed';
+  }
+}
+
+function updateSidebarToggleButton(
+  button: HTMLButtonElement,
+  collapsed: boolean,
+  collapsedIcon: string,
+  expandedIcon: string,
+  collapsedLabel: string,
+  expandedLabel: string,
+): void {
+  button.ariaExpanded = String(!collapsed);
+  button.ariaLabel = collapsed ? collapsedLabel : expandedLabel;
+  button.title = collapsed ? collapsedLabel : expandedLabel;
+  button.textContent = collapsed ? collapsedIcon : expandedIcon;
+}
+
+function applySidebarLayoutState(): void {
+  if (gridElement) {
+    gridElement.dataset.measureSidebarCollapsed = String(isMeasureSidebarCollapsed);
+  }
+
+  if (optionsStack) {
+    optionsStack.dataset.collapsed = String(isMeasureSidebarCollapsed);
+  }
+
+  if (equalizerLayout) {
+    equalizerLayout.dataset.leftCollapsed = String(isEqualizerSettingsSidebarCollapsed);
+  }
+
+  if (equalizerSettingsSidebar) {
+    equalizerSettingsSidebar.dataset.collapsed = String(isEqualizerSettingsSidebarCollapsed);
+  }
+
+  updateSidebarToggleButton(
+    measureSidebarToggleButton,
+    isMeasureSidebarCollapsed,
+    '▶',
+    '◀',
+    'Expand measurement sidebar',
+    'Collapse measurement sidebar',
+  );
+  updateSidebarToggleButton(
+    equalizerSettingsSidebarToggleButton,
+    isEqualizerSettingsSidebarCollapsed,
+    '▶',
+    '◀',
+    'Expand equalizer settings sidebar',
+    'Collapse equalizer settings sidebar',
+  );
+}
+
+function getRequestedHeaderTab(): string {
+  const tabFromQuery = new URLSearchParams(window.location.search).get('tab');
+  const tabFromHash = window.location.hash.replace(/^#/, '');
+  const requestedTab = tabFromQuery || tabFromHash;
+
+  return requestedTab === 'equalizer' || requestedTab === 'autocal' ? requestedTab : 'measure';
+}
+
+function setActiveHeaderTab(tabName: string): void {
+  headerTabs.forEach((tab) => {
+    tab.dataset.active = String((tab.dataset.tab ?? 'measure') === tabName);
+  });
+
+  if (gridElement) {
+    gridElement.dataset.activeTab = tabName;
+  }
+}
+
+headerTabs.forEach((tab) => {
+  tab.addEventListener('click', () => {
+    const nextTab = tab.dataset.tab ?? 'measure';
+    setActiveHeaderTab(nextTab);
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete('tab');
+    nextUrl.hash = nextTab;
+    window.history.replaceState(null, '', nextUrl);
+  });
+});
+
+measureSidebarToggleButton.addEventListener('click', () => {
+  isMeasureSidebarCollapsed = !isMeasureSidebarCollapsed;
+  localStorage.setItem(MEASURE_SIDEBAR_COLLAPSED_STORAGE_KEY, String(isMeasureSidebarCollapsed));
+  applySidebarLayoutState();
+});
+
+equalizerSettingsSidebarToggleButton.addEventListener('click', () => {
+  isEqualizerSettingsSidebarCollapsed = !isEqualizerSettingsSidebarCollapsed;
+  localStorage.setItem(EQ_SETTINGS_SIDEBAR_COLLAPSED_STORAGE_KEY, String(isEqualizerSettingsSidebarCollapsed));
+  applySidebarLayoutState();
 });
 
 importLeftCalibrationButton.addEventListener('click', () => {
@@ -1699,64 +1821,6 @@ apoFilterList.addEventListener('click', (event) => {
 
   if (filterId) {
     removeApoFilter(filterId);
-    return;
-  }
-
-  const pageButton = target.closest<HTMLButtonElement>('[data-apo-filter-page]');
-  const pageAction = pageButton?.dataset.apoFilterPage;
-
-  if (pageAction && !state.busy) {
-    if (pageAction === 'jump') {
-      const pageInput = apoFilterList.querySelector<HTMLInputElement>('[data-apo-filter-page-input]');
-      if (pageInput) {
-        handleApoFilterPageJump(pageInput);
-      }
-    } else {
-      handleApoFilterPageChange(pageAction);
-    }
-  }
-});
-
-apoFilterList.addEventListener('keydown', (event) => {
-  const target = event.target;
-
-  if (target instanceof HTMLSelectElement && target.dataset.apoFilterPageSize) {
-    return;
-  }
-
-  // Handle page jump input Enter key
-  if (target instanceof HTMLInputElement && target.dataset.apoFilterPageInput) {
-    if (event.key === 'Enter' && !state.busy) {
-      event.preventDefault();
-      handleApoFilterPageJump(target);
-    }
-    return;
-  }
-
-  // Handle arrow key navigation for pagination
-  if (state.busy) {
-    return;
-  }
-
-  const activeApoFilters = getActiveApoFilters();
-  const totalPages = Math.ceil(activeApoFilters.length / state.apoFilterListPageSize);
-
-  if (totalPages <= 1) {
-    return;
-  }
-
-  if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-    event.preventDefault();
-    handleApoFilterPageChange('prev');
-  } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-    event.preventDefault();
-    handleApoFilterPageChange('next');
-  } else if (event.key === 'Home') {
-    event.preventDefault();
-    handleApoFilterPageChange('first');
-  } else if (event.key === 'End') {
-    event.preventDefault();
-    handleApoFilterPageChange('last');
   }
 });
 
@@ -1803,6 +1867,9 @@ hideToast();
 updateMicrophoneCalibrationLabels();
 updateMeasurementActionState();
 updateAutomationUi();
+setActiveHeaderTab(getRequestedHeaderTab());
+applySidebarQueryOverrides();
+applySidebarLayoutState();
 renderApoSection();
 appendLog('Click Refresh to access microphones and outputs.');
 void refreshEqualizerApoStatus();
@@ -2717,7 +2784,6 @@ async function exportMeasurement(measurementId: string): Promise<void> {
       ],
     });
 
-    savedPathValue.textContent = saveResult.sessionDirectory;
     setStatus('Measurement export complete.', 'success');
     appendLog(`Exported ${measurement.name} to ${saveResult.sessionDirectory}.`, 'success');
     showToast({
@@ -3249,7 +3315,6 @@ function renderMeasurements(): void {
   }
 
   renderPlotCard(visibleMeasurements, visibleReferenceCurves);
-  updateMeasurementSummary();
   updateMeasurementActionState();
   renderApoSection();
 }
@@ -3327,6 +3392,7 @@ function renderPlotCard(
     responseMultiplier: getActiveImportedApoBlockRepeatCount() ?? 1,
     preampDb: getPlotAppliedApoPreampDb(),
     lockFrequency: getActiveApoEqMode() === 'graphic',
+    onFilterSelect: handleApoFilterSelect,
     onFilterDrag: handleApoFilterDrag,
     onDragEnd: handleApoFilterDragEnd,
     onAddFilter: addApoFilterAtPoint,
@@ -3346,45 +3412,6 @@ function updatePlotsLayout(): void {
   if (splitPlotHeight >= MIN_SPLIT_PLOT_HEIGHT_PX) {
     plotsContainer.classList.add('is-split');
   }
-}
-
-function updateMeasurementSummary(): void {
-  const focusedMeasurement = getFocusedMeasurement();
-
-  latencyValue.textContent = formatOptionalMeasurementValue(
-    focusedMeasurement?.summary.latencyMs,
-    'ms',
-  );
-  peakValue.textContent = formatOptionalMeasurementValue(
-    focusedMeasurement?.summary.peakDbfs,
-    'dBFS',
-  );
-  rmsValue.textContent = formatOptionalMeasurementValue(
-    focusedMeasurement?.summary.rmsDbfs,
-    'dBFS',
-  );
-  savedPathValue.textContent = focusedMeasurement?.summary.savedPath ?? '--';
-}
-
-function getFocusedMeasurement(): LoadedMeasurement | null {
-  if (state.focusedMeasurementId) {
-    const focusedMeasurement = state.measurements.find(
-      (measurement) => measurement.id === state.focusedMeasurementId,
-    );
-
-    if (focusedMeasurement) {
-      return focusedMeasurement;
-    }
-  }
-
-  return getLastItem(state.measurements) ?? null;
-}
-
-function formatOptionalMeasurementValue(
-  value: number | null | undefined,
-  unit: string,
-): string {
-  return Number.isFinite(value) ? `${value.toFixed(1)} ${unit}` : '--';
 }
 
 function readStoredMeasurementBackend(): MeasurementBackend {
@@ -3511,7 +3538,6 @@ function persistActiveConfiguration(): void {
     automationBandTolerances: state.automationBandTolerances,
     automationToleranceMaxAcceptableErrorWidthHz: state.automationToleranceMaxAcceptableErrorWidthHz,
     automationRegressionLimit: state.automationRegressionLimit,
-    apoFilterListPageSize: state.apoFilterListPageSize,
     apoChannelProfile: state.apoChannelProfile,
     apoSelectedMeasurementId: state.apoSelectedMeasurementId,
     apoSelectedReferenceId: state.apoSelectedReferenceId,
@@ -3703,7 +3729,6 @@ async function saveConfiguration(): Promise<void> {
       automationBandTolerances: state.automationBandTolerances,
       automationToleranceMaxAcceptableErrorWidthHz: state.automationToleranceMaxAcceptableErrorWidthHz,
       automationRegressionLimit: state.automationRegressionLimit,
-      apoFilterListPageSize: state.apoFilterListPageSize,
       leftMicrophoneCalibration: state.leftMicrophoneCalibration,
       rightMicrophoneCalibration: state.rightMicrophoneCalibration,
     };
@@ -3923,14 +3948,6 @@ function applyImportedConfiguration(
     0,
     20,
   );
-  state.apoFilterListPageSize = clamp(
-    Number.isFinite(Number(config.apoFilterListPageSize))
-      ? Math.round(Number(config.apoFilterListPageSize))
-      : state.apoFilterListPageSize,
-    1,
-    MAX_GRAPHIC_APO_FILTERS,
-  );
-  state.apoFilterListPage = 1;
   state.automationPidIntegralByBand = {};
   state.automationPidPreviousErrorByBand = {};
   state.automationMomentumByBand = {};
@@ -4764,6 +4781,16 @@ function handleApoFilterDrag(
   apoConfigPreview.value = buildApoConfigText();
 }
 
+function handleApoFilterSelect(filterId: string): void {
+  if (selectedApoFilterId === filterId) {
+    return;
+  }
+
+  selectedApoFilterId = filterId;
+  syncSelectedApoFilter();
+  apoFilterList.innerHTML = renderApoFilterList();
+}
+
 function handleApoFilterDragEnd(): void {
   renderApoSection();
   reapplyApoConfigIfEnabled();
@@ -4980,26 +5007,8 @@ function renderApoSection(): void {
   apoMaxFiltersInput.value = String(getActiveApoMaxFilters());
   syncApoSelectionOptions();
 
-  // Normalize page number to ensure it's within valid bounds
-  const activeApoFilters = getActiveApoFilters();
-  const totalPages = Math.ceil(activeApoFilters.length / state.apoFilterListPageSize);
-  if (totalPages > 0) {
-    state.apoFilterListPage = Math.max(1, Math.min(state.apoFilterListPage, totalPages));
-  } else {
-    state.apoFilterListPage = 1;
-  }
-
+  syncSelectedApoFilter();
   apoFilterList.innerHTML = renderApoFilterList();
-  const apoFilterPageSizeSelect = apoFilterList.querySelector<HTMLSelectElement>('[data-apo-filter-page-size]');
-  if (apoFilterPageSizeSelect) {
-    apoFilterPageSizeSelect.addEventListener('change', () => {
-      if (state.busy) {
-        return;
-      }
-
-      handleApoFilterPageSizeChange(apoFilterPageSizeSelect);
-    });
-  }
   apoConfigPreview.value = buildApoConfigText();
   syncApoEnableToggle();
   apoApplyStatus.textContent = getApoApplyStatusText();
@@ -5180,161 +5189,65 @@ function syncApoSelectionOptions(): void {
   persistApoSelections();
 }
 
-function renderApoFilterList(): string {
-  const activeApoFilters = getActiveApoFilters();
+function getSortedActiveApoFilters(): ApoFilter[] {
+  return [...getActiveApoFilters()].sort((aFilter, bFilter) => aFilter.frequencyHz - bFilter.frequencyHz);
+}
 
-  if (activeApoFilters.length === 0) {
+function syncSelectedApoFilter(): void {
+  const sortedFilters = getSortedActiveApoFilters();
+
+  if (sortedFilters.length === 0) {
+    selectedApoFilterId = null;
+    return;
+  }
+
+  if (!selectedApoFilterId || !sortedFilters.some((filter) => filter.id === selectedApoFilterId)) {
+    selectedApoFilterId = sortedFilters[0].id;
+  }
+}
+
+function renderApoFilterList(): string {
+  const sortedFilters = getSortedActiveApoFilters();
+
+  if (sortedFilters.length === 0) {
     return getActiveApoEqMode() === 'graphic'
       ? '<div class="measurement-empty">No graphic EQ bands yet. Increase the filter count to create fixed bands.</div>'
       : '<div class="measurement-empty">No APO filters yet. Generate from a target curve or add one manually.</div>';
   }
 
-  const sortedFilters = [...activeApoFilters].sort(
-    (aFilter, bFilter) => aFilter.frequencyHz - bFilter.frequencyHz,
-  );
-
-  const totalPages = Math.ceil(sortedFilters.length / state.apoFilterListPageSize);
-  const currentPage = Math.max(1, Math.min(state.apoFilterListPage, totalPages));
-  const startIndex = (currentPage - 1) * state.apoFilterListPageSize;
-  const endIndex = Math.min(startIndex + state.apoFilterListPageSize, sortedFilters.length);
-  const pagedFilters = sortedFilters.slice(startIndex, endIndex);
-
-  const filterRows = pagedFilters
-    .map(
-      (filter, index) => `
-        <div class="apo-filter-row${filter.enabled ? '' : ' is-hidden'}">
-          <label class="apo-filter-enabled">
-            <input type="checkbox" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="enabled" ${filter.enabled ? 'checked' : ''} ${state.busy ? 'disabled' : ''} />
-            <span>F${startIndex + index + 1}</span>
-          </label>
-          ${getActiveApoEqMode() === 'graphic'
-            ? ''
-            : `<select data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="kind" ${state.busy ? 'disabled' : ''}>
-             ${PARAMETRIC_APO_FILTER_KIND_OPTIONS.map(
-               (option) => `<option value="${option.value}" ${filter.kind === option.value ? 'selected' : ''}>${option.label}</option>`,
-             ).join('')}
-           </select>`}
-          <input type="number" min="20" max="20000" step="1" value="${filter.frequencyHz.toFixed(0)}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="frequencyHz" ${(state.busy || getActiveApoEqMode() === 'graphic') ? 'disabled' : ''} />
-          <input type="number" min="-24" max="24" step="0.1" value="${filter.gainDb.toFixed(1)}" data-apo-filter-id="${escapeHtml(filter.id)}" data-apo-field="gainDb" ${(state.busy || !apoFilterKindUsesGain(filter.kind)) ? 'disabled' : ''} />
-          ${renderApoFilterShapeInput(filter)}
-          <button class="btn btn-secondary measurement-remove-button" type="button" data-apo-filter-remove="${escapeHtml(filter.id)}" ${(state.busy || getActiveApoEqMode() === 'graphic' || activeApoFilters.length <= 1) ? 'disabled' : ''}>Remove</button>
-        </div>
-      `,
-    )
-    .join('');
-
-  if (totalPages <= 1) {
-    return filterRows;
-  }
-
-  const paginationControls = renderApoFilterPagination(currentPage, totalPages);
-  return `${filterRows}${paginationControls}`;
-}
-
-function renderApoFilterPagination(currentPage: number, totalPages: number): string {
-  const prevDisabled = currentPage <= 1 || state.busy ? 'disabled' : '';
-  const nextDisabled = currentPage >= totalPages || state.busy ? 'disabled' : '';
-  const jumpDisabled = state.busy ? 'disabled' : '';
-
-  const visiblePageButtonCount = getApoPaginationVisiblePageButtonCount(totalPages);
-  const pages = buildCompactPagination(currentPage, totalPages, visiblePageButtonCount);
-
-  // Generate page buttons
-  const pageButtons = pages.map((page) => {
-    if (page === '...') {
-      return `<span class="apo-filter-pagination-ellipsis">…</span>`;
-    }
-    const pageNum = page as number;
-    const isActive = pageNum === currentPage;
-    const activeClass = isActive ? ' btn-primary' : ' btn-secondary';
-    const disabledAttr = isActive || state.busy ? 'disabled' : '';
-    return `<button class="btn${activeClass} btn-small" type="button" data-apo-filter-page="${pageNum}" ${disabledAttr}>${pageNum}</button>`;
-  }).join('');
+  const selectedFilter = sortedFilters.find((filter) => filter.id === selectedApoFilterId) ?? sortedFilters[0];
+  const kindField = getActiveApoEqMode() === 'graphic'
+    ? ''
+    : `<label class="apo-filter-field">
+         <span class="apo-filter-field-label">Type</span>
+         <select data-apo-filter-id="${escapeHtml(selectedFilter.id)}" data-apo-field="kind" ${state.busy ? 'disabled' : ''}>
+           ${PARAMETRIC_APO_FILTER_KIND_OPTIONS.map(
+             (option) => `<option value="${option.value}" ${selectedFilter.kind === option.value ? 'selected' : ''}>${option.label}</option>`,
+           ).join('')}
+         </select>
+       </label>`;
 
   return `
-    <div class="apo-filter-pagination">
-      <div class="apo-filter-pagination-nav">
-        <button class="btn btn-secondary btn-small" type="button" data-apo-filter-page="first" ${jumpDisabled} title="First page">⏮</button>
-        <button class="btn btn-secondary btn-small" type="button" data-apo-filter-page="prev" ${prevDisabled} title="Previous page">←</button>
-        <div class="apo-filter-page-buttons">${pageButtons}</div>
-        <button class="btn btn-secondary btn-small" type="button" data-apo-filter-page="next" ${nextDisabled} title="Next page">→</button>
-        <button class="btn btn-secondary btn-small" type="button" data-apo-filter-page="last" ${jumpDisabled} title="Last page">⏭</button>
-      </div>
-      <div class="apo-filter-pagination-jump">
-        <span class="apo-filter-page-info">${currentPage} / ${totalPages}</span>
-        <label class="apo-filter-page-size-label">
-          <span>Per page</span>
-          <select class="apo-filter-page-size-select" data-apo-filter-page-size ${jumpDisabled}>
-            ${[12, 24, 48, 96]
-              .map(
-                (pageSize) =>
-                  `<option value="${pageSize}" ${pageSize === state.apoFilterListPageSize ? 'selected' : ''}>${pageSize}</option>`,
-              )
-              .join('')}
-          </select>
-        </label>
-        <label class="apo-filter-page-jump-label">
-          <span>Jump</span>
-        </label>
-        <input type="number" min="1" max="${totalPages}" value="" placeholder="#" class="apo-filter-page-input" data-apo-filter-page-input ${jumpDisabled} />
-        <button class="btn btn-secondary btn-small" type="button" data-apo-filter-page="jump" ${jumpDisabled}>Go</button>
+    <div class="apo-filter-row${selectedFilter.enabled ? '' : ' is-hidden'}">
+      ${kindField}
+      <label class="apo-filter-field">
+        <span class="apo-filter-field-label">Freq (Hz)</span>
+        <input type="number" min="20" max="20000" step="1" value="${selectedFilter.frequencyHz.toFixed(0)}" data-apo-filter-id="${escapeHtml(selectedFilter.id)}" data-apo-field="frequencyHz" ${(state.busy || getActiveApoEqMode() === 'graphic') ? 'disabled' : ''} />
+      </label>
+      <label class="apo-filter-field">
+        <span class="apo-filter-field-label">Gain (dB)</span>
+        <input type="number" min="-24" max="24" step="0.1" value="${selectedFilter.gainDb.toFixed(1)}" data-apo-filter-id="${escapeHtml(selectedFilter.id)}" data-apo-field="gainDb" ${(state.busy || !apoFilterKindUsesGain(selectedFilter.kind)) ? 'disabled' : ''} />
+      </label>
+      <label class="apo-filter-field">
+        <span class="apo-filter-field-label">${escapeHtml(getApoFilterShapeLabel(selectedFilter.kind))}</span>
+        ${renderApoFilterShapeInput(selectedFilter)}
+      </label>
+      <div class="apo-filter-field apo-filter-field-action">
+        <span class="apo-filter-field-label">Action</span>
+        <button class="btn btn-secondary measurement-remove-button" type="button" data-apo-filter-remove="${escapeHtml(selectedFilter.id)}" ${(state.busy || getActiveApoEqMode() === 'graphic' || sortedFilters.length <= 1) ? 'disabled' : ''}>Remove</button>
       </div>
     </div>
   `;
-}
-
-function getApoPaginationVisiblePageButtonCount(totalPages: number): number {
-  const containerWidth = Math.max(apoFilterList.clientWidth, apoCard.clientWidth, 0);
-  const pageDigits = String(totalPages).length;
-  const navButtonWidthPx = 40;
-  const ellipsisWidthPx = 32;
-  const pageButtonWidthPx = 30 + pageDigits * 8;
-  const gapWidthPx = 4;
-  const jumpInfoWidthPx = 54;
-  const pageSizeLabelWidthPx = 116;
-  const pageInputWidthPx = 50;
-  const goButtonWidthPx = 40;
-  const reservedWidthPx =
-    navButtonWidthPx * 4 +
-    gapWidthPx * 8 +
-    ellipsisWidthPx +
-    jumpInfoWidthPx +
-    pageSizeLabelWidthPx +
-    pageInputWidthPx +
-    goButtonWidthPx;
-  const availableWidthPx = Math.max(containerWidth - reservedWidthPx, pageButtonWidthPx * 3);
-  const measuredCount = Math.floor((availableWidthPx + gapWidthPx) / (pageButtonWidthPx + gapWidthPx));
-
-  return clamp(measuredCount, 3, totalPages);
-}
-
-function buildCompactPagination(
-  currentPage: number,
-  totalPages: number,
-  maxSlots: number,
-): Array<string | number> {
-  if (totalPages <= maxSlots) {
-    return Array.from({ length: totalPages }, (_, i) => i + 1);
-  }
-
-  const windowStart = clamp(
-    currentPage - Math.floor(maxSlots / 2),
-    1,
-    totalPages - maxSlots + 1,
-  );
-  const windowEnd = windowStart + maxSlots - 1;
-  const windowPages = Array.from({ length: maxSlots }, (_unused, index) => windowStart + index);
-
-  if (windowStart === 1) {
-    return [...windowPages, '...'];
-  }
-
-  if (windowEnd === totalPages) {
-    return ['...', ...windowPages];
-  }
-
-  const midpoint = (totalPages + 1) / 2;
-  return currentPage <= midpoint ? [...windowPages, '...'] : ['...', ...windowPages];
 }
 
 function renderApoFilterShapeInput(filter: ApoFilter): string {
@@ -5367,11 +5280,12 @@ function addApoFilter(partial: Partial<ApoFilter> = {}): void {
   }
 
   const nextFrequencyHz = partial.frequencyHz ?? findNextParametricFilterFrequency();
+  const newFilterId = `apo-filter-${state.nextApoFilterIndex}`;
 
   setActiveApoFilters([
     ...getActiveApoFilters(),
     {
-      id: `apo-filter-${state.nextApoFilterIndex}`,
+      id: newFilterId,
       enabled: partial.enabled ?? true,
       kind: 'PK',
       frequencyHz: nextFrequencyHz,
@@ -5384,69 +5298,12 @@ function addApoFilter(partial: Partial<ApoFilter> = {}): void {
   clearActiveImportedApoPreamp();
   clearActiveImportedApoBlockRepeatCount();
   syncParametricApoFilterCountToFilters();
+  selectedApoFilterId = newFilterId;
   state.nextApoFilterIndex += 1;
   persistApoState();
   persistActiveConfiguration();
   renderApoSection();
   reapplyApoConfigIfEnabled();
-}
-
-function handleApoFilterPageChange(action: string): void {
-  const activeApoFilters = getActiveApoFilters();
-  const totalPages = Math.ceil(activeApoFilters.length / state.apoFilterListPageSize);
-
-  let newPage = state.apoFilterListPage;
-
-  if (action === 'first') {
-    newPage = 1;
-  } else if (action === 'last') {
-    newPage = totalPages;
-  } else if (action === 'prev') {
-    newPage = Math.max(1, state.apoFilterListPage - 1);
-  } else if (action === 'next') {
-    newPage = Math.min(totalPages, state.apoFilterListPage + 1);
-  } else if (action === 'jump') {
-    // Handled separately via the input field
-    return;
-  } else {
-    const parsedPage = Number(action);
-    if (Number.isFinite(parsedPage)) {
-      newPage = Math.max(1, Math.min(totalPages, parsedPage));
-    }
-  }
-
-  if (newPage !== state.apoFilterListPage) {
-    state.apoFilterListPage = newPage;
-    renderApoSection();
-  }
-}
-
-function handleApoFilterPageJump(input: HTMLInputElement): void {
-  const activeApoFilters = getActiveApoFilters();
-  const totalPages = Math.ceil(activeApoFilters.length / state.apoFilterListPageSize);
-
-  const parsedPage = Number(input.value);
-  if (!Number.isFinite(parsedPage)) {
-    return;
-  }
-
-  const newPage = Math.max(1, Math.min(totalPages, Math.round(parsedPage)));
-
-  if (newPage !== state.apoFilterListPage) {
-    state.apoFilterListPage = newPage;
-    renderApoSection();
-  }
-}
-
-function handleApoFilterPageSizeChange(input: HTMLSelectElement): void {
-  const parsedPageSize = Number(input.value);
-  if (!Number.isFinite(parsedPageSize)) {
-    return;
-  }
-
-  state.apoFilterListPageSize = clamp(Math.round(parsedPageSize), 1, MAX_GRAPHIC_APO_FILTERS);
-  state.apoFilterListPage = 1;
-  renderApoSection();
 }
 
 function findNextParametricFilterFrequency(filters: ApoFilter[] = getActiveApoFilters()): number {
