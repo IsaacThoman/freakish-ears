@@ -82,43 +82,78 @@ export const DEFAULT_PLOT_HEIGHT = 480;
 const DEFAULT_PLOT_RIGHT = 24;
 const DEFAULT_PLOT_TOP = 18;
 const DEFAULT_PLOT_BOTTOM = 94;
-const PLOT_TEXT_SIZE_PX = 11;
-const PLOT_LABEL_SIZE_PX = 11;
-const PLOT_OUTER_HORIZONTAL_PADDING = 12;
-const PLOT_OUTER_TOP_PADDING = 18;
-const PLOT_OUTER_BOTTOM_PADDING = 12;
-const PLOT_Y_TICK_GAP = 10;
-const PLOT_X_TICK_GAP = 10;
-const PLOT_AXIS_LABEL_GAP = 8;
+const PLOT_TEXT_SIZE_PX = 12;
+const PLOT_LABEL_SIZE_PX = 12;
+type PlotFrameSpacing = {
+  outerHorizontalPadding: number;
+  outerTopPadding: number;
+  outerBottomPadding: number;
+  yTickGap: number;
+  xTickGap: number;
+  yAxisLabelGap: number;
+  xAxisLabelGap: number;
+};
+
+type PlotFrameSpacingTokens = Record<keyof PlotFrameSpacing, string>;
+
+const MEASUREMENT_PLOT_FRAME_SPACING_FALLBACK: PlotFrameSpacing = {
+  outerHorizontalPadding: 18,
+  outerTopPadding: 10,
+  outerBottomPadding: 10,
+  yTickGap: 10,
+  xTickGap: 10,
+  yAxisLabelGap: 10,
+  xAxisLabelGap: 10,
+};
+
+const APO_PLOT_FRAME_SPACING_FALLBACK: PlotFrameSpacing = {
+  outerHorizontalPadding: 18,
+  outerTopPadding: 14,
+  outerBottomPadding: 2,
+  yTickGap: 10,
+  xTickGap: 10,
+  yAxisLabelGap: 10,
+  xAxisLabelGap: 10,
+};
+
+const MEASUREMENT_PLOT_FRAME_SPACING_TOKENS: PlotFrameSpacingTokens = {
+  outerHorizontalPadding: '--plot-frame-horizontal-padding',
+  outerTopPadding: '--plot-frame-top-padding',
+  outerBottomPadding: '--plot-frame-bottom-padding',
+  yTickGap: '--plot-y-tick-gap',
+  xTickGap: '--plot-x-tick-gap',
+  yAxisLabelGap: '--plot-y-axis-label-gap',
+  xAxisLabelGap: '--plot-x-axis-label-gap',
+};
+
+const APO_PLOT_FRAME_SPACING_TOKENS: PlotFrameSpacingTokens = {
+  outerHorizontalPadding: '--apo-plot-frame-horizontal-padding',
+  outerTopPadding: '--apo-plot-frame-top-padding',
+  outerBottomPadding: '--apo-plot-frame-bottom-padding',
+  yTickGap: '--apo-plot-y-tick-gap',
+  xTickGap: '--apo-plot-x-tick-gap',
+  yAxisLabelGap: '--apo-plot-y-axis-label-gap',
+  xAxisLabelGap: '--apo-plot-x-axis-label-gap',
+};
+
 const PLOT_DRAW_AREA_ASPECT_RATIO =
   (DEFAULT_PLOT_HEIGHT - DEFAULT_PLOT_TOP - DEFAULT_PLOT_BOTTOM) /
   (DEFAULT_PLOT_WIDTH - 84 - DEFAULT_PLOT_RIGHT);
-const APO_PARAMETRIC_BAND_COLORS = [
-  '#ffb74f',
-  '#ffd95e',
-  '#c3f05e',
-  '#55e0a3',
-  '#49d7e8',
-  '#57a7ff',
-  '#9d7cff',
-  '#e76fff',
-  '#ff6ba4',
-  '#ff7d5c',
-  '#ff9b7a',
-  '#ffb36b',
-  '#f7d65a',
-  '#d7ef63',
-  '#96ef68',
-  '#5de58d',
-  '#48dfc1',
-  '#51d3f2',
-  '#6ab8ff',
-  '#7d97ff',
-  '#ad83ff',
-  '#d578ff',
-  '#f06fd7',
-  '#ff7497',
-];
+
+type PlotFrameOptions = {
+  drawAreaAspectRatio?: number;
+  plotAspectRatio?: number;
+  fixedHeight?: number;
+  reserveXAxisLabel?: boolean;
+  spacing?: PlotFrameSpacing;
+};
+const APO_EQ_ACCENT_COLOR = '#f07900';
+const APO_EQ_ACCENT_STROKE = '#2f1804';
+const APO_EQ_ACCENT_FILL_TOP = 'rgba(240,121,0,0.32)';
+const APO_EQ_ACCENT_FILL_BOTTOM = 'rgba(240,121,0,0.04)';
+const APO_EQ_ACCENT_AXIS = 'rgba(240,121,0,0.28)';
+const APO_EQ_ACCENT_HALO = 'rgba(240,121,0,0.5)';
+const APO_PARAMETRIC_BAND_COLORS = Array.from({ length: 24 }, () => APO_EQ_ACCENT_COLOR);
 
 type TextMetricsSummary = {
   width: number;
@@ -144,7 +179,9 @@ function buildPlotFrame(
   xTicks: number[],
   yAxisLabelText: string,
   labelSizing: PlotLabelSizing,
+  options: PlotFrameOptions = {},
 ): { width: number; height: number; left: number; right: number; top: number; bottom: number } {
+  const spacing = options.spacing ?? getMeasurementPlotFrameSpacing();
   const yTickWidth = getWidestTextWidth(
     yTicks.map((value) => formatDbLabel(value)),
     labelSizing.axisTextSize,
@@ -158,33 +195,39 @@ function buildPlotFrame(
     labelSizing.axisTextSize,
   );
   const xAxisLabelMetrics = measureSvgText('Frequency (Hz, log)', labelSizing.axisLabelSize);
-  const yAxisLabelMetrics = measureSvgText(yAxisLabelText, labelSizing.axisLabelSize);
   const left = Math.ceil(
-    PLOT_OUTER_HORIZONTAL_PADDING +
-    yAxisLabelMetrics.height +
-    PLOT_AXIS_LABEL_GAP +
+    spacing.outerHorizontalPadding +
+    spacing.yAxisLabelGap +
     yTickWidth +
-    PLOT_Y_TICK_GAP,
+    spacing.yTickGap,
   );
   const right = Math.ceil(
     Math.max(
-      PLOT_OUTER_HORIZONTAL_PADDING,
+      spacing.outerHorizontalPadding,
       getWidestTextWidth([formatFrequencyLabel(xTicks[xTicks.length - 1] ?? DEFAULT_END_FREQUENCY)], labelSizing.axisTextSize) / 2,
     ),
   );
-  const top = Math.ceil(PLOT_OUTER_TOP_PADDING + yTickMetrics.height / 2);
+  const top = Math.ceil(spacing.outerTopPadding + yTickMetrics.height / 2);
+  const xAxisLabelReserve = options.reserveXAxisLabel === false
+    ? 0
+    : spacing.xAxisLabelGap + xAxisLabelMetrics.height;
   const bottom = Math.ceil(
-    PLOT_OUTER_BOTTOM_PADDING +
-    PLOT_X_TICK_GAP +
+    spacing.outerBottomPadding +
+    spacing.xTickGap +
     xTickMetrics.height +
-    PLOT_AXIS_LABEL_GAP +
-    xAxisLabelMetrics.height,
+    xAxisLabelReserve,
   );
   const drawableWidth = Math.max(containerWidth - left - right, 1);
+  const drawAreaAspectRatio = options.drawAreaAspectRatio ?? PLOT_DRAW_AREA_ASPECT_RATIO;
+  const height = options.fixedHeight
+    ? Math.max(Math.ceil(options.fixedHeight), top + bottom + 1)
+    : options.plotAspectRatio
+    ? Math.max(Math.ceil(containerWidth / options.plotAspectRatio), top + bottom + 1)
+    : Math.ceil(top + drawableWidth * drawAreaAspectRatio + bottom);
 
   return {
     width: containerWidth,
-    height: Math.ceil(top + drawableWidth * PLOT_DRAW_AREA_ASPECT_RATIO + bottom),
+    height,
     left,
     right,
     top,
@@ -232,28 +275,197 @@ function measureSvgText(text: string, fontSize: number): TextMetricsSummary {
   };
 }
 
+function readCssPixelVariable(variableName: string, fallback: number): number {
+  if (typeof document === 'undefined') {
+    return fallback;
+  }
+
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+  if (value.length === 0) {
+    return fallback;
+  }
+
+  const parsedValue = Number.parseFloat(value);
+  return Number.isFinite(parsedValue) ? parsedValue : fallback;
+}
+
+function readPlotFrameSpacing(
+  tokens: PlotFrameSpacingTokens,
+  fallback: PlotFrameSpacing,
+): PlotFrameSpacing {
+  return {
+    outerHorizontalPadding: readCssPixelVariable(tokens.outerHorizontalPadding, fallback.outerHorizontalPadding),
+    outerTopPadding: readCssPixelVariable(tokens.outerTopPadding, fallback.outerTopPadding),
+    outerBottomPadding: readCssPixelVariable(tokens.outerBottomPadding, fallback.outerBottomPadding),
+    yTickGap: readCssPixelVariable(tokens.yTickGap, fallback.yTickGap),
+    xTickGap: readCssPixelVariable(tokens.xTickGap, fallback.xTickGap),
+    yAxisLabelGap: readCssPixelVariable(tokens.yAxisLabelGap, fallback.yAxisLabelGap),
+    xAxisLabelGap: readCssPixelVariable(tokens.xAxisLabelGap, fallback.xAxisLabelGap),
+  };
+}
+
+function getMeasurementPlotFrameSpacing(): PlotFrameSpacing {
+  return readPlotFrameSpacing(
+    MEASUREMENT_PLOT_FRAME_SPACING_TOKENS,
+    MEASUREMENT_PLOT_FRAME_SPACING_FALLBACK,
+  );
+}
+
+function getApoPlotFrameSpacing(): PlotFrameSpacing {
+  return readPlotFrameSpacing(
+    APO_PLOT_FRAME_SPACING_TOKENS,
+    APO_PLOT_FRAME_SPACING_FALLBACK,
+  );
+}
+
 function getYAxisLabelX(
   left: number,
   yTicks: number[],
   labelText: string,
   labelSizing: PlotLabelSizing,
+  spacing: PlotFrameSpacing,
 ): number {
   const widestTickLabelWidth = getWidestTextWidth(
     yTicks.map((value) => formatDbLabel(value)),
     labelSizing.axisTextSize,
   );
-  const labelMetrics = measureSvgText(labelText, labelSizing.axisLabelSize);
-  const tickLabelLeftEdge = left - PLOT_Y_TICK_GAP - widestTickLabelWidth;
-  return tickLabelLeftEdge - PLOT_AXIS_LABEL_GAP - labelMetrics.height / 2;
+  const tickLabelLeftEdge = left - spacing.yTickGap - widestTickLabelWidth;
+  return tickLabelLeftEdge - spacing.yAxisLabelGap;
 }
 
-function getXAxisTickY(geometry: ResponsePlotGeometry): number {
-  return geometry.height - geometry.bottom + PLOT_X_TICK_GAP;
+function getXAxisTickY(geometry: ResponsePlotGeometry, spacing: PlotFrameSpacing): number {
+  return geometry.height - geometry.bottom + spacing.xTickGap;
 }
 
-function getXAxisLabelY(geometry: ResponsePlotGeometry, labelSizing: PlotLabelSizing): number {
-  const tickMetrics = getTallestTextMetrics(['20k'], labelSizing.axisTextSize);
-  return getXAxisTickY(geometry) + tickMetrics.height + PLOT_AXIS_LABEL_GAP;
+function getYAxisTickLabelX(geometry: ResponsePlotGeometry, spacing: PlotFrameSpacing): number {
+  return geometry.left - spacing.yTickGap;
+}
+
+function getResponsePlotTicks(minDb: number, maxDb: number, yTickCount: number): number[] {
+  return Array.from({ length: yTickCount }, (_unused, index) => {
+    const ratio = index / (yTickCount - 1);
+    return maxDb - (maxDb - minDb) * ratio;
+  });
+}
+
+function getEmptyResponsePlotGeometry(
+  containerWidth: number,
+  containerHeight: number,
+  labelSizing: PlotLabelSizing,
+  yAxisLabelText: string,
+  spacing: PlotFrameSpacing,
+): ResponsePlotGeometry {
+  const minDb = -12;
+  const maxDb = 12;
+  const yTicks = getResponsePlotTicks(minDb, maxDb, labelSizing.yTickCount);
+  const frame = buildPlotFrame(
+    containerWidth,
+    yTicks,
+    labelSizing.xTicks,
+    yAxisLabelText,
+    labelSizing,
+    {
+      fixedHeight: containerHeight > 0 ? containerHeight : DEFAULT_PLOT_HEIGHT,
+      reserveXAxisLabel: false,
+      spacing,
+    },
+  );
+
+  return {
+    width: frame.width,
+    height: frame.height,
+    left: frame.left,
+    right: frame.right,
+    top: frame.top,
+    bottom: frame.bottom,
+    minFrequency: DEFAULT_START_FREQUENCY,
+    maxFrequency: DEFAULT_END_FREQUENCY,
+    minDb,
+    maxDb,
+  };
+}
+
+function renderEmptyResponsePlot(input: {
+  messageLines: string[];
+  normalizePlot: boolean;
+  compact: boolean;
+  containerWidth: number;
+  containerHeight: number;
+}): string {
+  const labelSizing = getPlotLabelSizing(input.compact);
+  const yAxisLabelText = input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)';
+  const spacing = getMeasurementPlotFrameSpacing();
+  const geometry = getEmptyResponsePlotGeometry(
+    input.containerWidth,
+    input.containerHeight,
+    labelSizing,
+    yAxisLabelText,
+    spacing,
+  );
+  const xTicks = labelSizing.xTicks.filter(
+    (frequency) =>
+      frequency >= geometry.minFrequency && frequency <= geometry.maxFrequency,
+  );
+  const yTicks = getResponsePlotTicks(geometry.minDb, geometry.maxDb, labelSizing.yTickCount);
+  const yAxisLabelX = getYAxisLabelX(
+    geometry.left,
+    yTicks,
+    yAxisLabelText,
+    labelSizing,
+    spacing,
+  );
+  const xAxisTickY = getXAxisTickY(geometry, spacing);
+  const xAxisY = geometry.height - geometry.bottom;
+  const yAxisX = geometry.left;
+  const placeholderX = (geometry.left + (geometry.width - geometry.right)) / 2;
+  const placeholderY = (geometry.top + (geometry.height - geometry.bottom)) / 2;
+  const placeholderLines = input.messageLines.slice(0, 2);
+
+  return `
+    <svg id="responsePlot" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" style="width:100%;height:100%" role="img" aria-label="Measurement frequency response graph placeholder with logarithmic frequency axis">
+      <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="var(--panel)"></rect>
+      ${yTicks
+        .map((value) => {
+          const y = getPlotY(value, geometry);
+          return `<line x1="${geometry.left}" y1="${y.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.07)" vector-effect="non-scaling-stroke" />`;
+        })
+        .join('')}
+      ${xTicks
+        .map((frequency) => {
+          const x = getPlotX(frequency, geometry);
+          return `<line x1="${x.toFixed(1)}" y1="${geometry.top}" x2="${x.toFixed(1)}" y2="${xAxisY}" stroke="rgba(255,255,255,0.06)" vector-effect="non-scaling-stroke" />`;
+        })
+        .join('')}
+      <line x1="${yAxisX}" y1="${xAxisY.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${xAxisY.toFixed(1)}" stroke="${APO_EQ_ACCENT_AXIS}" vector-effect="non-scaling-stroke" />
+      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${xAxisY}" stroke="${APO_EQ_ACCENT_AXIS}" vector-effect="non-scaling-stroke" />
+      ${yTicks
+        .map((value) => {
+          const y = getPlotY(value, geometry);
+          return `<text x="${getYAxisTickLabelX(geometry, spacing).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" class="plot-axis-text">${formatDbLabel(value)}</text>`;
+        })
+        .join('')}
+      ${xTicks
+        .map((frequency) => {
+          const x = getPlotX(frequency, geometry);
+          return `<text x="${x.toFixed(1)}" y="${xAxisTickY.toFixed(1)}" text-anchor="middle" dominant-baseline="hanging" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
+        })
+        .join('')}
+      <text x="${placeholderX.toFixed(1)}" y="${placeholderY.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" class="plot-axis-text">${placeholderLines
+        .map((line, index) => `<tspan x="${placeholderX.toFixed(1)}" dy="${index === 0 ? '-0.55em' : '1.2em'}">${escapeHtml(line)}</tspan>`)
+        .join('')}</text>
+      <text x="${yAxisLabelX.toFixed(1)}" y="${((geometry.top + (geometry.height - geometry.bottom)) / 2).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 ${yAxisLabelX.toFixed(1)} ${((geometry.top + (geometry.height - geometry.bottom)) / 2).toFixed(1)})" class="plot-axis-label">${yAxisLabelText}</text>
+    </svg>
+  `;
+}
+
+export function renderMeasurementLibrary(
+  measurements: LoadedMeasurement[],
+  referenceCurves: ReferenceCurve[],
+  measurementKeepCount: number,
+  busy: boolean,
+  outputFolder: string | null,
+): string {
+  return renderMeasurementList(measurements, referenceCurves, measurementKeepCount, busy, outputFolder);
 }
 
 export function renderResponsePlot(input: {
@@ -261,32 +473,32 @@ export function renderResponsePlot(input: {
   allMeasurements: LoadedMeasurement[];
   visibleReferenceCurves: ReferenceCurve[];
   allReferenceCurves: ReferenceCurve[];
-  measurementKeepCount: number;
   normalizePlot: boolean;
   smoothingMode: MeasurementSmoothingMode;
   splOffsetDb: number;
-  busy: boolean;
-  outputFolder: string | null;
   compact: boolean;
   containerWidth: number;
+  containerHeight: number;
   toleranceOverlay: ResponseToleranceOverlay | null;
 }): string {
   if (input.allMeasurements.length === 0 && input.allReferenceCurves.length === 0) {
-    return `
-      <div class="plot-empty-state">
-        <span>Run or import measurements to plot response.</span>
-      </div>
-      ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.measurementKeepCount, input.busy, input.outputFolder)}
-    `;
+    return renderEmptyResponsePlot({
+      messageLines: ['Run or import measurements', 'to plot response.'],
+      normalizePlot: input.normalizePlot,
+      compact: input.compact,
+      containerWidth: input.containerWidth,
+      containerHeight: input.containerHeight,
+    });
   }
 
   if (input.visibleMeasurements.length === 0 && input.visibleReferenceCurves.length === 0) {
-    return `
-      <div class="plot-empty-state">
-        <span>No measurements or reference curves are currently selected for display.</span>
-      </div>
-      ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.measurementKeepCount, input.busy, input.outputFolder)}
-    `;
+    return renderEmptyResponsePlot({
+      messageLines: ['No measurements or reference curves', 'are currently selected for display.'],
+      normalizePlot: input.normalizePlot,
+      compact: input.compact,
+      containerWidth: input.containerWidth,
+      containerHeight: input.containerHeight,
+    });
   }
 
   const plottedReferenceCurves = input.visibleReferenceCurves.map((referenceCurve) => ({
@@ -320,24 +532,28 @@ export function renderResponsePlot(input: {
   }));
   const labelSizing = getPlotLabelSizing(input.compact);
   const yAxisLabelText = input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)';
+  const spacing = getMeasurementPlotFrameSpacing();
   const geometry = getResponsePlotGeometry(
     [...plottedMeasurements.map((entry) => entry.points), ...plottedReferenceCurves.map((entry) => entry.points)],
     input.containerWidth,
+    input.containerHeight,
     labelSizing,
     yAxisLabelText,
+    spacing,
   );
   const xTicks = labelSizing.xTicks.filter(
     (frequency) =>
       frequency >= geometry.minFrequency && frequency <= geometry.maxFrequency,
   );
-  const yTicks = Array.from({ length: labelSizing.yTickCount }, (_unused, index) => {
-    const ratio = index / (labelSizing.yTickCount - 1);
-    return geometry.maxDb - (geometry.maxDb - geometry.minDb) * ratio;
-  });
-  const yAxisLabelX = getYAxisLabelX(geometry.left, yTicks, yAxisLabelText, labelSizing);
-  const xAxisTickY = getXAxisTickY(geometry);
-  const xAxisLabelY = getXAxisLabelY(geometry, labelSizing);
-
+  const yTicks = getResponsePlotTicks(geometry.minDb, geometry.maxDb, labelSizing.yTickCount);
+  const yAxisLabelX = getYAxisLabelX(
+    geometry.left,
+    yTicks,
+    yAxisLabelText,
+    labelSizing,
+    spacing,
+  );
+  const xAxisTickY = getXAxisTickY(geometry, spacing);
   const xAxisY = geometry.height - geometry.bottom;
   const yAxisX = geometry.left;
   const toleranceFailPaths = buildToleranceFailPaths(
@@ -353,19 +569,18 @@ export function renderResponsePlot(input: {
   const starredGradientDefs = starredMeasurements.map(({ measurement }) => {
     const gradientId = `${graphIdBase}-starred-gradient-${measurement.id}`;
     const starredStyle: ApoBandVisualStyle = {
-      nodeFill: '#f8a145',
-      strokeSoft: '#f8a145',
-      fillTop: 'rgba(248,161,69,0.35)',
-      fillBottom: 'rgba(248,161,69,0.02)',
+      nodeFill: APO_EQ_ACCENT_COLOR,
+      strokeSoft: APO_EQ_ACCENT_COLOR,
+      fillTop: APO_EQ_ACCENT_FILL_TOP,
+      fillBottom: APO_EQ_ACCENT_FILL_BOTTOM,
     };
     return buildApoBandGradientDef(gradientId, starredStyle);
   }).join('');
 
   return `
-    <div class="plot-hover" id="plotHover">Hover: --</div>
-      <svg id="responsePlot" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Measured frequency response overlay with logarithmic frequency axis">
+    <svg id="responsePlot" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" style="width:100%;height:100%" role="img" aria-label="Measured frequency response overlay with logarithmic frequency axis">
       ${starredGradientDefs.length > 0 ? `<defs>${starredGradientDefs}</defs>` : ''}
-      <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
+      <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="var(--panel)"></rect>
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
@@ -383,8 +598,8 @@ export function renderResponsePlot(input: {
           (path) => `<path d="${path}" fill="rgba(255,70,70,0.22)" stroke="none"></path>`,
         )
         .join('')}
-      <line x1="${yAxisX}" y1="${xAxisY}" x2="${geometry.width - geometry.right}" y2="${xAxisY}" stroke="rgba(248,161,69,0.24)" vector-effect="non-scaling-stroke" />
-      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${xAxisY}" stroke="rgba(248,161,69,0.24)" vector-effect="non-scaling-stroke" />
+      <line x1="${yAxisX}" y1="${xAxisY}" x2="${geometry.width - geometry.right}" y2="${xAxisY}" stroke="${APO_EQ_ACCENT_AXIS}" vector-effect="non-scaling-stroke" />
+      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${xAxisY}" stroke="${APO_EQ_ACCENT_AXIS}" vector-effect="non-scaling-stroke" />
       ${plottedReferenceCurves
         .map(({ referenceCurve, points }) => {
           const path = points
@@ -409,7 +624,7 @@ export function renderResponsePlot(input: {
             .join(' ');
 
           const isStarred = measurement.starred;
-          const strokeColor = isStarred ? '#f8a145' : measurement.color;
+          const strokeColor = isStarred ? APO_EQ_ACCENT_COLOR : measurement.color;
           const strokeWidth = isStarred ? '3.75' : '3';
 
           if (isStarred) {
@@ -424,17 +639,17 @@ export function renderResponsePlot(input: {
           return `<polyline points="${path}" fill="none" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>`;
         })
         .join('')}
-      <line id="plotHoverLine" x1="0" y1="${geometry.top}" x2="0" y2="${xAxisY}" stroke="#f8a145" stroke-width="1" opacity="0" vector-effect="non-scaling-stroke"></line>
+      <line id="plotHoverLine" x1="0" y1="${geometry.top}" x2="0" y2="${xAxisY}" stroke="${APO_EQ_ACCENT_COLOR}" stroke-width="1" opacity="0" vector-effect="non-scaling-stroke"></line>
       ${input.visibleMeasurements
         .map(
           (measurement, index) =>
-            `<circle class="plot-hover-dot" data-hover-index="${index}" cx="0" cy="0" r="4" fill="${measurement.starred ? '#f8a145' : measurement.color}" stroke="#0d0d0f" stroke-width="1.5" opacity="0" vector-effect="non-scaling-stroke"></circle>`,
+            `<circle class="plot-hover-dot" data-hover-index="${index}" cx="0" cy="0" r="4" fill="${measurement.starred ? APO_EQ_ACCENT_COLOR : measurement.color}" stroke="#0d0d0f" stroke-width="1.5" opacity="0" vector-effect="non-scaling-stroke"></circle>`,
         )
         .join('')}
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
-            return `<text x="${(geometry.left - PLOT_Y_TICK_GAP).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" class="plot-axis-text">${formatDbLabel(value)}</text>`;
+            return `<text x="${getYAxisTickLabelX(geometry, spacing).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" class="plot-axis-text">${formatDbLabel(value)}</text>`;
            })
            .join('')}
       ${xTicks
@@ -443,10 +658,8 @@ export function renderResponsePlot(input: {
           return `<text x="${x.toFixed(1)}" y="${xAxisTickY.toFixed(1)}" text-anchor="middle" dominant-baseline="hanging" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
          })
          .join('')}
-      <text x="${((geometry.left + (geometry.width - geometry.right)) / 2).toFixed(1)}" y="${xAxisLabelY.toFixed(1)}" text-anchor="middle" dominant-baseline="hanging" class="plot-axis-label">Frequency (Hz, log)</text>
       <text x="${yAxisLabelX.toFixed(1)}" y="${((geometry.top + (geometry.height - geometry.bottom)) / 2).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 ${yAxisLabelX.toFixed(1)} ${((geometry.top + (geometry.height - geometry.bottom)) / 2).toFixed(1)})" class="plot-axis-label">${yAxisLabelText}</text>
     </svg>
-    ${renderMeasurementList(input.allMeasurements, input.allReferenceCurves, input.measurementKeepCount, input.busy, input.outputFolder)}
   `;
 }
 
@@ -463,7 +676,8 @@ export function attachPlotInteractions(input: {
   const hoverDots = Array.from(
     input.plotCard.querySelectorAll<SVGCircleElement>('.plot-hover-dot'),
   );
-  const hoverLabel = input.plotCard.querySelector<HTMLDivElement>('#plotHover');
+  const hoverLabel =
+    input.plotCard.closest('.measurement-plot-stack')?.querySelector<HTMLDivElement>('#measurementPlotHover') ?? null;
 
   if (
     !svg ||
@@ -477,7 +691,8 @@ export function attachPlotInteractions(input: {
 
   const viewBox = svg.getAttribute('viewBox');
   const viewBoxWidth = viewBox ? Number(viewBox.split(' ')[2]) : NaN;
-  if (!Number.isFinite(viewBoxWidth) || viewBoxWidth <= 0) {
+  const viewBoxHeight = viewBox ? Number(viewBox.split(' ')[3]) : NaN;
+  if (!Number.isFinite(viewBoxWidth) || viewBoxWidth <= 0 || !Number.isFinite(viewBoxHeight) || viewBoxHeight <= 0) {
     return;
   }
 
@@ -507,6 +722,7 @@ export function attachPlotInteractions(input: {
   const compact = viewBoxWidth < 560;
   const labelSizing = getPlotLabelSizing(compact);
   const yAxisLabelText = input.normalizePlot ? 'Normalized response (dB)' : 'Response (dB)';
+  const spacing = getMeasurementPlotFrameSpacing();
   const geometry = getResponsePlotGeometry(
     [
       ...plottedMeasurements.map((entry) => entry.points),
@@ -522,8 +738,10 @@ export function attachPlotInteractions(input: {
       ),
     ],
     viewBoxWidth,
+    viewBoxHeight,
     labelSizing,
     yAxisLabelText,
+    spacing,
   );
 
   const updateHover = (clientX: number) => {
@@ -542,7 +760,7 @@ export function attachPlotInteractions(input: {
       hoverDots[index]?.setAttribute('cy', y.toFixed(1));
       hoverDots[index]?.setAttribute('opacity', '1');
       const valueText = `${closestPoint.smoothedMagnitudeDbRelative.toFixed(1)} ${input.normalizePlot ? 'dB rel' : 'dB'}`;
-      hoverDetails.push(`<span style="color:${measurement.starred ? '#f8a145' : measurement.color}">${valueText}</span>`);
+      hoverDetails.push(`<span style="color:${measurement.starred ? APO_EQ_ACCENT_COLOR : measurement.color}">${valueText}</span>`);
     });
 
     hoverLine.setAttribute('x1', hoverLineX.toFixed(1));
@@ -567,6 +785,11 @@ export function attachPlotInteractions(input: {
 
 export type ApoDragAxis = 'both' | 'horizontal' | 'vertical';
 
+export type RenderedApoEqPlot = {
+  markup: string;
+  geometry: ResponsePlotGeometry;
+};
+
 export type ApoPlotDragHandler = (
   filterId: string,
   frequencyHz: number,
@@ -576,6 +799,7 @@ export type ApoPlotDragHandler = (
 
 export function renderApoEqPlot(input: {
   filters: ApoFilter[];
+  selectedFilterId: string | null;
   eqMode: ApoEqMode;
   sampleRate: number;
   responseMultiplier: number;
@@ -584,7 +808,9 @@ export function renderApoEqPlot(input: {
   targetName: string | null;
   compact: boolean;
   containerWidth: number;
-}): string {
+  containerHeight: number;
+  sidebarCollapsed: boolean;
+}): RenderedApoEqPlot {
   const enabledFilters = input.filters.filter((filter) => filter.enabled);
   const sampledPoints = buildApoPreviewSampledPoints(
     enabledFilters,
@@ -606,28 +832,36 @@ export function renderApoEqPlot(input: {
             input.preampDb,
           ),
         })),
-      }));
+  }));
   const labelSizing = getPlotLabelSizing(input.compact);
   const yAxisLabelText = Math.abs(input.preampDb) >= 0.05 ? 'Output Gain (dB)' : 'EQ Gain (dB)';
+  const spacing = getApoPlotFrameSpacing();
   const geometry = getApoEqPlotGeometry(
     enabledFilters,
     sampledPoints,
     individualPointSets,
     input.containerWidth,
+    input.containerHeight,
     input.sampleRate,
     input.eqMode,
     input.responseMultiplier,
     input.preampDb,
     labelSizing,
     yAxisLabelText,
+    spacing,
   );
   const yTicks = Array.from({ length: labelSizing.yTickCount }, (_unused, index) => {
     const ratio = index / (labelSizing.yTickCount - 1);
     return geometry.maxDb - (geometry.maxDb - geometry.minDb) * ratio;
   });
-  const yAxisLabelX = getYAxisLabelX(geometry.left, yTicks, yAxisLabelText, labelSizing);
-  const xAxisTickY = getXAxisTickY(geometry);
-  const xAxisLabelY = getXAxisLabelY(geometry, labelSizing);
+  const yAxisLabelX = getYAxisLabelX(
+    geometry.left,
+    yTicks,
+    yAxisLabelText,
+    labelSizing,
+    spacing,
+  );
+  const xAxisTickY = getXAxisTickY(geometry, spacing);
   const xAxisY = getPlotY(0, geometry);
   const yAxisX = geometry.left;
   const isParametricMode = input.eqMode === 'parametric';
@@ -642,10 +876,10 @@ export function renderApoEqPlot(input: {
   }));
   const combinedGradientIdBase = `${graphIdBase}-combined-gradient`;
   const combinedVisualStyle: ApoBandVisualStyle = {
-    nodeFill: '#f8a145',
-    strokeSoft: '#f8a145',
-    fillTop: 'rgba(248,161,69,0.35)',
-    fillBottom: 'rgba(248,161,69,0.02)',
+    nodeFill: APO_EQ_ACCENT_COLOR,
+    strokeSoft: APO_EQ_ACCENT_COLOR,
+    fillTop: APO_EQ_ACCENT_FILL_TOP,
+    fillBottom: APO_EQ_ACCENT_FILL_BOTTOM,
   };
   const svgDefs = isParametricMode
     ? `
@@ -660,11 +894,12 @@ export function renderApoEqPlot(input: {
         ${buildApoBandGradientDef(combinedGradientIdBase, combinedVisualStyle)}
       </defs>`;
 
-  return `
-    <div class="plot-hover" id="apoPlotHover">Hover: --</div>
-    <svg class="apo-eq-svg${isParametricMode ? ' apo-eq-svg-parametric' : ' apo-eq-svg-graphic'}" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Equalizer APO frequency response graph">
+  return {
+    geometry,
+    markup: `
+    <svg class="apo-eq-svg${isParametricMode ? ' apo-eq-svg-parametric' : ' apo-eq-svg-graphic'}" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}" style="width:100%;height:100%" role="img" aria-label="Equalizer APO frequency response graph">
       ${svgDefs}
-      <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="rgba(255,255,255,0.02)"></rect>
+      <rect x="0" y="0" width="${geometry.width}" height="${geometry.height}" rx="4" fill="var(--panel)"></rect>
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
@@ -675,8 +910,8 @@ export function renderApoEqPlot(input: {
         const x = getPlotX(frequency, geometry);
         return `<line x1="${x.toFixed(1)}" y1="${geometry.top}" x2="${x.toFixed(1)}" y2="${geometry.height - geometry.bottom}" stroke="${isParametricMode ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.06)'}" vector-effect="non-scaling-stroke" />`;
       }).join('')}
-      <line x1="${yAxisX}" y1="${xAxisY.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${xAxisY.toFixed(1)}" stroke="${isParametricMode ? 'rgba(255,255,255,0.24)' : 'rgba(248,161,69,0.3)'}" vector-effect="non-scaling-stroke" />
-      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${geometry.height - geometry.bottom}" stroke="${isParametricMode ? 'rgba(255,255,255,0.12)' : 'rgba(248,161,69,0.24)'}" vector-effect="non-scaling-stroke" />
+      <line x1="${yAxisX}" y1="${xAxisY.toFixed(1)}" x2="${geometry.width - geometry.right}" y2="${xAxisY.toFixed(1)}" stroke="${isParametricMode ? 'rgba(255,255,255,0.18)' : APO_EQ_ACCENT_AXIS}" vector-effect="non-scaling-stroke" />
+      <line x1="${yAxisX}" y1="${geometry.top}" x2="${yAxisX}" y2="${geometry.height - geometry.bottom}" stroke="${isParametricMode ? 'rgba(255,255,255,0.12)' : APO_EQ_ACCENT_AXIS}" vector-effect="non-scaling-stroke" />
       ${individualPointSets
         .map(({ filter, points }, index) => {
           const linePath = buildPolylinePath(points, geometry);
@@ -712,13 +947,14 @@ export function renderApoEqPlot(input: {
           .map((segment) => `<path d="${segment.path}" fill="url(#${getApoBandGradientId(combinedGradientIdBase, segment.polarity)})" stroke="none"></path>`)
           .join('');
         return isParametricMode
-          ? `${combinedFillMarkup}<path d="${combinedStrokePath}" fill="none" stroke="#f8a145" stroke-width="3.45" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>`
-          : `${combinedFillMarkup}<polyline points="${sampledPoints.map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`).join(' ')}" fill="none" stroke="#f8a145" stroke-width="3.45" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>`;
+          ? `${combinedFillMarkup}<path d="${combinedStrokePath}" fill="none" stroke="${APO_EQ_ACCENT_COLOR}" stroke-width="3.45" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>`
+          : `${combinedFillMarkup}<polyline points="${sampledPoints.map((point) => `${getPlotX(point.frequencyHz, geometry).toFixed(1)},${getPlotY(point.totalDb, geometry).toFixed(1)}`).join(' ')}" fill="none" stroke="${APO_EQ_ACCENT_COLOR}" stroke-width="3.45" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>`;
       })()}
-      <line id="apoPlotHoverLine" x1="0" y1="${geometry.top}" x2="0" y2="${geometry.height - geometry.bottom}" stroke="#f8a145" stroke-width="1" opacity="0" vector-effect="non-scaling-stroke"></line>
+      <line id="apoPlotHoverLine" x1="0" y1="${geometry.top}" x2="0" y2="${geometry.height - geometry.bottom}" stroke="${APO_EQ_ACCENT_COLOR}" stroke-width="1" opacity="0" vector-effect="non-scaling-stroke"></line>
       ${enabledFilters
         .filter((filter, index) => shouldRenderGraphicEqNode(index, enabledFilters.length, input.eqMode, graphicNodeProfile))
         .map((filter, index) => {
+          const isSelected = filter.id === input.selectedFilterId;
           const x = getPlotX(filter.frequencyHz, geometry);
           const nodeGainDb = getRenderedApoFilterNodeGainDb(
             filter,
@@ -734,23 +970,23 @@ export function renderApoEqPlot(input: {
           const nodeSummary = apoFilterKindUsesGain(filter.kind)
             ? `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz, ${filter.gainDb.toFixed(1)} dB`
             : `${formatApoFilterKindLabel(filter.kind)} ${filter.frequencyHz.toFixed(0)} Hz`;
-          return `<circle class="apo-filter-node" data-apo-filter-id="${escapeHtml(filter.id)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${graphicNodeProfile.radius.toFixed(1)}" fill="${visualStyle?.nodeFill ?? '#f8a145'}" stroke="#4d2b0b" stroke-width="${graphicNodeProfile.strokeWidth.toFixed(2)}" cursor="grab" vector-effect="non-scaling-stroke"><title>${escapeHtml(nodeSummary)}</title></circle>`;
+          return `<g class="apo-filter-node-group${isSelected ? ' is-selected' : ''}">${isSelected ? `<circle class="apo-filter-node-halo" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(graphicNodeProfile.radius + 5).toFixed(1)}" fill="none" stroke="${APO_EQ_ACCENT_HALO}" stroke-width="2.4" vector-effect="non-scaling-stroke"></circle>` : ''}<circle class="apo-filter-node${isSelected ? ' is-selected' : ''}" data-apo-filter-id="${escapeHtml(filter.id)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${graphicNodeProfile.radius.toFixed(1)}" fill="${visualStyle?.nodeFill ?? APO_EQ_ACCENT_COLOR}" stroke="${APO_EQ_ACCENT_STROKE}" stroke-width="${graphicNodeProfile.strokeWidth.toFixed(2)}" cursor="grab" vector-effect="non-scaling-stroke"><title>${escapeHtml(nodeSummary)}</title></circle></g>`;
         })
         .join('')}
       ${yTicks
         .map((value) => {
           const y = getPlotY(value, geometry);
-          return `<text x="${(geometry.left - PLOT_Y_TICK_GAP).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" class="plot-axis-text">${formatDbLabel(getDisplayedApoAxisValueDb(value, input.preampDb))}</text>`;
+          return `<text x="${getYAxisTickLabelX(geometry, spacing).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" class="plot-axis-text">${formatDbLabel(getDisplayedApoAxisValueDb(value, input.preampDb))}</text>`;
         })
         .join('')}
       ${labelSizing.xTicks.map((frequency) => {
         const x = getPlotX(frequency, geometry);
         return `<text x="${x.toFixed(1)}" y="${xAxisTickY.toFixed(1)}" text-anchor="middle" dominant-baseline="hanging" class="plot-axis-text">${formatFrequencyLabel(frequency)}</text>`;
       }).join('')}
-      <text x="${((geometry.left + (geometry.width - geometry.right)) / 2).toFixed(1)}" y="${xAxisLabelY.toFixed(1)}" text-anchor="middle" dominant-baseline="hanging" class="plot-axis-label">Frequency (Hz, log)</text>
       <text x="${yAxisLabelX.toFixed(1)}" y="${((geometry.top + (geometry.height - geometry.bottom)) / 2).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 ${yAxisLabelX.toFixed(1)} ${((geometry.top + (geometry.height - geometry.bottom)) / 2).toFixed(1)})" class="plot-axis-label">${yAxisLabelText}</text>
     </svg>
-  `;
+  `,
+  };
 }
 
 function getPlotLabelSizing(compact: boolean): PlotLabelSizing {
@@ -779,12 +1015,14 @@ function getApoEqPlotGeometry(
     points: Array<{ frequencyHz: number; totalDb: number }>;
   }>,
   containerWidth: number,
+  containerHeight: number,
   sampleRate: number,
   eqMode: ApoEqMode,
   responseMultiplier: number,
   preampDb: number,
   labelSizing: PlotLabelSizing,
   yAxisLabelText: string,
+  spacing: PlotFrameSpacing,
 ): ResponsePlotGeometry {
   const allValues = [
     ...sampledPoints.map((point) => point.totalDb),
@@ -810,6 +1048,11 @@ function getApoEqPlotGeometry(
     labelSizing.xTicks,
     yAxisLabelText,
     labelSizing,
+    {
+      fixedHeight: containerHeight > 0 ? containerHeight : DEFAULT_PLOT_HEIGHT,
+      reserveXAxisLabel: false,
+      spacing,
+    },
   );
 
   return {
@@ -1320,13 +1563,12 @@ function renderMeasurementList(
           : measurements
               .map(
                 (measurement) => `
-                  <div class="measurement-row${measurement.visible ? '' : ' is-hidden'}${measurement.starred ? ' is-starred' : ''}">
+                   <div class="measurement-row${measurement.visible ? '' : ' is-hidden'}${measurement.starred ? ' is-starred' : ''}">
                     <label class="measurement-toggle" title="${escapeHtml(measurement.sourcePath ?? measurement.name)}">
-                      <input type="checkbox" data-measurement-toggle="${measurement.id}" ${measurement.visible ? 'checked' : ''} />
-                      <span class="measurement-swatch" style="background:${measurement.color}"></span>
+                      <input type="checkbox" data-measurement-toggle="${measurement.id}" style="accent-color:${measurement.color}" ${measurement.visible ? 'checked' : ''} />
                       <span class="measurement-name">${escapeHtml(measurement.name)}</span>
                     </label>
-                    <div class="measurement-actions">
+                     <div class="measurement-actions">
                       <button class="btn btn-icon measurement-star-button" type="button" data-measurement-star="${measurement.id}" aria-pressed="${measurement.starred ? 'true' : 'false'}" title="${measurement.starred ? 'Unstar' : 'Star'}" ${busy ? 'disabled' : ''}>
                         ${measurement.starred
                           ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="star-icon"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'
@@ -1348,7 +1590,7 @@ function renderMeasurementList(
       <label class="measurement-keep-control">
         <span>Keep</span>
         <input type="number" min="1" max="100" step="1" value="${measurementKeepCount}" data-measurement-keep-count ${busy ? 'disabled' : ''} />
-        <span>curves. Starred measurements are always kept.</span>
+        <span>curves.</span>
       </label>
       <div class="measurement-list-header">Reference curves</div>
       ${
@@ -1359,8 +1601,7 @@ function renderMeasurementList(
                 (referenceCurve) => `
                   <div class="measurement-row${referenceCurve.visible ? '' : ' is-hidden'}">
                     <label class="measurement-toggle" title="${escapeHtml(referenceCurve.sourcePath ?? referenceCurve.name)}">
-                      <input type="checkbox" data-reference-toggle="${referenceCurve.id}" ${referenceCurve.visible ? 'checked' : ''} />
-                      <span class="measurement-swatch measurement-swatch-reference"></span>
+                      <input type="checkbox" data-reference-toggle="${referenceCurve.id}" style="accent-color:${referenceCurve.color}" ${referenceCurve.visible ? 'checked' : ''} />
                       <span class="measurement-name">${escapeHtml(referenceCurve.name)}</span>
                     </label>
                     <div class="measurement-actions">
@@ -1380,8 +1621,10 @@ function renderMeasurementList(
 function getResponsePlotGeometry(
   measurementPointSets: MeasurementPoint[][],
   containerWidth: number,
+  containerHeight: number,
   labelSizing: PlotLabelSizing,
   yAxisLabelText: string,
+  spacing: PlotFrameSpacing,
 ): ResponsePlotGeometry {
   const points = measurementPointSets.flatMap((measurement) => measurement);
   const frequencies = points.map((point) => point.frequencyHz);
@@ -1400,6 +1643,11 @@ function getResponsePlotGeometry(
     labelSizing.xTicks,
     yAxisLabelText,
     labelSizing,
+    {
+      fixedHeight: containerHeight > 0 ? containerHeight : DEFAULT_PLOT_HEIGHT,
+      reserveXAxisLabel: false,
+      spacing,
+    },
   );
 
   return {
@@ -1517,11 +1765,13 @@ function buildToleranceFailPaths(
 
 export function attachApoPlotInteractions(input: {
   plotCard: HTMLElement;
+  geometry: ResponsePlotGeometry;
   filters: ApoFilter[];
   eqMode: ApoEqMode;
   sampleRate: number;
   responseMultiplier: number;
   preampDb: number;
+  sidebarCollapsed: boolean;
   lockFrequency: boolean;
   onFilterSelect: (filterId: string) => void;
   onFilterDrag: ApoPlotDragHandler;
@@ -1536,6 +1786,8 @@ export function attachApoPlotInteractions(input: {
       sampleRate: number;
       responseMultiplier: number;
       preampDb: number;
+      geometry: ResponsePlotGeometry;
+      sidebarCollapsed: boolean;
       lockFrequency: boolean;
       onFilterSelect: (filterId: string) => void;
       onFilterDrag: ApoPlotDragHandler;
@@ -1552,6 +1804,8 @@ export function attachApoPlotInteractions(input: {
     plotCardWithController.__apoPlotController.sampleRate = input.sampleRate;
     plotCardWithController.__apoPlotController.responseMultiplier = input.responseMultiplier;
     plotCardWithController.__apoPlotController.preampDb = input.preampDb;
+    plotCardWithController.__apoPlotController.geometry = input.geometry;
+    plotCardWithController.__apoPlotController.sidebarCollapsed = input.sidebarCollapsed;
     plotCardWithController.__apoPlotController.lockFrequency = input.lockFrequency;
     plotCardWithController.__apoPlotController.onFilterSelect = input.onFilterSelect;
     plotCardWithController.__apoPlotController.onFilterDrag = input.onFilterDrag;
@@ -1560,9 +1814,12 @@ export function attachApoPlotInteractions(input: {
     return;
   }
 
+  const getHoverLabel = (): HTMLDivElement | null =>
+    plotCard.closest('.apo-plot-stack')?.querySelector<HTMLDivElement>('#apoPlotHover') ?? null;
+
   const resetHoverState = () => {
     const hoverLine = plotCard.querySelector<SVGLineElement>('#apoPlotHoverLine');
-    const hoverLabel = plotCard.querySelector<HTMLDivElement>('#apoPlotHover');
+    const hoverLabel = getHoverLabel();
     hoverLine?.setAttribute('opacity', '0');
     if (hoverLabel) {
       hoverLabel.textContent = 'Hover: --';
@@ -1579,56 +1836,8 @@ export function attachApoPlotInteractions(input: {
     return tooltipParts.join(', ');
   };
 
-  const getGeometryFromSvg = (filters: ApoFilter[]): ResponsePlotGeometry | null => {
-    const svg = plotCard.querySelector('svg');
-    if (!svg) {
-      return null;
-    }
-
-    const viewBox = svg.getAttribute('viewBox');
-    if (!viewBox) return null;
-    const [width, height] = viewBox.split(' ').slice(2).map(Number);
-    if (!width || !height) return null;
-
-    const enabledFilters = filters.filter((filter) => filter.enabled);
-    const sampleRate = plotCardWithController.__apoPlotController?.sampleRate ?? 48000;
-    const sampledPoints = buildApoPreviewSampledPoints(
-      enabledFilters,
-      plotCardWithController.__apoPlotController?.eqMode ?? 'parametric',
-      sampleRate,
-      plotCardWithController.__apoPlotController?.responseMultiplier ?? 1,
-      plotCardWithController.__apoPlotController?.preampDb ?? 0,
-    );
-    const individualPointSets = (plotCardWithController.__apoPlotController?.eqMode ?? 'parametric') === 'graphic'
-      ? []
-      : enabledFilters.map((filter) => ({
-          filter,
-          points: sampledPoints.map((point) => ({
-            frequencyHz: point.frequencyHz,
-            totalDb: getRenderedApoEqValueDb(
-              getApoFilterResponseDb(filter, point.frequencyHz, sampleRate),
-              plotCardWithController.__apoPlotController?.eqMode ?? 'parametric',
-              plotCardWithController.__apoPlotController?.responseMultiplier ?? 1,
-              plotCardWithController.__apoPlotController?.preampDb ?? 0,
-            ),
-          })),
-        }));
-
-    const compact = width < 560;
-    const labelSizing = getPlotLabelSizing(compact);
-    const geometry = getApoEqPlotGeometry(
-      enabledFilters,
-      sampledPoints,
-      individualPointSets,
-      width,
-      sampleRate,
-      plotCardWithController.__apoPlotController?.eqMode ?? 'parametric',
-      plotCardWithController.__apoPlotController?.responseMultiplier ?? 1,
-      plotCardWithController.__apoPlotController?.preampDb ?? 0,
-      labelSizing,
-      'EQ Gain (dB)',
-    );
-    return { ...geometry, width, height };
+  const getGeometry = (): ResponsePlotGeometry | null => {
+    return plotCardWithController.__apoPlotController?.geometry ?? null;
   };
 
   const updateHover = (clientX: number) => {
@@ -1639,12 +1848,12 @@ export function attachApoPlotInteractions(input: {
 
     const svg = plotCard.querySelector<SVGSVGElement>('svg');
     const hoverLine = plotCard.querySelector<SVGLineElement>('#apoPlotHoverLine');
-    const hoverLabel = plotCard.querySelector<HTMLDivElement>('#apoPlotHover');
+    const hoverLabel = getHoverLabel();
     if (!svg || !hoverLine || !hoverLabel) {
       return;
     }
 
-    const geometry = getGeometryFromSvg(controller.filters);
+    const geometry = getGeometry();
     if (!geometry) {
       return;
     }
@@ -1697,7 +1906,7 @@ export function attachApoPlotInteractions(input: {
     }
 
     const target = event.target;
-    const geometry = getGeometryFromSvg(controller.filters);
+    const geometry = getGeometry();
     const filterId =
       target instanceof SVGCircleElement && target.classList.contains('apo-filter-node')
         ? target.getAttribute('data-apo-filter-id')
@@ -1763,7 +1972,7 @@ export function attachApoPlotInteractions(input: {
       return;
     }
 
-    const geometry = getGeometryFromSvg(controller.filters);
+    const geometry = getGeometry();
     if (!geometry) return;
 
     const svgPoint = svg.createSVGPoint();
@@ -1866,7 +2075,7 @@ export function attachApoPlotInteractions(input: {
       return;
     }
 
-    const geometry = getGeometryFromSvg(controller.filters);
+    const geometry = getGeometry();
     if (!geometry) {
       return;
     }
@@ -1958,6 +2167,8 @@ export function attachApoPlotInteractions(input: {
     sampleRate: input.sampleRate,
     responseMultiplier: input.responseMultiplier,
     preampDb: input.preampDb,
+    geometry: input.geometry,
+    sidebarCollapsed: input.sidebarCollapsed,
     lockFrequency: input.lockFrequency,
     onFilterSelect: input.onFilterSelect,
     onFilterDrag: input.onFilterDrag,

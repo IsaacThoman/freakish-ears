@@ -37,6 +37,7 @@ export const INPUT_DEVICE_STORAGE_KEY = 'freakish-ears-input-device';
 export const OUTPUT_DEVICE_STORAGE_KEY = 'freakish-ears-output-device';
 export const ACTIVE_CONFIG_STORAGE_KEY = 'freakish-ears-active-config';
 export const MEASURE_SIDEBAR_COLLAPSED_STORAGE_KEY = 'freakish-ears-measure-sidebar-collapsed';
+export const MEASURE_LIBRARY_SIDEBAR_COLLAPSED_STORAGE_KEY = 'freakish-ears-measure-library-sidebar-collapsed';
 export const EQ_SETTINGS_SIDEBAR_COLLAPSED_STORAGE_KEY = 'freakish-ears-eq-settings-sidebar-collapsed';
 export const DEFAULT_MEASUREMENT_BACKEND = 'web-audio';
 export const DEFAULT_MEASUREMENT_KEEP_COUNT = 5;

@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
@@ -21,6 +21,7 @@ const EQUALIZER_APO_CONFIG_FOLDER_ENV_KEY = 'FREAKISH_EARS_EQUALIZER_APO_CONFIG_
 const APO_CONFIG_FILE_NAME = 'config.txt';
 const FREAKISH_EARS_PROFILE_NAME = 'FreakishEars.txt';
 const PEACE_PROFILE_NAME = 'peace.txt';
+const EQ_PROFILES_DIRECTORY_NAME = 'eq-profiles';
 const DISABLED_FREAKISH_EARS_PROFILE_TEXT = `# FreakishEars Equalizer APO profile disabled${os.EOL}`;
 
 export function sanitizePathSegment(value: string): string {
@@ -121,11 +122,20 @@ export async function getEqualizerApoStatus(): Promise<EqualizerApoStatus> {
 }
 
 export async function listPeacePresets(): Promise<PeacePresetSummary[]> {
-  return BUNDLED_PEACE_PRESETS.map((preset) => ({
-    fileName: preset.fileName,
-    displayName: preset.displayName,
-    filePath: preset.fileName,
-  }));
+  const profilesDirectoryPath = await ensureBundledPeacePresetDirectory();
+  const entries = await readdir(profilesDirectoryPath, { withFileTypes: true });
+
+  return entries
+    .filter((entry) => entry.isFile() && /\.peace$/iu.test(entry.name))
+    .map((entry) => {
+      const bundledPreset = BUNDLED_PEACE_PRESETS.find((preset) => preset.fileName === entry.name);
+      return {
+        fileName: entry.name,
+        displayName: bundledPreset?.displayName ?? entry.name.replace(/\.peace$/iu, ''),
+        filePath: path.join(profilesDirectoryPath, entry.name),
+      };
+    })
+    .sort((left, right) => left.displayName.localeCompare(right.displayName));
 }
 
 export async function readPeacePreset(fileName: string): Promise<ReadPeacePresetResult> {
@@ -135,15 +145,16 @@ export async function readPeacePreset(fileName: string): Promise<ReadPeacePreset
     throw new Error('Invalid PEACE preset name.');
   }
 
-  const preset = BUNDLED_PEACE_PRESETS.find((entry) => entry.fileName === normalizedFileName);
+  const profilesDirectoryPath = await ensureBundledPeacePresetDirectory();
+  const presetPath = path.join(profilesDirectoryPath, normalizedFileName);
 
-  if (!preset) {
+  if (!await pathExists(presetPath)) {
     throw new Error(`PEACE preset not found: ${normalizedFileName}`);
   }
 
   return {
     fileName: normalizedFileName,
-    contents: preset.contents,
+    contents: await readFile(presetPath, 'utf8'),
   };
 }
 
@@ -269,6 +280,27 @@ export async function disablePeace(): Promise<{ disabled: boolean; processKilled
 function resolveEqualizerApoConfigFolderPath(): string {
   const overridePath = process.env[EQUALIZER_APO_CONFIG_FOLDER_ENV_KEY]?.trim();
   return overridePath ? path.resolve(overridePath) : DEFAULT_EQUALIZER_APO_CONFIG_FOLDER;
+}
+
+function resolveEqProfilesDirectoryPath(): string {
+  return path.join(os.homedir(), '.freakish-ears', EQ_PROFILES_DIRECTORY_NAME);
+}
+
+async function ensureBundledPeacePresetDirectory(): Promise<string> {
+  const directoryPath = resolveEqProfilesDirectoryPath();
+  await mkdir(directoryPath, { recursive: true });
+
+  await Promise.all(BUNDLED_PEACE_PRESETS.map(async (preset) => {
+    const presetPath = path.join(directoryPath, preset.fileName);
+
+    if (await pathExists(presetPath)) {
+      return;
+    }
+
+    await writeFile(presetPath, preset.contents, 'utf8');
+  }));
+
+  return directoryPath;
 }
 
 function getEqualizerApoUnavailableErrorMessage(): string {

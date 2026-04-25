@@ -199,7 +199,6 @@ export type AppState = {
   latestStatusTone: StatusTone;
   equalizerApoStatus: EqualizerApoStatus | null;
   peacePresets: PeacePresetSummary[];
-  apoPresetMenuOpen: boolean;
   toast: ToastState | null;
   toastTimeoutId: number;
 };

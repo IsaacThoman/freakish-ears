@@ -1,6 +1,8 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 
+const APP_ASPECT_RATIO = 16 / 10;
+
 type CreateWindowOptions = {
   width?: number;
   height?: number;
@@ -23,6 +25,8 @@ export function createWindow(options: CreateWindowOptions = {}): BrowserWindow {
     height: options.height ?? 840,
     minWidth: 960,
     minHeight: 720,
+    resizable: false,
+    maximizable: false,
     backgroundColor: '#151515',
     darkTheme: true,
     autoHideMenuBar: true,
@@ -33,6 +37,16 @@ export function createWindow(options: CreateWindowOptions = {}): BrowserWindow {
       preload: path.join(__dirname, 'preload.js'),
       backgroundThrottling: false,
     },
+  });
+
+  mainWindow.setAspectRatio(APP_ASPECT_RATIO);
+
+  mainWindow.on('enter-full-screen', () => {
+    mainWindow.setAspectRatio(0);
+  });
+
+  mainWindow.on('leave-full-screen', () => {
+    mainWindow.setAspectRatio(APP_ASPECT_RATIO);
   });
 
   mainWindow.removeMenu();

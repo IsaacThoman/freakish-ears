@@ -51,6 +51,7 @@ import {
   END_FREQUENCY_STORAGE_KEY,
   INPUT_DEVICE_STORAGE_KEY,
   INPUT_CHANNEL_STORAGE_KEY,
+  MEASURE_LIBRARY_SIDEBAR_COLLAPSED_STORAGE_KEY,
   MEASURE_SIDEBAR_COLLAPSED_STORAGE_KEY,
   MEASUREMENT_BACKEND_STORAGE_KEY,
   MEASUREMENT_KEEP_COUNT_STORAGE_KEY,
@@ -116,6 +117,7 @@ import {
   attachApoPlotInteractions,
   attachPlotInteractions,
   renderApoEqPlot,
+  renderMeasurementLibrary,
   renderResponsePlot,
   DEFAULT_PLOT_HEIGHT,
   DEFAULT_PLOT_WIDTH,
@@ -235,297 +237,50 @@ app.innerHTML = `
           <button class="header-tab" type="button" data-tab="measure">Measure</button>
           <button class="header-tab" type="button" data-tab="equalizer">Equalizer</button>
           <button class="header-tab" type="button" data-tab="autocal">Autocal</button>
+          <button class="header-tab" type="button" data-tab="preferences">Preferences</button>
         </div>
       </nav>
       <div class="header-spacer"></div>
     </header>
 
     <section class="grid" data-active-tab="measure">
-      <div class="options-stack" data-tab-content="measure autocal">
-        <button
-          id="measureSidebarToggleButton"
-          class="sidebar-toggle"
-          type="button"
-          aria-label="Collapse measurement sidebar"
-          title="Collapse measurement sidebar"
-          aria-expanded="true"
-        >
-          <span aria-hidden="true">◀</span>
-        </button>
-        <div class="sidebar-content">
-        <section class="panel section">
-          <span class="section-title">Input</span>
-
-        <div class="field">
-          <label for="measurementBackendSelect">Backend</label>
-          <select id="measurementBackendSelect">
-            <option value="web-audio">Built-in</option>
-            <option value="sox">SoX</option>
-          </select>
-          <span style="color:var(--text-muted);font-size:11px">SoX uses the system default input/output devices, but still applies the selected sample rate and channel routing.</span>
-        </div>
-
-        <div class="field">
-          <label for="sampleRateSelect">Sample Rate</label>
-          <select id="sampleRateSelect">
-            ${SAMPLE_RATE_OPTIONS.map((value) => `<option value="${value}" ${value === DEFAULT_SAMPLE_RATE ? 'selected' : ''}>${value.toLocaleString()} Hz</option>`).join('')}
-          </select>
-        </div>
-
-        <div class="field">
-          <label for="inputChannelSelect">Input Channel</label>
-          <select id="inputChannelSelect">
-            <option value="left">Left</option>
-            <option value="right">Right</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <select id="microphoneSelect"></select>
-        </div>
-
-        <div class="folder-row">
-          <button id="importLeftCalibrationButton" class="btn btn-secondary" type="button">
-            Left Cal
-          </button>
-          <div id="leftCalibrationValue" class="folder-chip">
-            <span id="leftCalibrationName" class="folder-chip-label">None</span>
-            <button
-              id="clearLeftCalibrationButton"
-              class="folder-chip-clear"
-              type="button"
-              aria-label="Clear left microphone calibration"
-              title="Clear left microphone calibration"
-            >
-              &times;
-            </button>
-          </div>
-        </div>
-
-        <div class="folder-row">
-          <button id="importRightCalibrationButton" class="btn btn-secondary" type="button">
-            Right Cal
-          </button>
-          <div id="rightCalibrationValue" class="folder-chip">
-            <span id="rightCalibrationName" class="folder-chip-label">None</span>
-            <button
-              id="clearRightCalibrationButton"
-              class="folder-chip-clear"
-              type="button"
-              aria-label="Clear right microphone calibration"
-              title="Clear right microphone calibration"
-            >
-              &times;
-            </button>
-          </div>
-        </div>
-
-        <button id="refreshDevicesButton" class="btn btn-secondary" type="button">
-          Refresh
-        </button>
-
-        <span class="section-title">Output</span>
-
-        <div class="field">
-          <label for="outputChannelSelect">Output Channel</label>
-          <select id="outputChannelSelect">
-            <option value="both">Both</option>
-            <option value="left">Left</option>
-            <option value="right">Right</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <select id="outputSelect"></select>
-        </div>
-
-        <div class="folder-row">
-          <button id="chooseFolderButton" class="btn btn-secondary" type="button">
-            Folder
-          </button>
-          <div id="selectedFolder" class="folder-chip">None</div>
-        </div>
-
-        <div class="folder-row folder-row-actions">
-          <button id="saveConfigButton" class="btn btn-secondary" type="button">
-            Save Config
-          </button>
-          <button id="importConfigButton" class="btn btn-secondary" type="button">
-            Import Config
-          </button>
-        </div>
-
-        <span class="section-title">Sweep</span>
-
-        <div class="inline-row">
-          <div class="inline-field">
-            <label for="startFrequencyInput">Start Hz</label>
-            <input id="startFrequencyInput" type="number" min="10" max="22000" step="1" value="${DEFAULT_START_FREQUENCY}" />
-          </div>
-          <div class="inline-field">
-            <label for="endFrequencyInput">End Hz</label>
-            <input id="endFrequencyInput" type="number" min="20" max="22000" step="1" value="${DEFAULT_END_FREQUENCY}" />
-          </div>
-          <div class="inline-field">
-            <label for="durationInput">Seconds</label>
-            <input id="durationInput" type="number" min="2" max="30" step="0.5" value="${DEFAULT_DURATION_SECONDS}" />
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="volumeInput">Level</label>
-          <div class="slider-row">
-            <input id="volumeInput" class="range-input" type="range" min="${MIN_SWEEP_LEVEL_DB}" max="${MAX_SWEEP_LEVEL_DB}" step="1" value="${DEFAULT_SWEEP_LEVEL_DB}" />
-            <div class="number-input-row">
-              <input id="volumeNumberInput" class="level-number-input" type="number" min="${MIN_SWEEP_LEVEL_DB}" max="${MAX_SWEEP_LEVEL_DB}" step="1" value="${DEFAULT_SWEEP_LEVEL_DB}" />
-              <span>dB</span>
-            </div>
-          </div>
-        </div>
-
-          <button id="runMeasurementButton" class="btn btn-primary" type="button">
-            Run
-          </button>
-        </section>
-
-        <section class="panel section automation-panel">
-          <span class="section-title">AUTOCAL</span>
-
-          <div class="field">
-            <label for="automationAlgorithmSelect">Algorithm</label>
-            <select id="automationAlgorithmSelect">
-              <option value="proportional">Proportional</option>
-              <option value="pid">PID</option>
-              <option value="damped-refit">Damped Refit</option>
-              <option value="momentum">Momentum</option>
-            </select>
-          </div>
-
-          <div class="automation-fields">
-            <div class="field">
-              <label for="automationDelayInput">Delay Between Runs</label>
-              <div class="number-input-row">
-                <input id="automationDelayInput" class="level-number-input" type="number" min="0" max="3600" step="0.1" value="${DEFAULT_AUTOMATION_DELAY_SECONDS.toFixed(1)}" />
-                <span>s</span>
-              </div>
-            </div>
-          </div>
-
-          <div id="proportionalAutomationFields" class="automation-fields">
-            <div id="proportionalPField" class="field">
-              <label for="proportionalPInput">P Value</label>
-              <div class="number-input-row">
-                <input id="proportionalPInput" class="level-number-input" type="number" min="0" max="1" step="0.01" placeholder="-.--" value="${DEFAULT_PROPORTIONAL_P.toFixed(2)}" />
-              </div>
-            </div>
-            <label class="plot-toggle">
-              <input id="dynamicProportionalPToggle" type="checkbox" />
-              <span>Dynamic P Value</span>
-            </label>
-            <span class="automation-hint">Each pass measures the current response, adds (target - measured) * P to the current APO correction, then applies the updated APO config.</span>
-          </div>
-
-          <div id="pidAutomationFields" class="automation-fields" hidden>
-            <div class="field">
-              <label for="pidProportionalGainInput">P Value</label>
-              <div class="number-input-row">
-                <input id="pidProportionalGainInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PID_PROPORTIONAL_GAIN.toFixed(2)}" />
-              </div>
-            </div>
-            <div class="field">
-              <label for="pidIntegralGainInput">I Value</label>
-              <div class="number-input-row">
-                <input id="pidIntegralGainInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PID_INTEGRAL_GAIN.toFixed(2)}" />
-              </div>
-            </div>
-            <div class="field">
-              <label for="pidDerivativeGainInput">D Value</label>
-              <div class="number-input-row">
-                <input id="pidDerivativeGainInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PID_DERIVATIVE_GAIN.toFixed(2)}" />
-              </div>
-            </div>
-          </div>
-
-          <div id="dampedRefitAutomationFields" class="automation-fields" hidden>
-            <div class="field">
-              <label for="dampedRefitBlendInput">Blend</label>
-              <div class="number-input-row">
-                <input id="dampedRefitBlendInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_DAMPED_REFIT_BLEND.toFixed(2)}" />
-              </div>
-            </div>
-            <span class="automation-hint">Each pass computes a fresh graphic EQ fit and blends part of it into the current correction.</span>
-          </div>
-
-          <div id="momentumAutomationFields" class="automation-fields" hidden>
-            <div class="field">
-              <label for="momentumBlendInput">Blend</label>
-              <div class="number-input-row">
-                <input id="momentumBlendInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_MOMENTUM_BLEND.toFixed(2)}" />
-              </div>
-            </div>
-            <div class="field">
-              <label for="momentumDecayInput">Decay</label>
-              <div class="number-input-row">
-                <input id="momentumDecayInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_MOMENTUM_DECAY.toFixed(2)}" />
-              </div>
-            </div>
-            <span class="automation-hint">Each pass blends toward a fresh fit while carrying forward part of the previous step.</span>
-          </div>
-
-          <div class="automation-fields">
-            <div class="field">
-              <label for="automationRegressionLimitInput">Revert After Regressions</label>
-              <div class="number-input-row">
-                <input id="automationRegressionLimitInput" class="level-number-input" type="number" min="0" max="20" step="1" value="${DEFAULT_AUTOMATION_REGRESSION_LIMIT}" />
-                <span>runs</span>
-              </div>
-            </div>
-            <label class="plot-toggle">
-              <input id="automationStopOnToleranceToggle" type="checkbox" />
-              <span>Stop when within tolerance</span>
-            </label>
-            <div id="automationToleranceFields" class="automation-fields">
-              <div class="field">
-                <label for="automationToleranceMaxAcceptableErrorWidthInput">Max Acceptable Error Width</label>
-                <div class="number-input-row">
-                  <input id="automationToleranceMaxAcceptableErrorWidthInput" class="level-number-input" type="number" min="0" max="5000" step="1" value="${DEFAULT_AUTOMATION_TOLERANCE_MAX_ACCEPTABLE_ERROR_WIDTH_HZ.toFixed(0)}" />
-                  <span>Hz</span>
-                </div>
-              </div>
-              <div class="automation-tolerance-grid">
-                ${AUTOMATION_TOLERANCE_BANDS.map(
-                  (band) => `
-                    <div class="field">
-                      <label for="automationTolerance${band.key}Input">${band.label}</label>
-                      <div class="number-input-row">
-                        <input id="automationTolerance${band.key}Input" class="level-number-input" type="number" min="0" max="24" step="0.1" value="${band.defaultToleranceDb.toFixed(1)}" />
-                        <span>dB</span>
-                      </div>
-                    </div>
-                  `,
-                ).join('')}
-              </div>
-            </div>
-          </div>
-          <button id="runAutomationButton" class="btn btn-primary automation-run-button" type="button">
-            Run Automatic Calibration
-          </button>
-          <div class="automation-progress" aria-live="polite">
-            <div class="automation-progress-item">
-              <span class="automation-progress-label">Iterations</span>
-              <span id="automationIterationValue" class="automation-progress-value">0</span>
-            </div>
-            <div class="automation-progress-item">
-              <span class="automation-progress-label">Elapsed</span>
-              <span id="automationElapsedValue" class="automation-progress-value">00:00</span>
-            </div>
-          </div>
-        </section>
-        </div>
-      </div>
-
       <section class="panel section">
-        <div id="statusPill" class="status-bar" data-tone="idle">Ready</div>
+        <div class="status-row" data-tab-content="measure equalizer autocal">
+          <button
+            id="measureSidebarToggleButton"
+            class="sidebar-toggle sidebar-toggle-inline"
+            type="button"
+            data-tab-content="measure autocal"
+            aria-label="Collapse measurement sidebar"
+            title="Collapse measurement sidebar"
+            aria-expanded="true"
+          >
+            <span aria-hidden="true">◀</span>
+          </button>
+          <button
+            id="equalizerSettingsSidebarToggleButton"
+            class="sidebar-toggle sidebar-toggle-inline"
+            type="button"
+            data-tab-content="equalizer"
+            aria-label="Collapse equalizer settings sidebar"
+            title="Collapse equalizer settings sidebar"
+            aria-expanded="true"
+          >
+            <span aria-hidden="true">◀</span>
+          </button>
+          <div id="statusPill" class="status-bar" data-tone="idle">Ready</div>
+          <button
+            id="measureLibrarySidebarToggleButton"
+            class="sidebar-toggle sidebar-toggle-inline"
+            type="button"
+            data-tab-content="measure autocal"
+            aria-label="Collapse measurement library sidebar"
+            title="Collapse measurement library sidebar"
+            aria-expanded="true"
+          >
+            <span aria-hidden="true">▶</span>
+          </button>
+        </div>
 
         <div id="plotsContainer" class="plots-container">
           <input id="measurementFileInput" type="file" accept=".txt,.csv,.json,.targetcurve,text/plain,application/json" multiple hidden />
@@ -536,46 +291,306 @@ app.innerHTML = `
           <input id="apoConfigFileInput" type="file" accept=".txt,.peace,.peq,.ini,text/plain" hidden />
 
           <div class="measure-content" data-tab-content="measure autocal">
-            <div class="plot-toolbar plot-toolbar-measurements">
-              <div class="plot-toolbar-actions">
-                <label class="plot-toggle">
-                  <input id="normalizePlotToggle" type="checkbox" />
-                  <span>Normalize @ 1 kHz</span>
-                </label>
-                <label class="plot-smoothing" for="smoothingModeSelect">
-                  <span>Smoothing</span>
-                  <select id="smoothingModeSelect">
-                    ${SMOOTHING_MODE_OPTIONS.map((value) => `<option value="${value}">${formatSmoothingModeLabel(value)}</option>`).join('')}
-                  </select>
-                </label>
-                <button id="importMeasurementsButton" class="btn btn-secondary" type="button">
-                  Import
-                </button>
-                <button id="importReferenceButton" class="btn btn-secondary" type="button">
-                  Import Ref
-                </button>
+            <div class="measurement-layout">
+              <aside class="measurement-settings-sidebar">
+                <div class="sidebar-content">
+                  <div class="measurement-sidebar-card">
+                    <section class="panel section measurement-sidebar-primary">
+                      <span class="section-title">Input</span>
+
+                      <div class="field">
+                        <label for="measurementBackendSelect">Backend</label>
+                        <select id="measurementBackendSelect">
+                          <option value="web-audio">Built-in</option>
+                          <option value="sox">SoX</option>
+                        </select>
+                      </div>
+
+                      <div class="field">
+                        <label for="sampleRateSelect">Sample Rate</label>
+                        <select id="sampleRateSelect">
+                          ${SAMPLE_RATE_OPTIONS.map((value) => `<option value="${value}" ${value === DEFAULT_SAMPLE_RATE ? 'selected' : ''}>${value.toLocaleString()} Hz</option>`).join('')}
+                        </select>
+                      </div>
+
+                      <div class="field">
+                        <label for="inputChannelSelect">Input Channel</label>
+                        <select id="inputChannelSelect">
+                          <option value="left">Left</option>
+                          <option value="right">Right</option>
+                        </select>
+                      </div>
+
+                      <div class="field">
+                        <select id="microphoneSelect"></select>
+                      </div>
+
+                      <div class="folder-row calibration-row">
+                        <div class="calibration-control">
+                          <button id="importLeftCalibrationButton" class="btn btn-secondary calibration-button" type="button">
+                            <span class="calibration-button-label">Left Cal</span>
+                            <span id="leftCalibrationButtonName" class="calibration-button-name" hidden></span>
+                          </button>
+                        </div>
+                        <div class="calibration-control">
+                          <button id="importRightCalibrationButton" class="btn btn-secondary calibration-button" type="button">
+                            <span class="calibration-button-label">Right Cal</span>
+                            <span id="rightCalibrationButtonName" class="calibration-button-name" hidden></span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <span class="section-title">Output</span>
+
+                      <div class="field">
+                        <label for="outputChannelSelect">Output Channel</label>
+                        <select id="outputChannelSelect">
+                          <option value="both">Both</option>
+                          <option value="left">Left</option>
+                          <option value="right">Right</option>
+                        </select>
+                      </div>
+
+                      <div class="field">
+                        <select id="outputSelect"></select>
+                      </div>
+
+                      <div class="folder-row">
+                        <button id="chooseFolderButton" class="btn btn-secondary" type="button">
+                          Folder
+                        </button>
+                        <div id="selectedFolder" class="folder-chip">None</div>
+                      </div>
+
+                      <div class="folder-row folder-row-actions">
+                        <button id="saveConfigButton" class="btn btn-secondary" type="button">
+                          Save Config
+                        </button>
+                        <button id="importConfigButton" class="btn btn-secondary" type="button">
+                          Import Config
+                        </button>
+                      </div>
+                    </section>
+
+                    <section class="panel section measurement-sidebar-footer">
+                      <div class="field measurement-sidebar-level-field">
+                        <label for="volumeInput">Level</label>
+                        <div class="slider-row">
+                          <input id="volumeInput" class="range-input" type="range" min="${MIN_SWEEP_LEVEL_DB}" max="${MAX_SWEEP_LEVEL_DB}" step="1" value="${DEFAULT_SWEEP_LEVEL_DB}" />
+                          <div class="number-input-row">
+                            <input id="volumeNumberInput" class="level-number-input" type="number" min="${MIN_SWEEP_LEVEL_DB}" max="${MAX_SWEEP_LEVEL_DB}" step="1" value="${DEFAULT_SWEEP_LEVEL_DB}" />
+                            <span>dB</span>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section class="panel section automation-panel" hidden>
+                      <span class="section-title">AUTOCAL</span>
+
+                      <div class="field">
+                        <label for="automationAlgorithmSelect">Algorithm</label>
+                        <select id="automationAlgorithmSelect">
+                          <option value="proportional">Proportional</option>
+                          <option value="pid">PID</option>
+                          <option value="damped-refit">Damped Refit</option>
+                          <option value="momentum">Momentum</option>
+                        </select>
+                      </div>
+
+                      <div class="automation-fields">
+                        <div class="field">
+                          <label for="automationDelayInput">Delay Between Runs</label>
+                          <div class="number-input-row">
+                            <input id="automationDelayInput" class="level-number-input" type="number" min="0" max="3600" step="0.1" value="${DEFAULT_AUTOMATION_DELAY_SECONDS.toFixed(1)}" />
+                            <span>s</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div id="proportionalAutomationFields" class="automation-fields">
+                        <div id="proportionalPField" class="field">
+                          <label for="proportionalPInput">P Value</label>
+                          <div class="number-input-row">
+                            <input id="proportionalPInput" class="level-number-input" type="number" min="0" max="1" step="0.01" placeholder="-.--" value="${DEFAULT_PROPORTIONAL_P.toFixed(2)}" />
+                          </div>
+                        </div>
+                        <label class="plot-toggle">
+                          <input id="dynamicProportionalPToggle" type="checkbox" />
+                          <span>Dynamic P Value</span>
+                        </label>
+                        <span class="automation-hint">Each pass measures the current response, adds (target - measured) * P to the current APO correction, then applies the updated APO config.</span>
+                      </div>
+
+                      <div id="pidAutomationFields" class="automation-fields" hidden>
+                        <div class="field">
+                          <label for="pidProportionalGainInput">P Value</label>
+                          <div class="number-input-row">
+                            <input id="pidProportionalGainInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PID_PROPORTIONAL_GAIN.toFixed(2)}" />
+                          </div>
+                        </div>
+                        <div class="field">
+                          <label for="pidIntegralGainInput">I Value</label>
+                          <div class="number-input-row">
+                            <input id="pidIntegralGainInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PID_INTEGRAL_GAIN.toFixed(2)}" />
+                          </div>
+                        </div>
+                        <div class="field">
+                          <label for="pidDerivativeGainInput">D Value</label>
+                          <div class="number-input-row">
+                            <input id="pidDerivativeGainInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_PID_DERIVATIVE_GAIN.toFixed(2)}" />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div id="dampedRefitAutomationFields" class="automation-fields" hidden>
+                        <div class="field">
+                          <label for="dampedRefitBlendInput">Blend</label>
+                          <div class="number-input-row">
+                            <input id="dampedRefitBlendInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_DAMPED_REFIT_BLEND.toFixed(2)}" />
+                          </div>
+                        </div>
+                        <span class="automation-hint">Each pass computes a fresh graphic EQ fit and blends part of it into the current correction.</span>
+                      </div>
+
+                      <div id="momentumAutomationFields" class="automation-fields" hidden>
+                        <div class="field">
+                          <label for="momentumBlendInput">Blend</label>
+                          <div class="number-input-row">
+                            <input id="momentumBlendInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_MOMENTUM_BLEND.toFixed(2)}" />
+                          </div>
+                        </div>
+                        <div class="field">
+                          <label for="momentumDecayInput">Decay</label>
+                          <div class="number-input-row">
+                            <input id="momentumDecayInput" class="level-number-input" type="number" min="0" max="1" step="0.01" value="${DEFAULT_MOMENTUM_DECAY.toFixed(2)}" />
+                          </div>
+                        </div>
+                        <span class="automation-hint">Each pass blends toward a fresh fit while carrying forward part of the previous step.</span>
+                      </div>
+
+                      <div class="automation-fields">
+                        <div class="field">
+                          <label for="automationRegressionLimitInput">Revert After Regressions</label>
+                          <div class="number-input-row">
+                            <input id="automationRegressionLimitInput" class="level-number-input" type="number" min="0" max="20" step="1" value="${DEFAULT_AUTOMATION_REGRESSION_LIMIT}" />
+                            <span>runs</span>
+                          </div>
+                        </div>
+                        <label class="plot-toggle">
+                          <input id="automationStopOnToleranceToggle" type="checkbox" />
+                          <span>Stop when within tolerance</span>
+                        </label>
+                        <div id="automationToleranceFields" class="automation-fields">
+                          <div class="field">
+                            <label for="automationToleranceMaxAcceptableErrorWidthInput">Max Acceptable Error Width</label>
+                            <div class="number-input-row">
+                              <input id="automationToleranceMaxAcceptableErrorWidthInput" class="level-number-input" type="number" min="0" max="5000" step="1" value="${DEFAULT_AUTOMATION_TOLERANCE_MAX_ACCEPTABLE_ERROR_WIDTH_HZ.toFixed(0)}" />
+                              <span>Hz</span>
+                            </div>
+                          </div>
+                          <div class="automation-tolerance-grid">
+                            ${AUTOMATION_TOLERANCE_BANDS.map(
+                              (band) => `
+                                <div class="field">
+                                  <label for="automationTolerance${band.key}Input">${band.label}</label>
+                                  <div class="number-input-row">
+                                    <input id="automationTolerance${band.key}Input" class="level-number-input" type="number" min="0" max="24" step="0.1" value="${band.defaultToleranceDb.toFixed(1)}" />
+                                    <span>dB</span>
+                                  </div>
+                                </div>
+                              `,
+                            ).join('')}
+                          </div>
+                        </div>
+                      </div>
+                      <button id="runAutomationButton" class="btn btn-primary automation-run-button" type="button">
+                        Run Automatic Calibration
+                      </button>
+                      <div class="automation-progress" aria-live="polite">
+                        <div class="automation-progress-item">
+                          <span class="automation-progress-label">Iterations</span>
+                          <span id="automationIterationValue" class="automation-progress-value">0</span>
+                        </div>
+                        <div class="automation-progress-item">
+                          <span class="automation-progress-label">Elapsed</span>
+                          <span id="automationElapsedValue" class="automation-progress-value">00:00</span>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </aside>
+
+              <div class="measurement-main-panel">
+                <div class="measurement-plot-stack">
+                  <div id="measurementPlotHover" class="plot-hover">Hover: --</div>
+                  <div id="measurementPlotViewport" class="measurement-plot-viewport">
+                    <div id="measurementsPlotCard" class="plot-card">
+                      <span class="panel-note">Run or import measurements to plot response</span>
+                    </div>
+                  </div>
+                  <div class="measurement-plot-axis-label" aria-hidden="true">Frequency (Hz, log)</div>
+                  <div class="measurement-preview-divider" aria-hidden="true"></div>
+                  <div class="measurement-controls-stack">
+                    <div class="measurement-sweep-grid">
+                      <div class="inline-row measurement-sweep-fields">
+                        <div class="inline-field" data-slot="start">
+                          <label for="startFrequencyInput">Start Hz</label>
+                          <input id="startFrequencyInput" type="number" min="10" max="22000" step="1" value="${DEFAULT_START_FREQUENCY}" />
+                        </div>
+                        <div class="inline-field" data-slot="end">
+                          <label for="endFrequencyInput">End Hz</label>
+                          <input id="endFrequencyInput" type="number" min="20" max="22000" step="1" value="${DEFAULT_END_FREQUENCY}" />
+                        </div>
+                        <div class="inline-field" data-slot="duration">
+                          <label for="durationInput">Seconds</label>
+                          <input id="durationInput" type="number" min="2" max="30" step="0.5" value="${DEFAULT_DURATION_SECONDS}" />
+                        </div>
+                        <div class="measurement-run-field" data-slot="run">
+                          <button id="runMeasurementButton" class="btn btn-primary measurement-control-compact measurement-action-button" type="button">
+                            Run
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="measurement-toolbar-actions">
+                        <label class="plot-toggle measurement-control-compact" data-slot="normalize">
+                          <input id="normalizePlotToggle" type="checkbox" />
+                          <span>Normalize @ 1 kHz</span>
+                        </label>
+                        <label class="plot-smoothing measurement-control-compact" for="smoothingModeSelect" data-slot="smoothing">
+                          <span>Smoothing</span>
+                          <select id="smoothingModeSelect">
+                            ${SMOOTHING_MODE_OPTIONS.map((value) => `<option value="${value}">${formatSmoothingModeLabel(value)}</option>`).join('')}
+                          </select>
+                        </label>
+                        <button id="importMeasurementsButton" class="btn btn-secondary measurement-control-compact measurement-action-button" type="button" data-slot="import-measurements">
+                          Import
+                        </button>
+                        <button id="importReferenceButton" class="btn btn-secondary measurement-control-compact measurement-action-button" type="button" data-slot="import-reference">
+                          Import Ref
+                        </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div id="measurementsPlotCard" class="plot-card">
-              <span style="color:var(--text-muted);font-size:11px">Run or import measurements to plot response</span>
+
+              <aside class="measurement-library-sidebar">
+                <div class="sidebar-content">
+                  <div id="measurementLibraryCard" class="measurement-library-card">
+                    <span class="panel-note">No measurements loaded.</span>
+                  </div>
+                </div>
+              </aside>
             </div>
           </div>
           <div class="equalizer-content" data-tab-content="equalizer">
             <div class="equalizer-layout">
               <aside class="equalizer-settings-sidebar">
-                <button
-                  id="equalizerSettingsSidebarToggleButton"
-                  class="sidebar-toggle"
-                  type="button"
-                  aria-label="Collapse equalizer settings sidebar"
-                  title="Collapse equalizer settings sidebar"
-                  aria-expanded="true"
-                >
-                  <span aria-hidden="true">◀</span>
-                </button>
                 <div class="sidebar-content">
                 <div id="apoCard" class="apo-card">
-                  <div class="apo-controls-bar">
+                  <div class="apo-section apo-controls-bar">
                     <div class="apo-apply-anchor">
                       <div id="apoEnableToggle" class="segmented-toggle apo-enable-toggle" role="tablist" aria-label="EQ enable selector">
                         <button id="apoEnableOffButton" class="segmented-toggle-option" type="button" data-apo-enabled="false" role="tab" aria-selected="true">EQ Off</button>
@@ -586,54 +601,48 @@ app.innerHTML = `
                         <span>PEACE is running</span>
                       </div>
                     </div>
-                    <div id="apoChannelProfileToggle" class="segmented-toggle" role="tablist" aria-label="EQ channel selector">
-                      <button id="apoChannelProfileAllButton" class="segmented-toggle-option" type="button" data-apo-channel-profile="all" role="tab" aria-selected="true">All</button>
-                      <button id="apoChannelProfileLeftButton" class="segmented-toggle-option" type="button" data-apo-channel-profile="left" role="tab" aria-selected="false">Left</button>
-                      <button id="apoChannelProfileRightButton" class="segmented-toggle-option" type="button" data-apo-channel-profile="right" role="tab" aria-selected="false">Right</button>
-                      <span class="segmented-toggle-thumb" aria-hidden="true"></span>
+                    <span id="apoApplyStatus" class="apo-hint"></span>
+                    <div class="field apo-channel-profile-field">
+                      <label for="apoChannelProfileSelect">Channel</label>
+                      <select id="apoChannelProfileSelect" aria-label="EQ channel selector">
+                        <option value="all">All</option>
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                      </select>
                     </div>
                     <div id="apoEqModeToggle" class="segmented-toggle" role="tablist" aria-label="EQ mode selector">
                       <button id="apoEqModeParametricButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="parametric" role="tab" aria-selected="true">Parametric</button>
                       <button id="apoEqModeGraphicButton" class="segmented-toggle-option" type="button" data-apo-eq-mode="graphic" role="tab" aria-selected="false">Graphic</button>
                       <span id="apoEqModeThumb" class="segmented-toggle-thumb" aria-hidden="true"></span>
                     </div>
-                    <label class="apo-control-group apo-control-group-inline" for="apoMaxFiltersInput">
-                      <span>Filters</span>
-                      <input id="apoMaxFiltersInput" type="number" min="1" max="${MAX_PARAMETRIC_APO_FILTERS}" step="1" value="${DEFAULT_APO_MAX_FILTERS}" />
-                    </label>
                   </div>
 
-                  <div class="apo-toolbar">
-                    <span class="section-title">Equalizer</span>
+                  <div class="apo-section apo-toolbar">
+                    <div class="apo-section-header">
+                      <span class="section-title">Equalizer</span>
+                    </div>
+
                     <div class="apo-toolbar-actions">
-                      <button id="generateApoFiltersButton" class="btn btn-secondary" type="button">
-                        Generate Baseline
+                      <button id="addApoFilterButton" class="btn btn-secondary" type="button" data-slot="add-node">
+                        Add Node
                       </button>
-                      <button id="addApoFilterButton" class="btn btn-secondary" type="button">
-                        Add Filter
+                      <button id="deleteApoFilterButton" class="btn btn-secondary" type="button" data-slot="delete-node">
+                        Delete Node
                       </button>
-                      <button id="clearApoFiltersButton" class="btn btn-secondary" type="button">
-                        Clear
-                      </button>
-                      <div id="apoPresetMenuAnchor" class="apo-preset-menu-anchor">
-                        <button
-                          id="selectApoPresetButton"
-                          class="btn btn-secondary"
-                          type="button"
-                          aria-haspopup="menu"
-                          aria-expanded="false"
-                        >
-                          Select Preset
-                        </button>
-                        <div id="apoPresetMenu" class="apo-preset-menu" role="menu" hidden></div>
-                      </div>
-                      <button id="importApoConfigButton" class="btn btn-secondary" type="button">
+                      <button id="importApoConfigButton" class="btn btn-secondary" type="button" data-slot="import-eq">
                         Import EQ
                       </button>
-                      <button id="exportApoConfigButton" class="btn btn-secondary" type="button">
+                      <button id="exportApoConfigButton" class="btn btn-secondary" type="button" data-slot="export-eq">
                         Export EQ
                       </button>
                     </div>
+                  </div>
+
+                  <div class="apo-section apo-profile-browser">
+                    <div class="apo-section-header">
+                      <span class="section-title">Profiles</span>
+                    </div>
+                    <div id="apoProfileList" class="apo-profile-list" role="listbox" aria-label="EQ profiles"></div>
                   </div>
 
                   <div class="apo-grid apo-hidden-controls">
@@ -646,50 +655,60 @@ app.innerHTML = `
                       <label for="apoReferenceSelect">Target</label>
                       <select id="apoReferenceSelect"></select>
                     </div>
+
+                    <button id="generateApoFiltersButton" class="btn btn-secondary" type="button">
+                      Generate Baseline
+                    </button>
                   </div>
 
-                  <span class="apo-hint">Generate filters from the selected measurement and target curve, then fine-tune them below or iterate automatically from the left panel.</span>
-                  <span id="apoApplyStatus" class="apo-hint"></span>
+                  <input id="apoMaxFiltersInput" type="number" min="1" max="${MAX_PARAMETRIC_APO_FILTERS}" step="1" value="${DEFAULT_APO_MAX_FILTERS}" hidden />
 
-                  <div id="apoPreampMeter" class="apo-control-group apo-preamp-control" aria-live="polite">
-                    <label for="apoPreampInput">Preamp</label>
-                    <div class="apo-preamp-inputs">
-                      <div class="apo-preamp-slider-group">
-                        <input id="apoPreampInput" class="apo-preamp-range range-input" type="range" min="-24" max="24" step="0.1" value="0" />
-                        <div id="apoPreampTicks" class="apo-preamp-ticks" aria-hidden="true"></div>
-                      </div>
-                      <div class="number-input-row">
-                        <input id="apoPreampNumberInput" class="apo-preamp-number-input level-number-input" type="number" min="-24" max="24" step="0.1" value="0.0" />
-                        <span class="value-chip">dB</span>
-                      </div>
-                    </div>
-                    <span id="apoPreampHint" class="apo-hint">Imports the profile preamp from PEACE and Equalizer APO files when present.</span>
-                  </div>
                 </div>
                 </div>
               </aside>
 
               <div class="equalizer-main-panel">
-                <div class="apo-plot-stack">
-                  <div id="apoPlotCard" class="plot-card">
-                    <span style="color:var(--text-muted);font-size:11px">Enable filters to see EQ graph</span>
-                  </div>
-                  <div class="apo-preview-divider" aria-hidden="true"></div>
-                  <div id="apoFilterList" class="apo-filter-list"></div>
-                  <div class="apo-preview-divider" aria-hidden="true"></div>
-                  <div class="field apo-config-preview-field">
-                    <label for="apoConfigPreview">APO Config Preview</label>
-                    <textarea id="apoConfigPreview" class="apo-config-preview" readonly></textarea>
+                  <div class="apo-plot-stack">
+                    <div id="apoPlotHover" class="plot-hover">Hover: --</div>
+                    <div id="apoPlotViewport" class="apo-plot-viewport">
+                      <div id="apoPlotCard" class="plot-card">
+                        <span class="panel-note">Enable filters to see EQ graph</span>
+                      </div>
+                    </div>
+                    <div class="apo-plot-axis-label" aria-hidden="true">Frequency (Hz, log)</div>
+                    <div class="apo-preview-divider" aria-hidden="true"></div>
+                    <div class="apo-controls-stack">
+                      <div id="apoFilterList" class="apo-filter-list"></div>
+                      <div id="apoPreampMeter" class="apo-section apo-control-group apo-preamp-control" aria-live="polite">
+                        <label for="apoPreampInput">Preamp</label>
+                        <div class="apo-preamp-inputs">
+                          <div class="number-input-row apo-preamp-number-row">
+                            <input id="apoPreampNumberInput" class="apo-preamp-number-input level-number-input" type="number" min="-24" max="24" step="0.1" value="0.0" />
+                            <span class="apo-preamp-suffix">dB</span>
+                          </div>
+                          <div class="apo-preamp-slider-group">
+                            <input id="apoPreampInput" class="apo-preamp-range range-input" type="range" min="-24" max="24" step="0.1" value="0" />
+                            <div id="apoPreampTicks" class="apo-preamp-ticks" aria-hidden="true"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+          </div>
+
+          <div class="preferences-content" data-tab-content="preferences">
+            <span class="section-title">Preferences</span>
+            <div class="measurement-empty">Preferences page coming soon.</div>
           </div>
 
         </div>
 
-        <span class="section-title">Log</span>
-        <ul id="logList" class="log-list"></ul>
+        <div data-tab-content="autocal">
+          <span class="section-title">Log</span>
+          <ul id="logList" class="log-list"></ul>
+        </div>
       </section>
     </section>
     <button id="toastButton" class="toast" type="button" hidden></button>
@@ -702,13 +721,8 @@ const sampleRateSelect = getElement<HTMLSelectElement>('sampleRateSelect');
 const inputChannelSelect = getElement<HTMLSelectElement>('inputChannelSelect');
 const importLeftCalibrationButton = getElement<HTMLButtonElement>('importLeftCalibrationButton');
 const importRightCalibrationButton = getElement<HTMLButtonElement>('importRightCalibrationButton');
-const leftCalibrationValue = getElement<HTMLDivElement>('leftCalibrationValue');
-const rightCalibrationValue = getElement<HTMLDivElement>('rightCalibrationValue');
-const leftCalibrationName = getElement<HTMLSpanElement>('leftCalibrationName');
-const rightCalibrationName = getElement<HTMLSpanElement>('rightCalibrationName');
-const clearLeftCalibrationButton = getElement<HTMLButtonElement>('clearLeftCalibrationButton');
-const clearRightCalibrationButton = getElement<HTMLButtonElement>('clearRightCalibrationButton');
-const refreshDevicesButton = getElement<HTMLButtonElement>('refreshDevicesButton');
+const leftCalibrationButtonName = getElement<HTMLSpanElement>('leftCalibrationButtonName');
+const rightCalibrationButtonName = getElement<HTMLSpanElement>('rightCalibrationButtonName');
 const chooseFolderButton = getElement<HTMLButtonElement>('chooseFolderButton');
 const saveConfigButton = getElement<HTMLButtonElement>('saveConfigButton');
 const importConfigButton = getElement<HTMLButtonElement>('importConfigButton');
@@ -755,6 +769,7 @@ const automationToleranceInputs: Record<AutomationToleranceBand, HTMLInputElemen
 const statusPill = getElement<HTMLDivElement>('statusPill');
 const headerTabs = document.querySelectorAll<HTMLButtonElement>('.header-tab');
 const measureSidebarToggleButton = getElement<HTMLButtonElement>('measureSidebarToggleButton');
+const measureLibrarySidebarToggleButton = getElement<HTMLButtonElement>('measureLibrarySidebarToggleButton');
 const equalizerSettingsSidebarToggleButton = getElement<HTMLButtonElement>('equalizerSettingsSidebarToggleButton');
 const importMeasurementsButton = getElement<HTMLButtonElement>('importMeasurementsButton');
 const importReferenceButton = getElement<HTMLButtonElement>('importReferenceButton');
@@ -768,22 +783,20 @@ const rightCalibrationFileInput = getElement<HTMLInputElement>('rightCalibration
 const configFileInput = getElement<HTMLInputElement>('configFileInput');
 const apoConfigFileInput = getElement<HTMLInputElement>('apoConfigFileInput');
 const plotsContainer = getElement<HTMLDivElement>('plotsContainer');
+const measurementPlotViewport = getElement<HTMLDivElement>('measurementPlotViewport');
 const measurementsPlotCard = getElement<HTMLDivElement>('measurementsPlotCard');
-const apoChannelProfileToggle = getElement<HTMLDivElement>('apoChannelProfileToggle');
-const apoChannelProfileAllButton = getElement<HTMLButtonElement>('apoChannelProfileAllButton');
-const apoChannelProfileLeftButton = getElement<HTMLButtonElement>('apoChannelProfileLeftButton');
-const apoChannelProfileRightButton = getElement<HTMLButtonElement>('apoChannelProfileRightButton');
+const measurementLibraryCard = getElement<HTMLDivElement>('measurementLibraryCard');
+const apoChannelProfileSelect = getElement<HTMLSelectElement>('apoChannelProfileSelect');
 const apoEqModeToggle = getElement<HTMLDivElement>('apoEqModeToggle');
 const apoEqModeParametricButton = getElement<HTMLButtonElement>('apoEqModeParametricButton');
 const apoEqModeGraphicButton = getElement<HTMLButtonElement>('apoEqModeGraphicButton');
+const apoPlotViewport = getElement<HTMLDivElement>('apoPlotViewport');
 const apoPlotCard = getElement<HTMLDivElement>('apoPlotCard');
 const apoCard = getElement<HTMLDivElement>('apoCard');
 const generateApoFiltersButton = getElement<HTMLButtonElement>('generateApoFiltersButton');
 const addApoFilterButton = getElement<HTMLButtonElement>('addApoFilterButton');
-const clearApoFiltersButton = getElement<HTMLButtonElement>('clearApoFiltersButton');
-const apoPresetMenuAnchor = getElement<HTMLDivElement>('apoPresetMenuAnchor');
-const selectApoPresetButton = getElement<HTMLButtonElement>('selectApoPresetButton');
-const apoPresetMenu = getElement<HTMLDivElement>('apoPresetMenu');
+const deleteApoFilterButton = getElement<HTMLButtonElement>('deleteApoFilterButton');
+const apoProfileList = getElement<HTMLDivElement>('apoProfileList');
 const importApoConfigButton = getElement<HTMLButtonElement>('importApoConfigButton');
 const exportApoConfigButton = getElement<HTMLButtonElement>('exportApoConfigButton');
 const apoEnableToggle = getElement<HTMLDivElement>('apoEnableToggle');
@@ -795,16 +808,17 @@ const apoReferenceSelect = getElement<HTMLSelectElement>('apoReferenceSelect');
 const apoPreampInput = getElement<HTMLInputElement>('apoPreampInput');
 const apoPreampNumberInput = getElement<HTMLInputElement>('apoPreampNumberInput');
 const apoPreampTicks = getElement<HTMLDivElement>('apoPreampTicks');
-const apoPreampHint = getElement<HTMLSpanElement>('apoPreampHint');
 const apoMaxFiltersInput = getElement<HTMLInputElement>('apoMaxFiltersInput');
 const apoFilterList = getElement<HTMLDivElement>('apoFilterList');
-const apoConfigPreview = getElement<HTMLTextAreaElement>('apoConfigPreview');
 const apoApplyStatus = getElement<HTMLSpanElement>('apoApplyStatus');
 const logList = getElement<HTMLUListElement>('logList');
 const toastButton = getElement<HTMLButtonElement>('toastButton');
-const optionsStack = document.querySelector<HTMLElement>('.options-stack');
+const measurementLayout = document.querySelector<HTMLElement>('.measurement-layout');
+const measurementSettingsSidebar = document.querySelector<HTMLElement>('.measurement-settings-sidebar');
+const measurementLibrarySidebar = document.querySelector<HTMLElement>('.measurement-library-sidebar');
 const equalizerLayout = document.querySelector<HTMLElement>('.equalizer-layout');
 const equalizerSettingsSidebar = document.querySelector<HTMLElement>('.equalizer-settings-sidebar');
+const equalizerMainPanel = document.querySelector<HTMLElement>('.equalizer-main-panel');
 
 const PLOT_ASPECT_RATIO = DEFAULT_PLOT_WIDTH / DEFAULT_PLOT_HEIGHT;
 const PLOTS_GAP_PX = 12;
@@ -932,7 +946,6 @@ const state: AppState = {
   latestStatusTone: 'idle',
   equalizerApoStatus: null,
   peacePresets: [],
-  apoPresetMenuOpen: false,
   toast: null,
   toastTimeoutId: 0,
 };
@@ -1140,6 +1153,7 @@ importConfigButton.addEventListener('click', () => {
 
 const gridElement = document.querySelector<HTMLElement>('.grid');
 let isMeasureSidebarCollapsed = localStorage.getItem(MEASURE_SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
+let isMeasureLibrarySidebarCollapsed = localStorage.getItem(MEASURE_LIBRARY_SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
 let isEqualizerSettingsSidebarCollapsed = localStorage.getItem(EQ_SETTINGS_SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
 
 function applySidebarQueryOverrides(): void {
@@ -1175,8 +1189,17 @@ function applySidebarLayoutState(): void {
     gridElement.dataset.measureSidebarCollapsed = String(isMeasureSidebarCollapsed);
   }
 
-  if (optionsStack) {
-    optionsStack.dataset.collapsed = String(isMeasureSidebarCollapsed);
+  if (measurementLayout) {
+    measurementLayout.dataset.leftCollapsed = String(isMeasureSidebarCollapsed);
+    measurementLayout.dataset.rightCollapsed = String(isMeasureLibrarySidebarCollapsed);
+  }
+
+  if (measurementSettingsSidebar) {
+    measurementSettingsSidebar.dataset.collapsed = String(isMeasureSidebarCollapsed);
+  }
+
+  if (measurementLibrarySidebar) {
+    measurementLibrarySidebar.dataset.collapsed = String(isMeasureLibrarySidebarCollapsed);
   }
 
   if (equalizerLayout) {
@@ -1196,6 +1219,14 @@ function applySidebarLayoutState(): void {
     'Collapse measurement sidebar',
   );
   updateSidebarToggleButton(
+    measureLibrarySidebarToggleButton,
+    isMeasureLibrarySidebarCollapsed,
+    '◀',
+    '▶',
+    'Expand measurement library sidebar',
+    'Collapse measurement library sidebar',
+  );
+  updateSidebarToggleButton(
     equalizerSettingsSidebarToggleButton,
     isEqualizerSettingsSidebarCollapsed,
     '▶',
@@ -1210,7 +1241,11 @@ function getRequestedHeaderTab(): string {
   const tabFromHash = window.location.hash.replace(/^#/, '');
   const requestedTab = tabFromQuery || tabFromHash;
 
-  return requestedTab === 'equalizer' || requestedTab === 'autocal' ? requestedTab : 'measure';
+  return requestedTab === 'equalizer'
+    || requestedTab === 'autocal'
+    || requestedTab === 'preferences'
+    ? requestedTab
+    : 'measure';
 }
 
 function setActiveHeaderTab(tabName: string): void {
@@ -1238,28 +1273,42 @@ measureSidebarToggleButton.addEventListener('click', () => {
   isMeasureSidebarCollapsed = !isMeasureSidebarCollapsed;
   localStorage.setItem(MEASURE_SIDEBAR_COLLAPSED_STORAGE_KEY, String(isMeasureSidebarCollapsed));
   applySidebarLayoutState();
+  renderMeasurements();
+});
+
+measureLibrarySidebarToggleButton.addEventListener('click', () => {
+  isMeasureLibrarySidebarCollapsed = !isMeasureLibrarySidebarCollapsed;
+  localStorage.setItem(
+    MEASURE_LIBRARY_SIDEBAR_COLLAPSED_STORAGE_KEY,
+    String(isMeasureLibrarySidebarCollapsed),
+  );
+  applySidebarLayoutState();
+  renderMeasurements();
 });
 
 equalizerSettingsSidebarToggleButton.addEventListener('click', () => {
   isEqualizerSettingsSidebarCollapsed = !isEqualizerSettingsSidebarCollapsed;
   localStorage.setItem(EQ_SETTINGS_SIDEBAR_COLLAPSED_STORAGE_KEY, String(isEqualizerSettingsSidebarCollapsed));
   applySidebarLayoutState();
+  scheduleApoSectionRender();
 });
 
 importLeftCalibrationButton.addEventListener('click', () => {
+  if (state.leftMicrophoneCalibration) {
+    clearMicrophoneCalibration('left');
+    return;
+  }
+
   leftCalibrationFileInput.click();
 });
 
 importRightCalibrationButton.addEventListener('click', () => {
+  if (state.rightMicrophoneCalibration) {
+    clearMicrophoneCalibration('right');
+    return;
+  }
+
   rightCalibrationFileInput.click();
-});
-
-clearLeftCalibrationButton.addEventListener('click', () => {
-  clearMicrophoneCalibration('left');
-});
-
-clearRightCalibrationButton.addEventListener('click', () => {
-  clearMicrophoneCalibration('right');
 });
 
 measurementBackendSelect.addEventListener('change', () => {
@@ -1267,10 +1316,6 @@ measurementBackendSelect.addEventListener('change', () => {
   localStorage.setItem(MEASUREMENT_BACKEND_STORAGE_KEY, state.measurementBackend);
   updateMeasurementBackendUi();
   persistActiveConfiguration();
-});
-
-refreshDevicesButton.addEventListener('click', () => {
-  void refreshMicrophones(true);
 });
 
 microphoneSelect.addEventListener('change', () => {
@@ -1354,12 +1399,6 @@ runAutomationButton.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && state.apoPresetMenuOpen) {
-    state.apoPresetMenuOpen = false;
-    renderApoSection();
-    return;
-  }
-
   if (
     event.key.toLowerCase() === 's' &&
     event.ctrlKey &&
@@ -1387,21 +1426,7 @@ document.addEventListener('keydown', (event) => {
   resetUserInputsToDefaults();
 });
 
-document.addEventListener('click', (event) => {
-  if (!state.apoPresetMenuOpen) {
-    return;
-  }
-
-  const target = event.target;
-  if (target instanceof Node && apoPresetMenuAnchor.contains(target)) {
-    return;
-  }
-
-  state.apoPresetMenuOpen = false;
-  renderApoSection();
-});
-
-measurementsPlotCard.addEventListener('change', (event) => {
+measurementLibraryCard.addEventListener('change', (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) {
     return;
@@ -1432,7 +1457,7 @@ measurementsPlotCard.addEventListener('change', (event) => {
   }
 });
 
-measurementsPlotCard.addEventListener('click', (event) => {
+measurementLibraryCard.addEventListener('click', (event) => {
   const target = event.target;
   if (!(target instanceof Element)) {
     return;
@@ -1663,20 +1688,15 @@ addApoFilterButton.addEventListener('click', () => {
   addApoFilter();
 });
 
-clearApoFiltersButton.addEventListener('click', () => {
-  clearApoFilters();
-});
-
-selectApoPresetButton.addEventListener('click', () => {
-  if (state.busy || state.peacePresets.length === 0) {
+deleteApoFilterButton.addEventListener('click', () => {
+  if (!selectedApoFilterId) {
     return;
   }
 
-  state.apoPresetMenuOpen = !state.apoPresetMenuOpen;
-  renderApoSection();
+  removeApoFilter(selectedApoFilterId);
 });
 
-apoPresetMenu.addEventListener('click', (event) => {
+apoProfileList.addEventListener('click', (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
     return;
@@ -1684,7 +1704,7 @@ apoPresetMenu.addEventListener('click', (event) => {
 
   const presetButton = target.closest<HTMLButtonElement>('[data-apo-preset-file-name]');
   const fileName = presetButton?.dataset.apoPresetFileName;
-  if (!fileName) {
+  if (!fileName || state.busy) {
     return;
   }
 
@@ -1713,13 +1733,8 @@ apoEnableToggle.addEventListener('click', (event) => {
   void applyApoConfig({ enableProfile: enableValue === 'true' });
 });
 
-apoChannelProfileToggle.addEventListener('click', (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) {
-    return;
-  }
-
-  const nextChannelProfile = target.dataset.apoChannelProfile;
+apoChannelProfileSelect.addEventListener('change', () => {
+  const nextChannelProfile = apoChannelProfileSelect.value;
   if (!isApoChannelProfile(nextChannelProfile) || state.apoChannelProfile === nextChannelProfile) {
     return;
   }
@@ -1851,6 +1866,66 @@ const plotsResizeObserver = new ResizeObserver(() => {
 });
 plotsResizeObserver.observe(plotsContainer);
 
+let measurementSectionRenderFrameId: number | null = null;
+let lastObservedMeasurementViewportWidth = measurementPlotViewport?.clientWidth ?? 0;
+let lastObservedMeasurementViewportHeight = measurementPlotViewport?.clientHeight ?? 0;
+function scheduleMeasurementSectionRender(): void {
+  if (measurementSectionRenderFrameId !== null) {
+    window.cancelAnimationFrame(measurementSectionRenderFrameId);
+  }
+
+  measurementSectionRenderFrameId = window.requestAnimationFrame(() => {
+    measurementSectionRenderFrameId = null;
+    renderMeasurements();
+  });
+}
+
+const measurementLayoutResizeObserver = new ResizeObserver(() => {
+  const nextWidth = measurementPlotViewport?.clientWidth ?? 0;
+  const nextHeight = measurementPlotViewport?.clientHeight ?? 0;
+  if (nextWidth === lastObservedMeasurementViewportWidth && nextHeight === lastObservedMeasurementViewportHeight) {
+    return;
+  }
+
+  lastObservedMeasurementViewportWidth = nextWidth;
+  lastObservedMeasurementViewportHeight = nextHeight;
+  scheduleMeasurementSectionRender();
+});
+
+if (measurementPlotViewport) {
+  measurementLayoutResizeObserver.observe(measurementPlotViewport);
+}
+
+let apoSectionRenderFrameId: number | null = null;
+let lastObservedApoViewportWidth = apoPlotViewport?.clientWidth ?? 0;
+let lastObservedApoViewportHeight = apoPlotViewport?.clientHeight ?? 0;
+function scheduleApoSectionRender(): void {
+  if (apoSectionRenderFrameId !== null) {
+    window.cancelAnimationFrame(apoSectionRenderFrameId);
+  }
+
+  apoSectionRenderFrameId = window.requestAnimationFrame(() => {
+    apoSectionRenderFrameId = null;
+    renderApoSection();
+  });
+}
+
+const apoLayoutResizeObserver = new ResizeObserver(() => {
+  const nextWidth = apoPlotViewport?.clientWidth ?? 0;
+  const nextHeight = apoPlotViewport?.clientHeight ?? 0;
+  if (nextWidth === lastObservedApoViewportWidth && nextHeight === lastObservedApoViewportHeight) {
+    return;
+  }
+
+  lastObservedApoViewportWidth = nextWidth;
+  lastObservedApoViewportHeight = nextHeight;
+  scheduleApoSectionRender();
+});
+
+if (apoPlotViewport) {
+  apoLayoutResizeObserver.observe(apoPlotViewport);
+}
+
 updateSelectedFolder();
 measurementBackendSelect.value = state.measurementBackend;
 updateMeasurementBackendUi();
@@ -1870,7 +1945,7 @@ updateAutomationUi();
 setActiveHeaderTab(getRequestedHeaderTab());
 applySidebarQueryOverrides();
 applySidebarLayoutState();
-renderApoSection();
+renderMeasurements();
 appendLog('Click Refresh to access microphones and outputs.');
 void refreshEqualizerApoStatus();
 void refreshMicrophones(false);
@@ -2242,10 +2317,7 @@ function setBusy(isBusy: boolean): void {
   inputChannelSelect.disabled = isBusy;
   importLeftCalibrationButton.disabled = isBusy;
   importRightCalibrationButton.disabled = isBusy;
-  clearLeftCalibrationButton.disabled = isBusy || state.leftMicrophoneCalibration === null;
-  clearRightCalibrationButton.disabled = isBusy || state.rightMicrophoneCalibration === null;
   microphoneSelect.disabled = isBusy;
-  refreshDevicesButton.disabled = isBusy;
   chooseFolderButton.disabled = isBusy;
   saveConfigButton.disabled = isBusy;
   importConfigButton.disabled = isBusy;
@@ -2281,15 +2353,12 @@ function setBusy(isBusy: boolean): void {
   smoothingModeSelect.disabled = isBusy;
   generateApoFiltersButton.disabled = isBusy;
   addApoFilterButton.disabled = isBusy;
-  clearApoFiltersButton.disabled = isBusy;
-  selectApoPresetButton.disabled = isBusy || state.peacePresets.length === 0;
+  deleteApoFilterButton.disabled = isBusy;
   importApoConfigButton.disabled = isBusy;
   exportApoConfigButton.disabled = isBusy;
   apoEnableOffButton.disabled = isBusy;
   apoEnableOnButton.disabled = isBusy;
-  apoChannelProfileAllButton.disabled = isBusy;
-  apoChannelProfileLeftButton.disabled = isBusy;
-  apoChannelProfileRightButton.disabled = isBusy;
+  apoChannelProfileSelect.disabled = isBusy;
   apoEqModeParametricButton.disabled = isBusy;
   apoEqModeGraphicButton.disabled = isBusy;
   apoMeasurementSelect.disabled = isBusy;
@@ -2348,15 +2417,23 @@ function updateMicrophoneCalibrationLabels(): void {
   const hasLeftCalibration = state.leftMicrophoneCalibration !== null;
   const hasRightCalibration = state.rightMicrophoneCalibration !== null;
 
-  leftCalibrationName.textContent = state.leftMicrophoneCalibration?.name ?? 'None';
-  leftCalibrationValue.title = state.leftMicrophoneCalibration?.sourcePath ?? '';
-  clearLeftCalibrationButton.disabled = state.busy || !hasLeftCalibration;
-  clearLeftCalibrationButton.hidden = !hasLeftCalibration;
+  importLeftCalibrationButton.dataset.loaded = String(hasLeftCalibration);
+  leftCalibrationButtonName.textContent = hasLeftCalibration
+    ? state.leftMicrophoneCalibration?.name ?? ''
+    : '';
+  leftCalibrationButtonName.hidden = !hasLeftCalibration;
+  importLeftCalibrationButton.title = hasLeftCalibration
+    ? `Click to clear ${state.leftMicrophoneCalibration?.name ?? 'left microphone calibration'}`
+    : 'Import left microphone calibration';
 
-  rightCalibrationName.textContent = state.rightMicrophoneCalibration?.name ?? 'None';
-  rightCalibrationValue.title = state.rightMicrophoneCalibration?.sourcePath ?? '';
-  clearRightCalibrationButton.disabled = state.busy || !hasRightCalibration;
-  clearRightCalibrationButton.hidden = !hasRightCalibration;
+  importRightCalibrationButton.dataset.loaded = String(hasRightCalibration);
+  rightCalibrationButtonName.textContent = hasRightCalibration
+    ? state.rightMicrophoneCalibration?.name ?? ''
+    : '';
+  rightCalibrationButtonName.hidden = !hasRightCalibration;
+  importRightCalibrationButton.title = hasRightCalibration
+    ? `Click to clear ${state.rightMicrophoneCalibration?.name ?? 'right microphone calibration'}`
+    : 'Import right microphone calibration';
 }
 
 function updateMeasurementActionState(): void {
@@ -2376,8 +2453,7 @@ function updateMeasurementActionState(): void {
   generateApoFiltersButton.disabled =
     state.busy || !state.apoSelectedMeasurementId || !state.apoSelectedReferenceId;
   addApoFilterButton.disabled = state.busy || getActiveApoEqMode() === 'graphic';
-  clearApoFiltersButton.disabled = state.busy || getActiveApoFilters().length === 0;
-  selectApoPresetButton.disabled = state.busy || state.peacePresets.length === 0;
+  deleteApoFilterButton.disabled = state.busy || !canDeleteSelectedApoFilter();
   importApoConfigButton.disabled = state.busy;
   exportApoConfigButton.disabled = state.busy || !state.outputFolder;
   const hasAnyEffectiveApoContent = APO_CHANNEL_PROFILES.some((channelProfile) =>
@@ -2392,7 +2468,6 @@ function updateMeasurementActionState(): void {
 function updateMeasurementBackendUi(): void {
   const usesSox = state.measurementBackend === 'sox';
   microphoneSelect.disabled = state.busy || usesSox;
-  refreshDevicesButton.disabled = state.busy || usesSox;
   outputSelect.disabled = state.busy || usesSox;
 }
 
@@ -3324,10 +3399,12 @@ function renderPlotCard(
   visibleReferenceCurves: ReferenceCurve[],
 ): void {
   const orderedMeasurements = getPlotMeasurementOrder(visibleMeasurements);
-  const measurementsCompact = measurementsPlotCard.clientWidth < 560;
-  const apoCompact = apoPlotCard.clientWidth < 560;
-  const measurementsContainerWidth = measurementsPlotCard.clientWidth;
-  const apoContainerWidth = apoPlotCard.clientWidth;
+  const measurementsContainerWidth = getMeasurementsRenderWidth();
+  const measurementsContainerHeight = getMeasurementsRenderHeight();
+  const measurementsCompact = measurementsContainerWidth < 560;
+  const apoContainerWidth = getApoEqRenderWidth();
+  const apoContainerHeight = Math.max(apoPlotViewport.clientHeight, 0);
+  const apoCompact = apoContainerWidth < 560;
 
   // Render measurements plot
   measurementsPlotCard.innerHTML = renderResponsePlot({
@@ -3335,14 +3412,12 @@ function renderPlotCard(
     allMeasurements: state.measurements,
     visibleReferenceCurves,
     allReferenceCurves: state.referenceCurves,
-    measurementKeepCount: state.measurementKeepCount,
     normalizePlot: state.normalizePlot,
     smoothingMode: state.smoothingMode,
     splOffsetDb: state.splOffsetDb,
-    busy: state.busy,
-    outputFolder: state.outputFolder,
     compact: measurementsCompact,
-    containerWidth: measurementsContainerWidth > 0 ? measurementsContainerWidth : DEFAULT_PLOT_WIDTH,
+    containerWidth: measurementsContainerWidth,
+    containerHeight: measurementsContainerHeight,
     toleranceOverlay:
       state.automationStopOnTolerance && getLastItem(state.measurements) && getSelectedApoReference()
         ? {
@@ -3358,6 +3433,13 @@ function renderPlotCard(
           }
         : null,
   });
+  measurementLibraryCard.innerHTML = renderMeasurementLibrary(
+    state.measurements,
+    state.referenceCurves,
+    state.measurementKeepCount,
+    state.busy,
+    state.outputFolder,
+  );
   attachPlotInteractions({
     plotCard: measurementsPlotCard,
     measurements: orderedMeasurements,
@@ -3372,8 +3454,9 @@ function renderPlotCard(
   const referenceCurve = getSelectedApoReference();
   const activeApoFilters = getActiveApoFilters();
 
-  apoPlotCard.innerHTML = renderApoEqPlot({
+  const apoPlot = renderApoEqPlot({
     filters: activeApoFilters,
+    selectedFilterId: selectedApoFilterId,
     eqMode: getActiveApoEqMode(),
     sampleRate: getSelectedSampleRate(),
     responseMultiplier: getActiveImportedApoBlockRepeatCount() ?? 1,
@@ -3381,16 +3464,21 @@ function renderPlotCard(
     measurementName: measurement?.name ?? null,
     targetName: referenceCurve?.name ?? null,
     compact: apoCompact,
-    containerWidth: apoContainerWidth > 0 ? apoContainerWidth : DEFAULT_PLOT_WIDTH,
+    containerWidth: apoContainerWidth,
+    containerHeight: apoContainerHeight,
+    sidebarCollapsed: isEqualizerSettingsSidebarCollapsed,
   });
+  apoPlotCard.innerHTML = apoPlot.markup;
 
   attachApoPlotInteractions({
     plotCard: apoPlotCard,
+    geometry: apoPlot.geometry,
     filters: activeApoFilters,
     eqMode: getActiveApoEqMode(),
     sampleRate: getSelectedSampleRate(),
     responseMultiplier: getActiveImportedApoBlockRepeatCount() ?? 1,
     preampDb: getPlotAppliedApoPreampDb(),
+    sidebarCollapsed: isEqualizerSettingsSidebarCollapsed,
     lockFrequency: getActiveApoEqMode() === 'graphic',
     onFilterSelect: handleApoFilterSelect,
     onFilterDrag: handleApoFilterDrag,
@@ -3399,6 +3487,32 @@ function renderPlotCard(
   });
 
   updatePlotsLayout();
+}
+
+function getMeasurementsRenderWidth(): number {
+  const panelWidth = measurementPlotViewport.clientWidth
+    || measurementsPlotCard.clientWidth
+    || measurementPlotViewport.parentElement?.clientWidth
+    || 0;
+
+  if (panelWidth <= 0) {
+    return DEFAULT_PLOT_WIDTH;
+  }
+
+  return Math.max(320, panelWidth);
+}
+
+function getMeasurementsRenderHeight(): number {
+  const panelHeight = measurementPlotViewport.clientHeight
+    || measurementsPlotCard.clientHeight
+    || measurementPlotViewport.parentElement?.clientHeight
+    || 0;
+
+  if (panelHeight <= 0) {
+    return DEFAULT_PLOT_HEIGHT;
+  }
+
+  return Math.max(260, panelHeight);
 }
 
 function updatePlotsLayout(): void {
@@ -4422,6 +4536,20 @@ function normalizeApoFilters(value: unknown): ApoFilter[] {
   });
 }
 
+function getApoEqRenderWidth(): number {
+  const panelWidth = apoPlotViewport.clientWidth
+    || apoPlotCard.clientWidth
+    || equalizerMainPanel?.clientWidth
+    || apoPlotViewport.parentElement?.clientWidth
+    || 0;
+
+  if (panelWidth <= 0) {
+    return DEFAULT_PLOT_WIDTH;
+  }
+
+  return Math.max(320, panelWidth);
+}
+
 function normalizeImportedApoFilterSets(
   value: unknown,
   selectedMode: ApoEqMode,
@@ -4778,7 +4906,6 @@ function handleApoFilterDrag(
     state.measurements.filter((measurement) => measurement.visible),
     state.referenceCurves.filter((referenceCurve) => referenceCurve.visible),
   );
-  apoConfigPreview.value = buildApoConfigText();
 }
 
 function handleApoFilterSelect(filterId: string): void {
@@ -5009,11 +5136,10 @@ function renderApoSection(): void {
 
   syncSelectedApoFilter();
   apoFilterList.innerHTML = renderApoFilterList();
-  apoConfigPreview.value = buildApoConfigText();
+  apoProfileList.innerHTML = renderApoProfileList();
   syncApoEnableToggle();
   apoApplyStatus.textContent = getApoApplyStatusText();
   apoApplyWarning.hidden = !state.equalizerApoStatus?.peaceRunning;
-  renderApoPresetMenu();
   renderPlotCard(
     state.measurements.filter((measurement) => measurement.visible),
     state.referenceCurves.filter((referenceCurve) => referenceCurve.visible),
@@ -5023,24 +5149,7 @@ function renderApoSection(): void {
 }
 
 function syncApoChannelProfileToggle(): void {
-  const channelProfileButtons: Record<ApoChannelProfile, HTMLButtonElement> = {
-    all: apoChannelProfileAllButton,
-    left: apoChannelProfileLeftButton,
-    right: apoChannelProfileRightButton,
-  };
-
-  apoChannelProfileToggle.style.setProperty('--segmented-count', '3');
-  apoChannelProfileToggle.style.setProperty(
-    '--segmented-index',
-    String(APO_CHANNEL_PROFILES.indexOf(state.apoChannelProfile)),
-  );
-
-  for (const channelProfile of APO_CHANNEL_PROFILES) {
-    const button = channelProfileButtons[channelProfile];
-    const isActive = state.apoChannelProfile === channelProfile;
-    button.dataset.active = String(isActive);
-    button.setAttribute('aria-selected', String(isActive));
-  }
+  apoChannelProfileSelect.value = state.apoChannelProfile;
 }
 
 function syncApoEqModeToggle(): void {
@@ -5068,9 +5177,6 @@ function syncApoPreampMeter(): void {
       : `Preamp ${displayPreampDb >= 0 ? '+' : ''}${displayPreampDb.toFixed(1)} dB imported from the active profile.`,
   );
   apoPreampNumberInput.value = displayPreampDb.toFixed(1);
-  apoPreampHint.textContent = importedPreampDb === null
-    ? 'No imported profile preamp is active for this channel and mode.'
-    : 'Imported profile preamp applied to this channel and mode.';
 }
 
 function renderApoPreampTicks(): void {
@@ -5242,10 +5348,6 @@ function renderApoFilterList(): string {
         <span class="apo-filter-field-label">${escapeHtml(getApoFilterShapeLabel(selectedFilter.kind))}</span>
         ${renderApoFilterShapeInput(selectedFilter)}
       </label>
-      <div class="apo-filter-field apo-filter-field-action">
-        <span class="apo-filter-field-label">Action</span>
-        <button class="btn btn-secondary measurement-remove-button" type="button" data-apo-filter-remove="${escapeHtml(selectedFilter.id)}" ${(state.busy || getActiveApoEqMode() === 'graphic' || sortedFilters.length <= 1) ? 'disabled' : ''}>Remove</button>
-      </div>
     </div>
   `;
 }
@@ -5335,39 +5437,11 @@ function findNextParametricFilterFrequency(filters: ApoFilter[] = getActiveApoFi
   return roundTo(Math.sqrt(gapStartFrequencyHz * gapEndFrequencyHz), 1);
 }
 
-function clearApoFilters(): void {
-  clearActiveImportedApoPreamp();
-  clearActiveImportedApoBlockRepeatCount();
-  if (getActiveApoEqMode() === 'graphic') {
-    const graphicFilters = buildGraphicEqFilters(getActiveApoMaxFilters());
-    setActiveApoFilters(graphicFilters);
-    state.nextApoFilterIndex = graphicFilters.length + 1;
-  } else {
-    setActiveApoFilters([
-      {
-        id: 'apo-filter-1',
-        enabled: true,
-        kind: 'PK',
-        frequencyHz: findNextParametricFilterFrequency([]),
-        gainDb: 0,
-        q: getDefaultApoFilterQ('PK'),
-        order: null,
-        slopeDbPerOct: null,
-      },
-    ]);
-    syncParametricApoFilterCountToFilters();
-    state.nextApoFilterIndex = 2;
-  }
-  persistApoState();
-  persistActiveConfiguration();
-  renderApoSection();
-  reapplyApoConfigIfEnabled();
-  appendLog(
-    getActiveApoEqMode() === 'graphic'
-      ? 'Reset graphic EQ bands to flat.'
-      : 'Cleared parametric APO filters back to one centered peak filter.',
-    'neutral',
-  );
+function canDeleteSelectedApoFilter(): boolean {
+  return getActiveApoEqMode() === 'parametric'
+    && selectedApoFilterId !== null
+    && getActiveApoFilters().length > 1
+    && getActiveApoFilters().some((filter) => filter.id === selectedApoFilterId);
 }
 
 function removeApoFilter(filterId: string): void {
@@ -5611,24 +5685,17 @@ function buildFiltersForSelectedAlgorithm(
   return buildApoFiltersFromCurves(measurement, referenceCurve);
 }
 
-function renderApoPresetMenu(): void {
-  const presets = state.peacePresets;
-
-  if (presets.length === 0) {
-    state.apoPresetMenuOpen = false;
+function renderApoProfileList(): string {
+  if (state.peacePresets.length === 0) {
+    return '<div class="apo-profile-list-empty">No EQ profiles found.</div>';
   }
 
-  selectApoPresetButton.setAttribute('aria-expanded', String(state.apoPresetMenuOpen));
-  apoPresetMenuAnchor.classList.toggle('is-open', state.apoPresetMenuOpen);
-  apoPresetMenu.hidden = !state.apoPresetMenuOpen;
-  apoPresetMenu.innerHTML = presets.length
-    ? presets
-        .map(
-          (preset) =>
-            `<button class="apo-preset-menu-item" type="button" role="menuitem" data-apo-preset-file-name="${escapeHtml(preset.fileName)}">${escapeHtml(preset.displayName)}</button>`,
-        )
-        .join('')
-    : '<div class="apo-preset-menu-empty">No PEACE presets found.</div>';
+  return state.peacePresets
+    .map(
+      (preset) =>
+        `<button class="apo-profile-list-item" type="button" role="option" data-apo-preset-file-name="${escapeHtml(preset.fileName)}" title="${escapeHtml(preset.filePath)}">${escapeHtml(preset.displayName)}</button>`,
+    )
+    .join('');
 }
 
 function buildProportionalApoFilters(
@@ -6566,19 +6633,16 @@ async function importPeacePreset(fileName: string): Promise<void> {
     return;
   }
 
-  state.apoPresetMenuOpen = false;
-  renderApoSection();
-
   try {
     setBusy(true);
-    setStatus('Importing PEACE preset...', 'working');
+    setStatus('Importing EQ profile...', 'working');
 
     const preset = await window.freakishEars.readPeacePreset(fileName);
     applyImportedEqProfileSet(parseImportedEqProfileSet(preset.contents), preset.fileName);
   } catch (error) {
     const message = getErrorMessage(error);
-    setStatus(`PEACE preset import failed: ${message}`, 'error');
-    appendLog(`PEACE preset import failed for ${fileName}: ${message}`, 'error');
+    setStatus(`EQ profile import failed: ${message}`, 'error');
+    appendLog(`EQ profile import failed for ${fileName}: ${message}`, 'error');
   } finally {
     setBusy(false);
     renderApoSection();
@@ -7155,7 +7219,7 @@ async function refreshEqualizerApoStatus(): Promise<void> {
   if (presetResult.status === 'fulfilled') {
     state.peacePresets = presetResult.value;
   } else {
-    appendLog(`Unable to load PEACE presets: ${getErrorMessage(presetResult.reason)}`, 'error');
+    appendLog(`Unable to load EQ profiles: ${getErrorMessage(presetResult.reason)}`, 'error');
     state.peacePresets = [];
   }
 
